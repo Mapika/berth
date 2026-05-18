@@ -43,6 +43,33 @@ async def download_model_async(**kwargs) -> str:
     return await asyncio.to_thread(download_model, **kwargs)
 
 
+def _json_safe_docker_kwargs(kw: dict) -> dict:
+    """Convert docker SDK objects (Ulimit, etc.) to plain JSON-safe dicts
+    so a remote-agent plan can be encoded across the WS. Agent-side
+    `_rehydrate_docker_kwargs` reverses this.
+
+    Note: docker.types.Ulimit IS a dict subclass with PascalCase keys
+    ('Name'/'Soft'/'Hard'); the .name/.soft/.hard properties read those.
+    We normalise to lowercase-key plain dicts so the agent can
+    reconstruct without depending on attribute names."""
+    def _ulimit_to_dict(u) -> dict:
+        # Attribute access works for both Ulimit and plain-dict shapes.
+        return {
+            "name": getattr(u, "name", None) if not isinstance(u, dict)
+                    else u.get("name") or u.get("Name"),
+            "soft": getattr(u, "soft", None) if not isinstance(u, dict)
+                    else u.get("soft") if "soft" in u else u.get("Soft"),
+            "hard": getattr(u, "hard", None) if not isinstance(u, dict)
+                    else u.get("hard") if "hard" in u else u.get("Hard"),
+        }
+
+    out = dict(kw)
+    ulimits = out.get("ulimits")
+    if ulimits:
+        out["ulimits"] = [_ulimit_to_dict(u) for u in ulimits]
+    return out
+
+
 async def _dispatch_start(
     registry: AgentRegistry,
     *,
@@ -384,12 +411,18 @@ class LifecycleManager:
                     config_path=container_config_path,
                 )
 
+                # backend.container_kwargs(...) contains docker.types.Ulimit
+                # instances that aren't JSON-serialisable; the WS frame
+                # encoder needs plain dicts. The agent rehydrates them
+                # via _rehydrate_docker_kwargs before calling docker.run.
                 agent_plan = {
                     "image": plan.image_tag,
                     "name": f"serve-{plan.backend}-{plan.model_name}-{dep.id}",
                     "command": argv,
                     "environment": container_env,
-                    "kwargs": backend.container_kwargs(effective_plan),
+                    "kwargs": _json_safe_docker_kwargs(
+                        backend.container_kwargs(effective_plan),
+                    ),
                     "internal_port": backend.internal_port,
                     # Agent-side staging instructions.
                     "model_hf_repo": plan.hf_repo,

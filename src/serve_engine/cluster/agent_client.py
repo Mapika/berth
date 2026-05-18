@@ -154,6 +154,20 @@ class AgentFrameDispatcher:
 # ---------------------------------------------------------------------------
 
 
+def _rehydrate_docker_kwargs(kw: dict) -> dict:
+    """Inverse of manager._json_safe_docker_kwargs — reconstruct
+    docker.types.Ulimit objects from plain dicts so docker-py accepts them."""
+    from docker.types import Ulimit  # type: ignore[import-untyped]
+    out = dict(kw)
+    ulimits = out.get("ulimits")
+    if ulimits and isinstance(ulimits, list) and ulimits and isinstance(ulimits[0], dict):
+        out["ulimits"] = [
+            Ulimit(name=u.get("name"), soft=u.get("soft"), hard=u.get("hard"))
+            for u in ulimits
+        ]
+    return out
+
+
 class _DockerAdapter:
     """Adapter from DockerClient's sync API to the awaitables the
     dispatcher expects.
@@ -222,7 +236,7 @@ class _DockerAdapter:
                 name=plan["name"],
                 command=command,
                 environment=plan["environment"],
-                kwargs=plan["kwargs"],
+                kwargs=_rehydrate_docker_kwargs(plan["kwargs"]),
                 volumes=volumes,
                 internal_port=plan["internal_port"],
             )
