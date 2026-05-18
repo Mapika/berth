@@ -409,17 +409,16 @@ npm run build
 Bind to `127.0.0.1` by default. Put a reverse proxy in front when exposing it
 outside the host.
 
-## Multi-Node (Preview)
+## Multi-Node (Secure-by-Default)
 
 A leader serves the OpenAI API and admin API. Additional GPU hosts run a
-thin agent that dials home over mTLS WebSocket. Today the cluster
-fabric, enrollment, and `/admin/nodes` surface are in place; routing
-deployments and `/v1/*` traffic to remote agents end-to-end is the next
-step on the roadmap.
+thin agent that dials home over mTLS WebSocket. The leader terminates
+TLS itself — no reverse proxy required — and ships with a two-listener
+trust model that is safe to expose on the public internet.
 
-See **[docs/multi-node.md](docs/multi-node.md)** for the operator guide
-(same-network and cross-network setup, reverse-proxy config, status,
-troubleshooting, roadmap).
+See **[docs/multi-node.md](docs/multi-node.md)** for the full operator
+guide (same-network and cross-network setup, public-cert configuration,
+internet-exposure hardening, troubleshooting, roadmap).
 
 ## License
 

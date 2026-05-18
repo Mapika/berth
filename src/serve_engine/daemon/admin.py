@@ -2,7 +2,10 @@ from __future__ import annotations
 
 import asyncio
 import json as _json
+import logging as _audit_logging
 import sqlite3
+import time as _rl_time
+from collections import defaultdict, deque
 from dataclasses import asdict
 from pathlib import Path
 
@@ -1275,14 +1278,16 @@ class EnrollBody(BaseModel):
 def admin_nodes_enroll(body: EnrollBody, request: Request):
     """Mint a single-use enrollment token bound to `label`.
 
-    Returns the token, the leader's public URL the agent should dial, and
-    the CA cert in PEM (the agent pins this CA when establishing mTLS)."""
+    Returns the token, the leader's cluster URL the agent should dial,
+    the CA cert in PEM, and the CA fingerprint (the agent pins this
+    fingerprint to detect a swapped CA during the bootstrap fetch)."""
     tokens = request.app.state.enrollment_tokens
     token = tokens.mint(label=body.label)
     return {
         "token": token,
         "leader_url": request.app.state.leader_url,
         "ca_cert": request.app.state.ca_cert_pem,
+        "ca_fingerprint": request.app.state.ca_fingerprint,
     }
 
 
@@ -1339,6 +1344,68 @@ def admin_nodes_remove(
 unauthed_router = APIRouter(prefix="/admin")
 
 
+# ---------------------------------------------------------------------------
+# Per-IP fixed-window rate limit for unauthenticated cluster endpoints.
+# Process-local; resets on daemon restart. Good enough as a brute-force
+# brake — real DDoS protection is the firewall/CDN's job.
+# ---------------------------------------------------------------------------
+
+_audit_log = _audit_logging.getLogger("serve_engine.audit")
+_rl_buckets: dict[str, deque[float]] = defaultdict(deque)
+
+
+def _client_ip(request: Request) -> str:
+    client = request.scope.get("client")
+    if client is None:
+        return "uds"
+    return client[0] if isinstance(client, tuple) else str(client)
+
+
+def _rate_limit(
+    request: Request, *, route: str, limit: int, window_s: float = 60.0,
+) -> None:
+    """Raise 429 if `_client_ip` has exceeded `limit` calls to `route`
+    within the last `window_s` seconds. UDS callers are exempt."""
+    ip = _client_ip(request)
+    if ip == "uds":
+        return
+    key = f"{route}|{ip}"
+    bucket = _rl_buckets[key]
+    now = _rl_time.monotonic()
+    cutoff = now - window_s
+    while bucket and bucket[0] < cutoff:
+        bucket.popleft()
+    if len(bucket) >= limit:
+        raise HTTPException(
+            status.HTTP_429_TOO_MANY_REQUESTS,
+            detail="rate limit exceeded",
+            headers={"Retry-After": str(int(window_s))},
+        )
+    bucket.append(now)
+
+
+# ---------------------------------------------------------------------------
+# Cluster-only routes: hosted on the cluster_app listener (and uds_app),
+# never on the public listener. Includes the unauthenticated CA endpoint
+# and the rate-limited enrollment registration.
+# ---------------------------------------------------------------------------
+
+cluster_router = APIRouter(prefix="/admin")
+
+
+@cluster_router.get("/ca.pem")
+def admin_ca_pem(request: Request):
+    """Serve the cluster CA cert. Pinned by SHA-256 fingerprint in the
+    enrollment URI, so this endpoint is intentionally unauthenticated."""
+    from fastapi.responses import PlainTextResponse
+
+    return PlainTextResponse(
+        request.app.state.ca_cert_pem,
+        headers={"X-Serve-CA-Fingerprint": request.app.state.ca_fingerprint},
+        media_type="application/x-pem-file",
+    )
+
+
 class RegisterBody(BaseModel):
     token: str
     host_info: dict
@@ -1350,10 +1417,22 @@ def admin_nodes_register(body: RegisterBody, request: Request):
 
     from serve_engine.cluster.ca import fingerprint_sha256, issue_agent_cert
 
+    _rate_limit(request, route="register", limit=10, window_s=60.0)
+
     tokens = request.app.state.enrollment_tokens
+    ip = _client_ip(request)
+    token_prefix = body.token[:8] if body.token else ""
     label = tokens.consume(body.token)
     if label is None:
+        _audit_log.warning(
+            "agent_register reject ip=%s token_prefix=%s reason=invalid_or_expired",
+            ip, token_prefix,
+        )
         raise HTTPException(403, "invalid or expired enrollment token")
+    _audit_log.info(
+        "agent_register accept ip=%s token_prefix=%s label=%s",
+        ip, token_prefix, label,
+    )
 
     ca = request.app.state.ca
     bundle = issue_agent_cert(ca, label=label)

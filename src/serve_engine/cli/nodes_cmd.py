@@ -1,14 +1,18 @@
 from __future__ import annotations
 
+import asyncio
 import os
+from urllib.parse import urlencode
 
-import httpx
 import typer
 
-from serve_engine.cli import app
+from serve_engine import config
+from serve_engine.cli import app, ipc
 
 nodes_app = typer.Typer(help="Manage cluster nodes from the leader.")
 app.add_typer(nodes_app, name="nodes")
+
+ENROLLMENT_URI_SCHEME = "serve://enroll"
 
 
 def _auth_headers() -> dict[str, str]:
@@ -20,13 +24,31 @@ def _base() -> str:
     return os.environ.get("SERVE_URL", "http://127.0.0.1:11500").rstrip("/")
 
 
+def _uds_post(path: str, json_body: dict) -> dict:
+    """Call the daemon's admin API over the local UDS socket (no TLS, no auth)."""
+    return asyncio.run(ipc.post(config.SOCK_PATH, path, json=json_body))
+
+
+def _uds_get(path: str) -> dict:
+    return asyncio.run(ipc.get(config.SOCK_PATH, path))
+
+
+def _uds_delete(path: str) -> None:
+    asyncio.run(ipc.delete(config.SOCK_PATH, path))
+
+
+def build_enrollment_uri(*, leader: str, token: str, ca_fp: str) -> str:
+    """Produce `serve://enroll?leader=...&token=...&ca_fp=...` with proper
+    URL-encoding of every component."""
+    q = urlencode({"leader": leader, "token": token, "ca_fp": ca_fp})
+    return f"{ENROLLMENT_URI_SCHEME}?{q}"
+
+
 @nodes_app.command("ls")
 def list_nodes():
     """List nodes — status, GPU count, total VRAM, agent version."""
-    r = httpx.get(f"{_base()}/admin/nodes",
-                  headers=_auth_headers(), timeout=10.0)
-    r.raise_for_status()
-    rows = r.json()["nodes"]
+    data = _uds_get("/admin/nodes")
+    rows = data["nodes"]
     typer.echo(
         f"{'ID':<4} {'LABEL':<20} {'STATUS':<14} "
         f"{'GPUs':<5} {'VRAM MB':>10}  VERSION"
@@ -42,10 +64,7 @@ def list_nodes():
 @nodes_app.command("show")
 def show(node_id: int):
     """Detailed view of a single node, including its GPU inventory."""
-    r = httpx.get(f"{_base()}/admin/nodes/{node_id}",
-                  headers=_auth_headers(), timeout=10.0)
-    r.raise_for_status()
-    data = r.json()
+    data = _uds_get(f"/admin/nodes/{node_id}")
     n = data["node"]
     typer.echo(f"label    : {n['label']}")
     typer.echo(f"status   : {n['status']}")
@@ -58,33 +77,33 @@ def show(node_id: int):
 
 @nodes_app.command("enroll")
 def enroll(label: str):
-    """Mint a single-use enrollment token for a new agent."""
-    r = httpx.post(
-        f"{_base()}/admin/nodes/enroll",
-        json={"label": label},
-        headers=_auth_headers(),
-        timeout=10.0,
-    )
-    r.raise_for_status()
-    data = r.json()
-    typer.echo("Enrollment token (single-use, expires in 10 min):")
-    typer.echo(f"  token      : {data['token']}")
-    typer.echo(f"  leader_url : {data['leader_url']}")
+    """Mint a single-use enrollment URI for a new agent.
+
+    Prints a `serve://enroll?leader=…&token=…&ca_fp=…` URI that bundles
+    the leader URL, single-use token, and CA fingerprint. The agent
+    pastes this into `serve agent register --uri '<uri>'` and the
+    fingerprint pin prevents MITM during the CA bootstrap."""
+    data = _uds_post("/admin/nodes/enroll", {"label": label})
+    leader = data["leader_url"]
+    token = data["token"]
+    ca_fp = data.get("ca_fingerprint")
+    if ca_fp is None:
+        # Leader on an older build that didn't return the fingerprint.
+        # We still print a URI but the agent will have to skip pinning.
+        ca_fp = ""
+    uri = build_enrollment_uri(leader=leader, token=token, ca_fp=ca_fp)
+    typer.echo("Enrollment URI (single-use, expires in 10 min):")
     typer.echo("")
-    typer.echo("On the agent host run:")
-    typer.echo(
-        f"  serve agent register --leader {data['leader_url']} "
-        f"--token {data['token']}"
-    )
+    typer.echo(f"  {uri}")
+    typer.echo("")
+    typer.echo("On the agent host, run:")
+    typer.echo(f"  serve agent register --uri '{uri}'")
 
 
 @nodes_app.command("remove")
 def remove(node_id: int):
     """Decommission a node — revokes its cert fingerprint and deletes the row."""
-    r = httpx.delete(
-        f"{_base()}/admin/nodes/{node_id}",
-        headers=_auth_headers(),
-        timeout=10.0,
-    )
-    r.raise_for_status()
+    _uds_delete(f"/admin/nodes/{node_id}")
     typer.echo(f"removed node {node_id}")
+
+

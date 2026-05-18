@@ -1,16 +1,21 @@
 # Multi-Node serve-engine
 
 This page is the operator's guide to running a leader plus one or more
-agent hosts. The architectural rationale is in
-`docs/superpowers/specs/2026-05-18-multi-node-serving-design.md`; here we
-stick to setup, verification, and troubleshooting.
+agent hosts. The architectural rationale is split across two specs:
 
-> **Preview status.** The cluster fabric (enrollment, mTLS WebSocket,
-> registry, heartbeat) is in place and tested. The lifecycle manager
-> does **not yet** dispatch deployment starts through the AgentLink, so
-> `serve run <model>` still spawns the engine container on the leader
-> host even when agents are connected. See the **Status** section below
-> before planning a production rollout.
+- `docs/superpowers/specs/2026-05-18-multi-node-serving-design.md` —
+  the cluster fabric (mTLS WebSocket, enrollment, registry, routing).
+- `docs/superpowers/specs/2026-05-18-secure-by-default-cluster-transport-design.md` —
+  the two-listener TLS design covered on this page.
+
+Here we stick to setup, verification, and troubleshooting.
+
+> **Preview status.** The cluster fabric (TLS, enrollment, mTLS
+> WebSocket, registry, heartbeat) is in place and tested. The
+> lifecycle manager does **not yet** dispatch deployment starts
+> through the AgentLink, so `serve run <model>` still spawns the
+> engine container on the leader host even when agents are connected.
+> See **Status** below before planning a production rollout.
 
 ## Concepts
 
@@ -20,13 +25,22 @@ stick to setup, verification, and troubleshooting.
 - **Agent.** A thin daemon (`serve agent start`) that runs on each
   additional GPU host. It dials home to the leader over an mTLS
   WebSocket and exposes the host's local Docker through that channel.
+- **Public listener.** The leader's external-facing HTTPS port
+  (default `:11500`). Serves `/v1/*`, `/admin/*` (bearer-auth),
+  `/healthz`, `/metrics`. Operator supplies a publicly-trusted cert
+  for browser/SDK clients; falls back to a self-signed cluster-CA
+  cert in dev.
+- **Cluster listener.** A second HTTPS port (default `:11501`) with
+  mTLS and its own cert chain. Serves `/cluster/agent` (WS),
+  `/admin/nodes/register` (token-gated), `/admin/ca.pem`
+  (fingerprint-pinned). This is the only port agents ever touch.
+- **Cluster CA.** A self-signed root that lives only on the leader at
+  `~/.serve/ca/`. Used to mint both the leader's cluster-listener
+  server cert and each agent's mTLS client cert. Agents pin its
+  SHA-256 fingerprint at enrollment.
 - **Node.** A row in the leader's `nodes` table. The leader's own host
-  is always present as `label=local`; each enrolled agent gets one more
-  row.
-- **AgentLink.** The protocol the leader uses to talk to a node, with
-  two implementations: `LocalAgentLink` (in-process, wraps the local
-  Docker client) and `RemoteAgentLink` (WS-backed, multiplexes lifecycle
-  RPCs and per-request `/v1/*` proxy streams over one socket).
+  is always present as `label=local`; each enrolled agent gets one
+  more row.
 
 ## Install
 
@@ -46,212 +60,349 @@ as a control plane (today's lifecycle manager assumes a local GPU so
 this is most useful once the manager refactor lands; flagged in
 **Status**).
 
-## Same-network setup (LAN)
+## Quick start (LAN, single afternoon)
 
-Even on a trusted LAN, the leader expects a reverse proxy to terminate
-TLS and forward the agent's verified client-cert fingerprint as the
-`x-serve-client-fingerprint` header. Direct uvicorn TLS termination is
-a separate follow-up. This is the v1 simplification — plan accordingly.
-
-Minimum LAN topology:
-
-```
-[ leader host ]
-    serve daemon  ->  127.0.0.1:11500
-    caddy / nginx ->  10.0.0.1:11501 (tls, mtls verify)
-
-[ agent host ]
-    serve agent start  ->  wss://10.0.0.1:11501/cluster/agent
-```
+The leader autodetects its LAN IP and serves TLS on both ports
+directly from uvicorn — no reverse proxy.
 
 ### Leader
 
 ```bash
 serve daemon start
-# Reverse proxy in front of 11500 — see "Reverse proxy" below.
-serve nodes enroll gpu-rig-2
 ```
 
-`serve nodes enroll` prints a single-use token and the exact
-`serve agent register …` command for the agent to run.
+The startup banner prints both URLs and the CA fingerprint:
+
+```
+daemon started (pid …)
+
+public  : https://192.168.0.164:11500    ⚠  using cluster-CA cert
+            external clients must trust sha256:7f3a… or set [public_tls]
+cluster : https://192.168.0.164:11501  (cert: serve cluster CA)
+            ca fingerprint: sha256:7f3a…
+```
+
+The "using cluster-CA cert" warning is expected on a LAN — you don't
+need a publicly-trusted cert for traffic that never leaves your
+network. Browser/SDK clients hitting the public URL will have to trust
+the cluster CA (or you can ignore the warning if you only call from
+the loopback / local CLI / a trusting `httpx` client).
+
+Mint an enrollment URI for the new GPU host:
+
+```bash
+$ serve nodes enroll gpu-rig-2
+Enrollment URI (single-use, expires in 10 min):
+
+  serve://enroll?leader=https%3A%2F%2F192.168.0.164%3A11501&token=…&ca_fp=sha256%3A7f3a…
+
+On the agent host, run:
+  serve agent register --uri 'serve://enroll?leader=…&token=…&ca_fp=…'
+```
+
+Copy the entire `serve agent register --uri '…'` line.
 
 ### Agent
 
 On the new GPU host:
 
 ```bash
-serve agent register \
-    --leader https://leader.lan:11501 \
-    --token <pasted>
+# Same install as the leader.
+git clone https://github.com/Mapika/serve-engine
+cd serve-engine
+uv tool install --editable .
+
+# Paste the line you copied.
+serve agent register --uri 'serve://enroll?leader=…&token=…&ca_fp=…'
 serve agent start
 ```
 
-`serve agent register` writes `~/.serve/agent.crt`, `~/.serve/agent.key`,
-`~/.serve/ca.crt`, and `~/.serve/agent.yaml`. `serve agent start` runs
-the daemon in the foreground; in production wrap it with systemd or
-tmux.
+What `--uri` does under the hood:
+
+1. Parses leader URL + token + CA fingerprint out of the URI.
+2. Fetches `https://<leader>/admin/ca.pem` with TLS verification
+   disabled for this one request.
+3. Verifies `sha256(downloaded ca.pem)` equals the pinned fingerprint.
+   This closes the standard MITM-during-CA-bootstrap hole — an
+   attacker who substitutes their own CA fails this check.
+4. Writes the verified CA to `~/.serve/ca.crt`.
+5. POSTs the token to `/admin/nodes/register`, gets back a per-host
+   mTLS client cert, writes `agent.crt`, `agent.key`, and
+   `agent.yaml`.
+
+After that, `serve agent start` runs the agent loop and connects to
+`wss://<cluster URL>/cluster/agent` with mTLS.
 
 ### Verify (from the leader)
 
 ```bash
-serve nodes ls            # the new node should appear `ready`
+serve nodes ls            # new node should appear `ready`
 serve nodes show <id>     # GPU inventory, agent_version, last heartbeat
 ```
+
+## Configuring the leader
+
+Resolution order for every address-shaped setting (flag wins, then env,
+then file, then autodetect, then literal default):
+
+1. `--public-host` / `--public-port` / `--public-bind` /
+   `--cluster-host` / `--cluster-port` / `--cluster-bind` on
+   `serve daemon start`.
+2. `SERVE_PUBLIC_HOST`, `SERVE_PUBLIC_PORT`, `SERVE_PUBLIC_BIND`,
+   `SERVE_CLUSTER_HOST`, `SERVE_CLUSTER_PORT`, `SERVE_CLUSTER_BIND`
+   env vars.
+3. `~/.serve/config.toml`.
+4. Autodetect (UDP-connect trick + `gethostbyname`) for the host;
+   `0.0.0.0` for the bind; `11500` / `11501` for ports.
+
+`SERVE_LEADER_URL` continues to work as an explicit override of the
+**advertised** cluster URL only (i.e. what enrollment URIs contain).
+It does not change bind addresses.
+
+Inspect:
+
+```bash
+serve config show
+```
+
+```
+public.host          api.example.com                   (file)
+public.port          11500                             (default)
+public.bind          0.0.0.0                           (default)
+public_tls.cert      /etc/le/.../fullchain.pem         (file)
+public_tls.key       /etc/le/.../privkey.pem           (file)
+cluster.host         cluster.example.com               (file)
+cluster.port         11501                             (default)
+cluster.bind         10.0.0.1                          (file)
+
+resolved public_url : https://api.example.com:11500
+resolved cluster_url: https://cluster.example.com:11501
+```
+
+Edit:
+
+```bash
+serve config set-public host=api.example.com port=11500
+serve config set-cluster host=cluster.example.com bind=10.0.0.1
+serve config set-public-tls cert=/etc/le/.../fullchain.pem \
+                            key=/etc/le/.../privkey.pem
+```
+
+The config file is `~/.serve/config.toml`:
+
+```toml
+[public]
+host = "api.example.com"
+port = 11500
+bind = "0.0.0.0"
+
+[public_tls]
+cert = "/etc/letsencrypt/live/api.example.com/fullchain.pem"
+key  = "/etc/letsencrypt/live/api.example.com/privkey.pem"
+
+[cluster]
+host = "cluster.example.com"
+port = 11501
+bind = "10.0.0.1"   # bind cluster listener to a VPN iface
+```
+
+All sections optional; missing keys fall through to env / autodetect.
 
 ## Cross-network setup (different networks, VPN, NAT)
 
 The tunnel-by-default design was built for this case. **The agent only
-needs outbound reach to the leader.** No port forwarding on the agent
-side, no NAT punching, no VPN required.
+needs outbound reach to the leader's cluster port.** No port forwarding
+on the agent side, no NAT punching, no VPN required.
 
 Requirements:
 
-- The leader has a stable, routable address from the agent's network.
-  Public DNS + public IP, a Tailscale / WireGuard peer, anything.
-- A reverse proxy in front of the leader terminating TLS (Let's
-  Encrypt for public; internal CA if you prefer). It must verify the
-  agent's client cert against the leader's CA and forward the
-  fingerprint as `x-serve-client-fingerprint`.
-- The agent's firewall allows outbound HTTPS to the leader.
+- The leader has a stable, routable address from the agent's network
+  (public DNS + public IP, a Tailscale / WireGuard peer, anything).
+- The leader's cluster port is reachable from the agent.
+- The agent's firewall allows outbound HTTPS to the cluster port.
 
 Topology:
 
 ```
 [ public internet ]
-                |
-                v
-        serve.example.com:443  (Caddy / nginx)
-                |  (TLS + mTLS verify, forwards fingerprint header)
-                v
-            127.0.0.1:11500   (serve daemon)
+                  |
+                  v
+       cluster.example.com:11501      (serve daemon, cluster listener)
+                  |  (TLS + mTLS, terminated by uvicorn directly)
+                  |
+                  +-- agents dial in from anywhere
 
-[ agent host, behind residential NAT ]
-        serve agent start  ->  wss://serve.example.com/cluster/agent
+       api.example.com:11500          (serve daemon, public listener)
+                  |  (TLS, terminated by uvicorn directly)
+                  |
+                  +-- SDK clients call /v1/*
 ```
 
-The flow is identical to the LAN setup:
+Flow is identical to the LAN setup. The enrollment URI carries the
+cluster URL, so the agent ends up dialing the right port automatically:
 
 ```bash
 # On the leader:
 serve nodes enroll home-rig
 
-# On the agent (anywhere with outbound HTTPS):
-serve agent register --leader https://serve.example.com --token <pasted>
+# On the agent (anywhere with outbound HTTPS to the cluster port):
+serve agent register --uri 'serve://enroll?…'
 serve agent start
 ```
 
 ### Latency / throughput honesty
 
-Every prompt byte and every generated token traverses the
-leader↔agent WebSocket. For one LLM streaming 30 tok/s at ~80 B/token
-that's ~2.4 KB/s per request — negligible. At 50 concurrent streams
-it's a few hundred KB/s through one persistent socket on the leader
-process. The leader's uplink is the bottleneck. Fine for moderate
-scale; not what you want for serving hundreds of concurrent users
-from a residential leader. The direct-LAN mode (agent advertises a
-reachable address; leader probes; uses direct path when available)
-is on the follow-up list precisely to avoid this hop when both ends
-actually can reach each other.
+Every prompt byte and every generated token traverses the leader↔agent
+WebSocket. For one LLM streaming 30 tok/s at ~80 B/token that's
+~2.4 KB/s per request — negligible. At 50 concurrent streams it's a
+few hundred KB/s through one persistent socket on the leader process.
+The leader's uplink is the bottleneck. Fine for moderate scale; not
+what you want for serving hundreds of concurrent users from a
+residential leader. The direct-LAN mode (agent advertises a reachable
+address; leader probes; uses direct path when available) is on the
+follow-up list precisely to avoid this hop when both ends actually can
+reach each other.
 
-## Reverse proxy
+## Public-internet exposure
 
-The leader trusts whatever the proxy in front of it forwards in
-`x-serve-client-fingerprint`. Configure the proxy carefully:
+The defaults (`0.0.0.0` bind on both listeners) work on the open
+internet, but you should harden:
 
-1. Terminate TLS.
-2. Require + verify client certs against the leader's CA at
-   `~/.serve/ca/ca.crt`.
-3. Compute the SHA-256 of the verified client cert (DER) and forward
-   it as `x-serve-client-fingerprint: sha256:<lowercase hex>`.
-4. Drop the header on any path other than `/cluster/agent` so an
-   attacker can't spoof it on a different endpoint.
+### Public listener cert
 
-### Caddy example
+External SDK clients won't trust the self-signed cluster CA. Supply a
+publicly-trusted cert via `[public_tls]` in `config.toml` or
+`--public-cert` / `--public-key` flags. Standard sources: Let's Encrypt
+(`certbot --standalone --preferred-challenges http -d api.example.com`,
+or a DNS-01 challenge for behind-NAT), an internal corp CA, or a
+managed cert from your cloud provider.
 
-```caddyfile
-serve.example.com {
-    tls /etc/caddy/server.crt /etc/caddy/server.key {
-        client_auth {
-            mode require_and_verify
-            trusted_ca_cert_file /home/serve/.serve/ca/ca.crt
-        }
-    }
+If you don't, the daemon prints a loud warning on startup and serves
+the cluster-CA cert on the public listener. Fine for demos and
+internal use, not fine for browser clients.
 
-    @cluster path /cluster/*
-    handle @cluster {
-        request_header x-serve-client-fingerprint "sha256:{tls_client_fingerprint}"
-        reverse_proxy 127.0.0.1:11500
-    }
+### Cluster listener bind
 
-    handle {
-        # Strip fingerprint on non-cluster paths so nobody can spoof it.
-        request_header -x-serve-client-fingerprint
-        reverse_proxy 127.0.0.1:11500
-    }
-}
+If your leader has a VPN / private interface, bind the cluster
+listener to it:
+
+```bash
+serve config set-cluster bind=10.0.0.1
 ```
 
-### nginx example
+Now only hosts on the VPN can reach `/cluster/agent`. Agents on the
+public internet (e.g., remote GPU box, no VPN) will need the public
+interface — in that case leave `bind = 0.0.0.0` but firewall the
+cluster port to known agent source IPs.
 
-nginx exposes `$ssl_client_fingerprint` as SHA-1 by default; SHA-256
-requires nginx ≥ 1.11.6 with `$ssl_client_fingerprint_sha256`, or
-computing it externally. Recent OpenResty / nginx-plus builds expose
-`$ssl_client_s_dn` and a SHA-256 variant. Use what your build supports
-and confirm the value matches `serve nodes show <id>`'s `fingerprint`
-field after one connection attempt.
+### Built-in defenses
+
+- `/admin/nodes/register` is rate-limited: 10 attempts per source IP
+  per minute. Returns 429 + `Retry-After` on overflow.
+- Every register attempt (success and failure) is logged via the
+  `serve_engine.audit` logger with source IP and token prefix.
+- Enrollment tokens are single-use and expire after 10 minutes.
+- `serve nodes remove <id>` causes the next WS handshake from that
+  agent to be rejected — the cert fingerprint is re-checked against
+  the DB on every connection, not cached in-process.
+
+### What this design does *not* protect against
+
+- **Root on the leader.** Anyone with root can mint agent certs from
+  `~/.serve/ca/ca.key`. Protect that file.
+- **Stolen public-cert key.** If your `[public_tls]` key leaks, an
+  attacker can MITM your public listener. Standard cert-management
+  hygiene applies; this design doesn't help or hurt.
+- **DDoS / volumetric abuse.** The fixed-window rate limit slows
+  brute force but is not a DDoS defense. Put a CDN / WAF in front of
+  the public listener if you expect hostile traffic.
+- **Compromised agent host.** mTLS authenticates a cert, not a human;
+  whoever controls an enrolled agent host can stream traffic into
+  your fleet until you `serve nodes remove` them.
+
+## Legacy: reverse-proxy mode
+
+The pre-secure-by-default deployment style (reverse proxy in front of
+plain-HTTP uvicorn, forwarding `x-serve-client-fingerprint`) is still
+supported as an opt-in for operators who already run TLS termination
+upstream:
+
+```bash
+SERVE_TRUST_FORWARDED_FP=1 serve daemon start
+```
+
+With that flag set, `LeaderHub` will accept the proxy-forwarded
+fingerprint header when no TLS peer cert is present. **Do not set
+this on an internet-exposed leader without an upstream proxy doing
+real mTLS verification** — the header is unauthenticated by itself.
 
 ## Status — what works today
 
 What you can rely on:
 
-- Enrollment, single-use token consumption, cert issuance.
-- mTLS WebSocket connection, Hello/Welcome handshake, fingerprint
-  pinning, agent → leader heartbeat.
+- Two-listener TLS termination directly inside uvicorn — no reverse
+  proxy required for either `/v1/*` or `/cluster/agent`.
+- Enrollment via single-paste URI with CA-fingerprint pin.
+- Single-use token consumption, rate-limited registration, audit log.
+- mTLS WebSocket connection with real TLS peer-cert verification on
+  every connection (DB lookup, no in-process fingerprint cache).
 - `serve nodes ls / show / enroll / remove` and `serve agent
   register / start / status`.
-- Heartbeat-based health watcher (`ready` → `unreachable` after 15s of
-  silence; auto-recovers on reconnect).
-- The `_proxy_via_link` helper and `RemoteAgentLink.proxy_request`
-  fully exercise the tunneled data plane in tests
-  (`tests/integration/test_remote_agent_roundtrip.py`).
+- `serve config show / set-public / set-cluster / set-public-tls`.
+- Heartbeat-based health watcher (`ready` → `unreachable` after 15 s
+  of silence; auto-recovers on reconnect).
+- Tunneled `/v1/*` data plane through `RemoteAgentLink.proxy_request`
+  (exercised in `tests/integration/test_remote_agent_roundtrip.py`).
 
 What is **not yet wired** in this release:
 
-- `serve run <model>` always spawns the engine container on the leader
-  host. The manager has the `agent_registry` and the dispatch helpers
-  but its start path still calls `self._docker.run(...)` directly.
-- The `/v1/*` route handler still uses today's direct httpx call, not
-  `_proxy_via_link`.
-- mTLS termination directly inside uvicorn — today you need a reverse
-  proxy.
-- Direct-LAN mode (advertised `reachable_as` + leader probing).
+- `serve run <model>` always spawns the engine container on the
+  leader host. The manager has the `agent_registry` and dispatch
+  helpers but its start path still calls `self._docker.run(...)`
+  directly.
+- The `/v1/*` route handler still uses today's direct httpx call,
+  not `_proxy_via_link`.
+- Direct-LAN data-plane mode (advertised `reachable_as` + leader
+  probing).
+- ACME / Let's Encrypt auto-issuance for the public-listener cert
+  (bring your own cert today).
 - UI surface for nodes (no Nodes page yet; chips on deployments not
   added).
 - `node_label` affinity on service profiles.
 - Replicas of the same service profile across nodes.
 
-In other words: the fabric is real, but workloads still land on the
-leader. The next iteration plan (separate doc) addresses the manager
-and proxy routing changes that make remote-agent deployments actually
-serve traffic.
+In other words: the fabric and the transport are real, but workloads
+still land on the leader. The next iteration plan (separate doc)
+addresses the manager and proxy routing changes that make remote-agent
+deployments actually serve traffic.
 
 ## Troubleshooting
 
-**`serve agent start` reconnects forever, never sees `Welcome`.**
+**`serve agent register --uri` fails with "CA fingerprint mismatch".**
 
-The agent reports the underlying error in its logs. Common cases:
+Either the URI was tampered with in transit, or you're talking to a
+different leader than the one that minted it (e.g., the leader's CA
+was regenerated by deleting `~/.serve/ca/`). Re-mint:
 
-- *TLS handshake fails* → the leader has no reverse proxy terminating
-  TLS, or the proxy doesn't trust the agent's CA. Check the proxy's
-  `client_auth` config and that `~/.serve/ca/ca.crt` on the agent is
-  byte-identical to the one the proxy trusts.
-- *HTTP 403 / 1008 close* → the proxy isn't forwarding
-  `x-serve-client-fingerprint`, or the value doesn't match the row in
-  the leader's `nodes` table. Run `serve nodes show <id>` on the
-  leader and compare against what the proxy logs are forwarding.
+```bash
+serve nodes enroll <label>
+```
 
-**`serve nodes ls` shows the node as `unreachable` even though `serve
-agent start` is running.**
+**`serve agent start` connects but the WS handshake closes immediately
+with 1008.**
+
+The leader rejected the peer cert. Possible causes:
+
+- The agent's `agent.yaml` points at the wrong leader / port (it now
+  defaults to `:11501` for cluster, not `:11500`). Re-register.
+- The leader's CA was rotated since enrollment. Re-register.
+- The node was removed from the DB. Check `serve nodes ls` on the
+  leader.
+- Logs on the leader (`~/.serve/logs/daemon.log`) should show
+  `cluster ws reject:` with the cause.
+
+**`serve nodes ls` shows the node as `unreachable` even though
+`serve agent start` is running.**
 
 The health watcher flips to `unreachable` after 15 s without a
 heartbeat. If the agent is alive but the row is stale, the WS isn't
@@ -261,13 +412,25 @@ connected — check the agent logs for reconnect attempts.
 token`.**
 
 Tokens are single-use and expire after 10 minutes. Re-run `serve nodes
-enroll <label>` on the leader to mint a new one.
+enroll <label>` on the leader to mint a fresh URI.
+
+**`serve daemon start` fails with `port already in use` on 11501.**
+
+Either another daemon is running (`serve daemon status`) or another
+process holds the port. Pick a different cluster port:
+
+```bash
+serve config set-cluster port=21501
+serve daemon start
+```
+
+Existing agents will still try the old port — re-enroll them.
 
 **Re-enrolling an existing agent.**
 
 `serve nodes enroll <existing-label>` is allowed and rotates the cert
 fingerprint on the next register. The agent will need a fresh
-`serve agent register …` run.
+`serve agent register --uri …` run.
 
 ## Decommissioning a node
 
@@ -277,10 +440,12 @@ On the leader:
 serve nodes remove <id>
 ```
 
-This unregisters any live AgentLink, deletes the row, and forgets the
-cert fingerprint. The agent process keeps trying to reconnect; stop it
-on the agent host (`Ctrl-C` or your service manager). The local node
-(`label=local`) cannot be removed.
+This unregisters any live AgentLink, deletes the row, and the cert
+fingerprint stops authenticating new connections (the DB lookup
+happens on every WS handshake, so revocation is immediate). The agent
+process keeps trying to reconnect; stop it on the agent host
+(`Ctrl-C` or your service manager). The local node (`label=local`)
+cannot be removed.
 
 ## Tuning
 
@@ -296,24 +461,31 @@ them:
   See `run_agent()` in `agent_client.py`.
 - **Enrollment token TTL.** Default 600 s. See `EnrollmentTokens` in
   `src/serve_engine/cluster/enrollment.py`.
+- **Registration rate limit.** Default 10 attempts / IP / 60 s.
+  See `_rate_limit` in `src/serve_engine/daemon/admin.py`.
+- **Server-cert validity.** 5 years. Regenerated automatically when
+  `public_host` / `cluster_host` change and the existing SAN doesn't
+  cover the new value. See `ensure_server_cert` in
+  `src/serve_engine/cluster/ca.py`.
 
 ## Roadmap
 
-Tracked in the design doc, in priority order:
+Tracked in the design docs, in priority order:
 
 1. **Manager-via-AgentLink.** Route `start_deployment` through the
    chosen node's link; move `wait_healthy` and image digest collection
    behind `AgentLink`. After this, remote-agent deployments serve
    traffic end-to-end.
 2. **Proxy via `_proxy_via_link`.** Thread the helper into the `/v1/*`
-   route handler so the data plane goes through `AgentLink` instead of
-   direct httpx.
+   route handler so the data plane goes through `AgentLink` instead
+   of direct httpx.
 3. **Direct-LAN ingress.** Agent opens a guarded mTLS ingress on its
    `reachable_as` address; leader probes and switches the data plane
    to direct routing when reachable. Falls back to tunnel
    automatically.
-4. **uvicorn-direct mTLS.** Remove the reverse-proxy requirement for
-   the cluster endpoint.
+4. **ACME for the public listener.** Auto-issue and auto-renew via
+   Let's Encrypt so a single-command public deploy works without
+   external certbot orchestration.
 5. **UI.** Nodes page, node chip on deployment cards, profile
    `node_label` editor.
 6. **Service-profile `node_label` affinity.**

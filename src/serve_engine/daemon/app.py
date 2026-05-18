@@ -64,13 +64,20 @@ def build_apps(
     topology: Topology | None = None,
     configs_dir: Path | None = None,
     serve_home: Path | None = None,
-) -> tuple[FastAPI, FastAPI]:
-    """Returns (tcp_app, uds_app) sharing the same LifecycleManager.
+    leader_url: str | None = None,
+) -> tuple[FastAPI, FastAPI, FastAPI]:
+    """Returns (public_app, cluster_app, uds_app) sharing one LifecycleManager.
 
-    - tcp_app: public OpenAI-compatible API + admin routes. Owns the lifespan
-      (reconcile on startup, stop_all on shutdown).
-    - uds_app: full surface (admin + OpenAI) for the local CLI / future UI.
-      No separate lifespan - shares the single Reaper and manager with tcp_app.
+    - public_app: external-client surface. /v1/*, /admin/* (bearer auth),
+      /healthz, /metrics. Owns the lifespan (reconcile on startup, stop_all
+      on shutdown). Does NOT host /cluster/agent or /admin/nodes/register —
+      those are on cluster_app only so they can be firewalled separately
+      from the public API.
+    - cluster_app: agent-transport surface. /cluster/agent (mTLS WS),
+      /admin/nodes/register (token-gated), /admin/ca.pem (unauth pin),
+      /healthz. Designed to be exposed only to known agent hosts.
+    - uds_app: full surface for the local CLI. Shares the single Reaper
+      and manager with public_app.
     """
     # Ensure the local-node row exists before anything that reads it.
     ensure_local_node(conn, agent_version=_serve_version)
@@ -173,54 +180,74 @@ def build_apps(
         except Exception:
             log.exception("stop_all on shutdown failed")
 
-    tcp_app = FastAPI(title="serve-engine (public)", version="0.0.1", lifespan=lifespan)
+    import os as _os
+
+    from serve_engine.cluster.ca import fingerprint_ca_pem
+    from serve_engine.daemon.admin import cluster_router as admin_cluster_router
+    resolved_leader_url = (
+        leader_url
+        or _os.environ.get("SERVE_LEADER_URL")
+        or "https://127.0.0.1:11501"
+    )
+    ca_fingerprint = fingerprint_ca_pem(ca.cert_pem)
+
+    def _wire_common_state(app: FastAPI) -> None:
+        app.state.predictor_task = predictor_task
+        app.state.agent_registry = agent_registry
+        app.state.ca = ca
+        app.state.ca_cert_pem = ca.cert_pem.decode("ascii")
+        app.state.ca_fingerprint = ca_fingerprint
+        app.state.enrollment_tokens = enrollment_tokens
+        app.state.leader_url = resolved_leader_url
+
+    # public_app: external client surface. Owns the lifespan.
+    public_app = FastAPI(
+        title="serve-engine (public)", version="0.0.1", lifespan=lifespan,
+    )
     _attach_state(
-        tcp_app,
-        conn=conn,
-        backends=backends,
-        manager=manager,
-        event_bus=event_bus,
-        stream_tokens=stream_tokens,
+        public_app,
+        conn=conn, backends=backends, manager=manager,
+        event_bus=event_bus, stream_tokens=stream_tokens,
         request_tracer=request_tracer,
     )
-    tcp_app.state.predictor_task = predictor_task
-    tcp_app.state.agent_registry = agent_registry
-    tcp_app.state.ca = ca
-    tcp_app.state.ca_cert_pem = ca.cert_pem.decode("ascii")
-    tcp_app.state.enrollment_tokens = enrollment_tokens
-    import os as _os
-    tcp_app.state.leader_url = _os.environ.get(
-        "SERVE_LEADER_URL", "https://127.0.0.1:11500"
-    )
-    tcp_app.include_router(openai_router)
-    tcp_app.include_router(metrics_router)
-    tcp_app.include_router(admin_router)
-    tcp_app.include_router(admin_unauthed_router)
-    tcp_app.include_router(LeaderHub(conn=conn, registry=agent_registry).router)
-    install_ui(tcp_app)
+    _wire_common_state(public_app)
+    public_app.include_router(openai_router)
+    public_app.include_router(metrics_router)
+    public_app.include_router(admin_router)
+    install_ui(public_app)
 
+    # cluster_app: agent transport. Hosts the WS hub, registration, and
+    # CA endpoint. Does NOT host /v1/* or general admin routes.
+    cluster_app = FastAPI(title="serve-engine (cluster)", version="0.0.1")
+    _attach_state(
+        cluster_app,
+        conn=conn, backends=backends, manager=manager,
+        event_bus=event_bus, stream_tokens=stream_tokens,
+        request_tracer=request_tracer,
+    )
+    _wire_common_state(cluster_app)
+    cluster_app.include_router(admin_unauthed_router)
+    cluster_app.include_router(admin_cluster_router)
+    cluster_app.include_router(
+        LeaderHub(conn=conn, registry=agent_registry).router
+    )
+
+    # uds_app: full local surface for the CLI.
     uds_app = FastAPI(title="serve-engine (control)", version="0.0.1")
     _attach_state(
         uds_app,
-        conn=conn,
-        backends=backends,
-        manager=manager,
-        event_bus=event_bus,
-        stream_tokens=stream_tokens,
+        conn=conn, backends=backends, manager=manager,
+        event_bus=event_bus, stream_tokens=stream_tokens,
         request_tracer=request_tracer,
     )
-    uds_app.state.predictor_task = predictor_task
-    uds_app.state.agent_registry = agent_registry
-    uds_app.state.ca = ca
-    uds_app.state.ca_cert_pem = ca.cert_pem.decode("ascii")
-    uds_app.state.enrollment_tokens = enrollment_tokens
-    uds_app.state.leader_url = tcp_app.state.leader_url
+    _wire_common_state(uds_app)
     uds_app.include_router(openai_router)
     uds_app.include_router(admin_router)
     uds_app.include_router(admin_unauthed_router)
+    uds_app.include_router(admin_cluster_router)
     uds_app.include_router(metrics_router)
 
-    return tcp_app, uds_app
+    return public_app, cluster_app, uds_app
 
 
 def build_app(
@@ -233,7 +260,7 @@ def build_app(
     serve_home: Path | None = None,
 ) -> FastAPI:
     """Single-app factory retained for tests that exercise the full surface."""
-    _, uds_app = build_apps(
+    _public, _cluster, uds_app = build_apps(
         conn=conn,
         docker_client=docker_client,
         backends=backends,

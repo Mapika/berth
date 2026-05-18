@@ -19,23 +19,31 @@ PID_FILE = config.SERVE_DIR / "daemon.pid"
 
 
 def spawn_daemon(
-    host: str = config.DEFAULT_PUBLIC_HOST,
-    port: int = config.DEFAULT_PUBLIC_PORT,
+    cfg: config.ResolvedConfig,
     *,
     timeout_s: float = 30.0,
     poll_s: float = 0.5,
 ) -> int:
-    """Spawn the daemon process, write its PID, poll /healthz until ready.
-
-    Returns the spawned PID. Raises TimeoutError if the daemon does not become
-    healthy within `timeout_s`. Caller is responsible for ensuring no daemon
-    is already running.
-    """
+    """Spawn the daemon process, write its PID, poll the UDS /healthz
+    until it answers. Returns the spawned PID."""
     config.SERVE_DIR.mkdir(parents=True, exist_ok=True)
     log_path = config.LOGS_DIR / "daemon.log"
     log_path.parent.mkdir(parents=True, exist_ok=True)
+    cmd = [
+        sys.executable, "-m", "serve_engine.daemon",
+        "--public-host", cfg.public_host,
+        "--public-port", str(cfg.public_port),
+        "--public-bind", cfg.public_bind,
+        "--cluster-host", cfg.cluster_host,
+        "--cluster-port", str(cfg.cluster_port),
+        "--cluster-bind", cfg.cluster_bind,
+    ]
+    if cfg.public_cert_path:
+        cmd.extend(["--public-cert", str(cfg.public_cert_path)])
+    if cfg.public_key_path:
+        cmd.extend(["--public-key", str(cfg.public_key_path)])
     proc = subprocess.Popen(
-        [sys.executable, "-m", "serve_engine.daemon", "--host", host, "--port", str(port)],
+        cmd,
         stdout=open(log_path, "ab"),  # file must outlive this Popen call
         stderr=subprocess.STDOUT,
         start_new_session=True,
@@ -65,21 +73,83 @@ def _is_running() -> bool:
         return False
 
 
+def _print_startup_banner(cfg: config.ResolvedConfig, pid: int) -> None:
+    """Print the resolved addresses, certs, and fingerprint."""
+    from serve_engine.cluster.ca import fingerprint_ca_pem, load_ca
+
+    ca_dir = config.SERVE_DIR / "ca"
+    ca = load_ca(ca_dir)
+    ca_fp = fingerprint_ca_pem(ca.cert_pem)
+    using_public_cert = bool(cfg.public_cert_path and cfg.public_key_path)
+
+    typer.echo(f"daemon started (pid {pid})")
+    typer.echo("")
+    if using_public_cert:
+        typer.echo(
+            f"public  : {cfg.public_url}    (cert: {cfg.public_cert_path})"
+        )
+    else:
+        typer.echo(
+            f"public  : {cfg.public_url}    "
+            "⚠  using cluster-CA cert"
+        )
+        typer.echo(
+            "            external clients must trust "
+            f"{ca_fp} or set [public_tls]"
+        )
+    typer.echo(
+        f"cluster : {cfg.cluster_url}  (cert: serve cluster CA)"
+    )
+    typer.echo(f"            ca fingerprint: {ca_fp}")
+    if cfg.cluster_bind == "0.0.0.0":
+        typer.echo("")
+        typer.echo(
+            f"cluster listener on {cfg.cluster_bind}:{cfg.cluster_port} "
+            "— internet-reachable"
+        )
+        typer.echo(
+            "  consider setting [cluster] bind in ~/.serve/config.toml "
+            "to restrict it to a private/VPN interface"
+        )
+
+
 @daemon_app.command("start")
 def daemon_start(
-    host: str = typer.Option(config.DEFAULT_PUBLIC_HOST),
-    port: int = typer.Option(config.DEFAULT_PUBLIC_PORT),
+    public_host: str = typer.Option(None, "--public-host"),
+    public_port: int = typer.Option(None, "--public-port"),
+    public_bind: str = typer.Option(None, "--public-bind"),
+    public_cert: str = typer.Option(None, "--public-cert"),
+    public_key: str = typer.Option(None, "--public-key"),
+    cluster_host: str = typer.Option(None, "--cluster-host"),
+    cluster_port: int = typer.Option(None, "--cluster-port"),
+    cluster_bind: str = typer.Option(None, "--cluster-bind"),
+    # Back-compat aliases.
+    host: str = typer.Option(None, "--host", hidden=True),
+    port: int = typer.Option(None, "--port", hidden=True),
 ):
-    """Start the daemon in the background."""
+    """Start the daemon in the background.
+
+    Without flags: resolves addresses from ~/.serve/config.toml or
+    autodetects the LAN interface."""
     if _is_running():
         typer.echo("daemon already running")
         raise typer.Exit(0)
+    cfg = config.resolve_config(
+        cli_public_host=public_host or host,
+        cli_public_port=public_port or port,
+        cli_public_bind=public_bind,
+        cli_cluster_host=cluster_host,
+        cli_cluster_port=cluster_port,
+        cli_cluster_bind=cluster_bind,
+        cli_public_cert=public_cert,
+        cli_public_key=public_key,
+    )
     try:
-        pid = spawn_daemon(host, port)
+        pid = spawn_daemon(cfg)
     except TimeoutError as e:
         typer.echo(str(e), err=True)
         raise typer.Exit(1) from e
-    typer.echo(f"daemon started (pid {pid}) on http://{host}:{port}")
+    _print_startup_banner(cfg, pid)
 
 
 @daemon_app.command("stop")
