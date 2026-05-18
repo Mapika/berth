@@ -10,6 +10,7 @@ from fastapi.responses import StreamingResponse
 
 from serve_engine.auth.middleware import require_auth_dep
 from serve_engine.backends.base import Backend
+from serve_engine.cluster.agent_registry import AgentRegistry
 from serve_engine.lifecycle.adapter_router import (
     UnknownModel,
     ensure_adapter_loaded,
@@ -33,6 +34,47 @@ ENGINE_TIMEOUT = httpx.Timeout(connect=10.0, read=None, write=30.0, pool=30.0)
 def make_engine_client(base_url: str) -> httpx.AsyncClient:
     """Factory wrapper so tests can monkeypatch transport."""
     return httpx.AsyncClient(base_url=base_url, timeout=ENGINE_TIMEOUT)
+
+
+async def _proxy_via_link(
+    *,
+    registry: AgentRegistry,
+    node_id: int,
+    container_id: str,
+    method: str,
+    path: str,
+    headers: dict[str, str],
+    body: bytes,
+) -> tuple[int, dict[str, str], list[bytes]]:
+    """Materialize the proxy response into a list. Used by tests to verify
+    the routing contract without exercising the FastAPI streaming response
+    plumbing. The route handler streams via the same `proxy_request`
+    generator directly."""
+    link = registry.get(node_id)
+    if link is None or not link.is_ready:
+        raise RuntimeError(f"node {node_id} not connected")
+    status_code: int | None = None
+    out_headers: dict[str, str] = {}
+    body_chunks: list[bytes] = []
+    async for chunk in link.proxy_request(
+        container_id=container_id,
+        method=method,
+        path=path,
+        headers=headers,
+        body=body,
+    ):
+        if chunk.status is not None and status_code is None:
+            status_code = chunk.status
+        if chunk.headers is not None and not out_headers:
+            out_headers = dict(chunk.headers)
+        if chunk.body:
+            body_chunks.append(chunk.body)
+        if chunk.eof:
+            break
+    if status_code is None:
+        raise RuntimeError("agent returned no status chunk")
+    out_headers.pop("content-length", None)
+    return status_code, out_headers, body_chunks
 
 
 async def _proxy(
