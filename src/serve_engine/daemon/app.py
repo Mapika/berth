@@ -11,6 +11,7 @@ from fastapi import FastAPI
 from serve_engine import __version__ as _serve_version
 from serve_engine.auth.stream_tokens import StreamTokenStore
 from serve_engine.cluster.agent_registry import AgentRegistry
+from serve_engine.cluster.health_watcher import run_health_watcher
 from serve_engine.cluster.leader_hub import LeaderHub
 from serve_engine.cluster.local_agent import LocalAgentLink
 from serve_engine.cluster.local_bootstrap import ensure_local_node
@@ -152,8 +153,17 @@ def build_apps(
         health_monitor.start()
         predictor_task.start()
         rollup_task.start()
+        import asyncio as _asyncio
+        cluster_watcher = _asyncio.create_task(
+            run_health_watcher(conn, agent_registry)
+        )
         yield
         # Shutdown
+        cluster_watcher.cancel()
+        try:
+            await cluster_watcher
+        except (Exception, _asyncio.CancelledError):
+            pass
         await rollup_task.stop()
         await predictor_task.stop()
         await health_monitor.stop()
