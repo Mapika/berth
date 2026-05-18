@@ -18,6 +18,7 @@ from serve_engine.store import nodes as nodes_store
 from serve_engine.auth.tiers import load_tiers
 from serve_engine.backends.base import Backend
 from serve_engine.daemon.admin import router as admin_router
+from serve_engine.daemon.admin import unauthed_router as admin_unauthed_router
 from serve_engine.daemon.metrics_router import router as metrics_router
 from serve_engine.daemon.openai_proxy import router as openai_router
 from serve_engine.daemon.ui_router import install_ui
@@ -183,6 +184,7 @@ def build_apps(
     tcp_app.include_router(openai_router)
     tcp_app.include_router(metrics_router)
     tcp_app.include_router(admin_router)
+    tcp_app.include_router(admin_unauthed_router)
     tcp_app.include_router(LeaderHub(conn=conn, registry=agent_registry).router)
     install_ui(tcp_app)
 
@@ -204,6 +206,7 @@ def build_apps(
     uds_app.state.leader_url = tcp_app.state.leader_url
     uds_app.include_router(openai_router)
     uds_app.include_router(admin_router)
+    uds_app.include_router(admin_unauthed_router)
     uds_app.include_router(metrics_router)
 
     return tcp_app, uds_app

@@ -1324,3 +1324,83 @@ def admin_nodes_remove(
         registry.unregister(node_id)
     nodes_store.delete(conn, node_id)
     return {"ok": True}
+
+
+# ---------------------------------------------------------------------------
+# Cert exchange — POST /admin/nodes/register
+#
+# This is the bootstrap path for a new agent: the enrollment token IS the
+# auth, so the endpoint cannot live under the admin router (which requires
+# an admin Bearer key once any key has been registered). The agent will be
+# unable to present an admin key until *after* this endpoint hands it a
+# durable client certificate.
+# ---------------------------------------------------------------------------
+
+unauthed_router = APIRouter(prefix="/admin")
+
+
+class RegisterBody(BaseModel):
+    token: str
+    host_info: dict
+
+
+@unauthed_router.post("/nodes/register")
+def admin_nodes_register(body: RegisterBody, request: Request):
+    import time as _time
+
+    from serve_engine.cluster.ca import fingerprint_sha256, issue_agent_cert
+
+    tokens = request.app.state.enrollment_tokens
+    label = tokens.consume(body.token)
+    if label is None:
+        raise HTTPException(403, "invalid or expired enrollment token")
+
+    ca = request.app.state.ca
+    bundle = issue_agent_cert(ca, label=label)
+    fp = fingerprint_sha256(bundle.cert_pem)
+    now = _time.time()
+    conn: sqlite3.Connection = request.app.state.conn
+    info = body.host_info
+
+    existing = nodes_store.find_by_label(conn, label)
+    if existing is not None:
+        node_id = existing.id
+        nodes_store.update_inventory(
+            conn, node_id,
+            agent_version=info.get("agent_version", "unknown"),
+            cpu_count=int(info.get("cpu_count", 0)),
+            total_ram_mb=int(info.get("total_ram_mb", 0)),
+            gpu_count=int(info.get("gpu_count", 0)),
+            total_vram_mb=int(info.get("total_vram_mb", 0)),
+        )
+        conn.execute(
+            "UPDATE nodes SET fingerprint = ? WHERE id = ?",
+            (fp, node_id),
+        )
+    else:
+        node_id = nodes_store.insert(
+            conn,
+            label=label, fingerprint=fp,
+            reachable_as=None,
+            first_seen=now, last_seen=now,
+            agent_version=info.get("agent_version", "unknown"),
+            cpu_count=int(info.get("cpu_count", 0)),
+            total_ram_mb=int(info.get("total_ram_mb", 0)),
+            gpu_count=int(info.get("gpu_count", 0)),
+            total_vram_mb=int(info.get("total_vram_mb", 0)),
+        )
+    node_gpus_store.delete_for_node(conn, node_id)
+    for g in info.get("gpus", []):
+        node_gpus_store.upsert(
+            conn,
+            node_id=node_id, gpu_index=int(g["index"]),
+            name=str(g["name"]),
+            total_vram_mb=int(g["total_vram_mb"]),
+            driver_version=g.get("driver_version"),
+        )
+    return {
+        "node_id": node_id,
+        "agent_cert": bundle.cert_pem.decode("ascii"),
+        "agent_key": bundle.key_pem.decode("ascii"),
+        "ca_cert": request.app.state.ca_cert_pem,
+    }
