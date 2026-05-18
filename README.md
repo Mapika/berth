@@ -409,48 +409,17 @@ npm run build
 Bind to `127.0.0.1` by default. Put a reverse proxy in front when exposing it
 outside the host.
 
-## Multi-Node (Tunneled, Preview)
+## Multi-Node (Preview)
 
 A leader serves the OpenAI API and admin API. Additional GPU hosts run a
-thin agent that dials home over mTLS WebSocket. Engines run on the agent's
-host; `/v1/*` traffic is tunneled over the WS for now. Direct-LAN routing
-is the next iteration.
+thin agent that dials home over mTLS WebSocket. Today the cluster
+fabric, enrollment, and `/admin/nodes` surface are in place; routing
+deployments and `/v1/*` traffic to remote agents end-to-end is the next
+step on the roadmap.
 
-On the leader, mint a single-use enrollment token:
-
-```bash
-serve nodes enroll gpu-rig-2
-```
-
-It prints a `serve agent register ...` command. Copy it.
-
-On the new GPU host:
-
-```bash
-serve agent register --leader https://leader.example:11500 --token <token>
-serve agent start
-```
-
-Check it landed:
-
-```bash
-serve nodes ls
-serve nodes show <id>
-```
-
-The leader's CA cert and key live under `~/.serve/ca/`. Revoke an agent
-with:
-
-```bash
-serve nodes remove <id>
-```
-
-What works today: the enrollment flow, the mTLS WS connection, the
-`/admin/nodes` surface, heartbeat-based health, and the `/v1/*` data
-plane routing through `AgentLink`. The manager still spawns engine
-containers on the leader host (single-node fast path); routing
-remote-agent deployments end-to-end through `link.start_deployment` is
-the next step on the roadmap.
+See **[docs/multi-node.md](docs/multi-node.md)** for the operator guide
+(same-network and cross-network setup, reverse-proxy config, status,
+troubleshooting, roadmap).
 
 ## License
 
