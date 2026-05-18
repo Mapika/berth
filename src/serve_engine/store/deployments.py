@@ -31,6 +31,7 @@ class Deployment:
     max_loras: int = 0  # 0 = LoRA disabled
     max_lora_rank: int = 0  # 0 = unset; treat as engine default (16)
     image_digest: str | None = None  # docker image content-id (sha256:...)
+    node_id: int = 0  # which cluster node owns this deployment (migration 014)
 
 
 def _row_to_dep(row: sqlite3.Row) -> Deployment:
@@ -51,6 +52,11 @@ def _row_to_dep(row: sqlite3.Row) -> Deployment:
         image_digest_value = row["image_digest"]
     except (KeyError, IndexError):
         image_digest_value = None
+    # node_id is on schema migration 014; older DBs may not have it.
+    try:
+        node_id_value = row["node_id"]
+    except (KeyError, IndexError):
+        node_id_value = 0
     return Deployment(
         id=row["id"],
         model_id=row["model_id"],
@@ -73,6 +79,7 @@ def _row_to_dep(row: sqlite3.Row) -> Deployment:
         max_loras=max_loras_value or 0,
         max_lora_rank=max_lora_rank_value or 0,
         image_digest=image_digest_value,
+        node_id=int(node_id_value or 0),
     )
 
 
@@ -142,16 +149,29 @@ def set_container(
     container_name: str,
     container_port: int,
     container_address: str,
+    node_id: int | None = None,
 ) -> None:
-    conn.execute(
-        """
-        UPDATE deployments
-        SET container_id=?, container_name=?, container_port=?, container_address=?,
-            started_at=CURRENT_TIMESTAMP
-        WHERE id=?
-        """,
-        (container_id, container_name, container_port, container_address, dep_id),
-    )
+    if node_id is None:
+        conn.execute(
+            """
+            UPDATE deployments
+            SET container_id=?, container_name=?, container_port=?, container_address=?,
+                started_at=CURRENT_TIMESTAMP
+            WHERE id=?
+            """,
+            (container_id, container_name, container_port, container_address, dep_id),
+        )
+    else:
+        conn.execute(
+            """
+            UPDATE deployments
+            SET container_id=?, container_name=?, container_port=?, container_address=?,
+                node_id=?, started_at=CURRENT_TIMESTAMP
+            WHERE id=?
+            """,
+            (container_id, container_name, container_port, container_address,
+             node_id, dep_id),
+        )
 
 
 def find_active(conn: sqlite3.Connection) -> Deployment | None:

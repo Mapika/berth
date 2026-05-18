@@ -10,6 +10,8 @@ import httpx
 import yaml
 
 from serve_engine.backends.base import Backend
+from serve_engine.cluster.agent_link import StartedContainer
+from serve_engine.cluster.agent_registry import AgentRegistry
 from serve_engine.lifecycle.docker_client import DockerClient
 from serve_engine.lifecycle.downloader import download_model
 from serve_engine.lifecycle.kv_estimator import (
@@ -40,6 +42,36 @@ async def download_model_async(**kwargs) -> str:
     return await asyncio.to_thread(download_model, **kwargs)
 
 
+async def _dispatch_start(
+    registry: AgentRegistry,
+    *,
+    node_id: int,
+    plan: dict,
+) -> StartedContainer:
+    """Route a start_deployment call to the right AgentLink for `node_id`.
+
+    Module-level for unit testability — LifecycleManager calls through this
+    so tests can exercise the routing logic without spinning up FastAPI.
+    """
+    link = registry.get(node_id)
+    if link is None or not link.is_ready:
+        raise RuntimeError(f"node {node_id} not connected")
+    return await link.start_deployment(plan)
+
+
+async def _dispatch_stop(
+    registry: AgentRegistry,
+    *,
+    node_id: int,
+    container_id: str,
+) -> None:
+    """Route a stop_deployment call to the right AgentLink for `node_id`."""
+    link = registry.get(node_id)
+    if link is None:
+        raise RuntimeError(f"node {node_id} not connected")
+    await link.stop_deployment(container_id)
+
+
 async def wait_healthy(url: str, *, timeout_s: float = 600.0, interval_s: float = 2.0) -> bool:
     loop = asyncio.get_running_loop()
     deadline = loop.time() + timeout_s
@@ -67,6 +99,7 @@ class LifecycleManager:
         load_timeout_s: float = 600.0,
         event_bus: EventBus | None = None,
         configs_dir: Path | None = None,
+        agent_registry: AgentRegistry | None = None,
     ):
         self._conn = conn
         self._docker = docker_client
@@ -78,6 +111,10 @@ class LifecycleManager:
         self._topology = topology
         self._load_timeout_s = load_timeout_s
         self._events = event_bus
+        # Cluster registry — when present, start/stop routes through the
+        # AgentLink for the chosen node. Single-node deployments work
+        # without it (the docker_client path stays).
+        self._registry = agent_registry
         self._lock = asyncio.Lock()
         self._adapter_locks: dict[int, asyncio.Lock] = {}
 
@@ -286,12 +323,23 @@ class LifecycleManager:
                 volumes=volumes,
                 internal_port=backend.internal_port,
             )
+            # Persist node_id alongside container info — when a cluster
+            # registry is wired in, the local node is whichever AgentLink
+            # holds the in-process LocalAgentLink. Single-node deployments
+            # (no registry) leave node_id at its row default.
+            local_node_id: int | None = None
+            if self._registry is not None:
+                for link in self._registry.all():
+                    if link.is_ready and link.node_id is not None:
+                        local_node_id = link.node_id
+                        break
             dep_store.set_container(
                 self._conn, dep.id,
                 container_id=handle.id,
                 container_name=handle.name,
                 container_port=handle.port,
                 container_address=handle.address,
+                node_id=local_node_id,
             )
             # Capture the docker image's content-addressable id so the row
             # records what actually ran, not just the tag. Tags are mutable;

@@ -107,6 +107,7 @@ def build_apps(
         topology=topology,
         event_bus=event_bus,
         configs_dir=configs_dir,
+        agent_registry=agent_registry,
     )
 
     from serve_engine.lifecycle.health_monitor import HealthMonitor
