@@ -16,6 +16,7 @@ from serve_engine.cli import (  # noqa: E402
     key_cmd,  # noqa: F401  registers `key` sub-app
     logs_cmd,  # noqa: F401  registers command
     ls_cmd,  # noqa: F401  registers command
+    nodes_cmd,  # noqa: F401  registers `nodes` sub-app
     pin_cmd,  # noqa: F401  registers `pin` and `unpin` commands
     predict_cmd,  # noqa: F401  registers `predict` command
     ps_cmd,  # noqa: F401  registers command
