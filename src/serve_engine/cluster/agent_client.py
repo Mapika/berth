@@ -317,7 +317,16 @@ async def run_agent(serve_home: Path) -> None:
 
     cfg = _load_agent_config(serve_home)
     ssl_ctx = _build_ssl_context(cfg)
-    docker = _DockerAdapter(DockerClient(network_name="serve-engines"))
+    dc = DockerClient(network_name="serve-engines")
+    # Engine containers attach to a named bridge network the leader uses
+    # by default. The leader's daemon ensures this at startup; the agent
+    # must do the same on its own host, otherwise the first remote
+    # deploy errors with "network serve-engines not found".
+    try:
+        dc.ensure_network()
+    except Exception as e:
+        log.warning("agent ensure_network failed (continuing): %s", e)
+    docker = _DockerAdapter(dc)
     http = _HttpxAdapter()
 
     ws_url = (
