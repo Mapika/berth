@@ -8,7 +8,9 @@ from typing import Any
 
 from fastapi import FastAPI
 
+from serve_engine import __version__ as _serve_version
 from serve_engine.auth.stream_tokens import StreamTokenStore
+from serve_engine.cluster.local_bootstrap import ensure_local_node
 from serve_engine.auth.tiers import load_tiers
 from serve_engine.backends.base import Backend
 from serve_engine.daemon.admin import router as admin_router
@@ -63,6 +65,9 @@ def build_apps(
     - uds_app: full surface (admin + OpenAI) for the local CLI / future UI.
       No separate lifespan - shares the single Reaper and manager with tcp_app.
     """
+    # Ensure the local-node row exists before anything that reads it.
+    ensure_local_node(conn, agent_version=_serve_version)
+
     event_bus = EventBus()
     stream_tokens = StreamTokenStore()
     from serve_engine.daemon.request_tracer import RequestTracer
