@@ -20,6 +20,8 @@ from serve_engine.store import api_keys as _ak_store
 from serve_engine.store import deployment_adapters as da_store
 from serve_engine.store import deployments as dep_store
 from serve_engine.store import models as model_store
+from serve_engine.store import node_gpus as node_gpus_store
+from serve_engine.store import nodes as nodes_store
 from serve_engine.store import service_profiles as profile_store
 from serve_engine.store import service_routes as route_store
 
@@ -1258,3 +1260,67 @@ def list_backends(backends: dict[str, Backend] = Depends(get_backends)):
         }
         for name, b in sorted(backends.items())
     ]
+
+
+# ---------------------------------------------------------------------------
+# Multi-node — /admin/nodes/*
+# ---------------------------------------------------------------------------
+
+
+class EnrollBody(BaseModel):
+    label: str
+
+
+@router.post("/nodes/enroll")
+def admin_nodes_enroll(body: EnrollBody, request: Request):
+    """Mint a single-use enrollment token bound to `label`.
+
+    Returns the token, the leader's public URL the agent should dial, and
+    the CA cert in PEM (the agent pins this CA when establishing mTLS)."""
+    tokens = request.app.state.enrollment_tokens
+    token = tokens.mint(label=body.label)
+    return {
+        "token": token,
+        "leader_url": request.app.state.leader_url,
+        "ca_cert": request.app.state.ca_cert_pem,
+    }
+
+
+@router.get("/nodes")
+def admin_nodes_list(conn: sqlite3.Connection = Depends(get_conn)):
+    """All known nodes (the local row + every enrolled remote agent)."""
+    return {"nodes": [asdict(n) for n in nodes_store.list_all(conn)]}
+
+
+@router.get("/nodes/{node_id}")
+def admin_nodes_show(
+    node_id: int,
+    conn: sqlite3.Connection = Depends(get_conn),
+):
+    n = nodes_store.get(conn, node_id)
+    if n is None:
+        raise HTTPException(404, f"node {node_id} not found")
+    return {
+        "node": asdict(n),
+        "gpus": [asdict(g) for g in node_gpus_store.list_for_node(conn, node_id)],
+    }
+
+
+@router.delete("/nodes/{node_id}")
+def admin_nodes_remove(
+    node_id: int,
+    request: Request,
+    conn: sqlite3.Connection = Depends(get_conn),
+):
+    n = nodes_store.get(conn, node_id)
+    if n is None:
+        raise HTTPException(404, f"node {node_id} not found")
+    if n.label == "local":
+        raise HTTPException(400, "cannot remove the local node")
+    # Drop any live link before removing the row so its cert fingerprint
+    # can't continue to authenticate connections.
+    registry = request.app.state.agent_registry
+    if registry.get(node_id) is not None:
+        registry.unregister(node_id)
+    nodes_store.delete(conn, node_id)
+    return {"ok": True}

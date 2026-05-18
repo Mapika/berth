@@ -61,6 +61,7 @@ def build_apps(
     models_dir: Path,
     topology: Topology | None = None,
     configs_dir: Path | None = None,
+    serve_home: Path | None = None,
 ) -> tuple[FastAPI, FastAPI]:
     """Returns (tcp_app, uds_app) sharing the same LifecycleManager.
 
@@ -81,6 +82,17 @@ def build_apps(
     agent_registry.register(LocalAgentLink(
         node_id=local_node.id, docker_client=docker_client,
     ))
+
+    # CA + enrollment-token store for agent enrollment.
+    from serve_engine import config as _cfg
+    from serve_engine.cluster.ca import generate_ca, load_ca
+    from serve_engine.cluster.enrollment import EnrollmentTokens
+    home = serve_home or _cfg.SERVE_DIR
+    ca_dir = home / "ca"
+    if not (ca_dir / "ca.crt").exists():
+        generate_ca(ca_dir, common_name="serve-engine-ca")
+    ca = load_ca(ca_dir)
+    enrollment_tokens = EnrollmentTokens()
 
     event_bus = EventBus()
     stream_tokens = StreamTokenStore()
@@ -161,6 +173,13 @@ def build_apps(
     )
     tcp_app.state.predictor_task = predictor_task
     tcp_app.state.agent_registry = agent_registry
+    tcp_app.state.ca = ca
+    tcp_app.state.ca_cert_pem = ca.cert_pem.decode("ascii")
+    tcp_app.state.enrollment_tokens = enrollment_tokens
+    import os as _os
+    tcp_app.state.leader_url = _os.environ.get(
+        "SERVE_LEADER_URL", "https://127.0.0.1:11500"
+    )
     tcp_app.include_router(openai_router)
     tcp_app.include_router(metrics_router)
     tcp_app.include_router(admin_router)
@@ -179,6 +198,10 @@ def build_apps(
     )
     uds_app.state.predictor_task = predictor_task
     uds_app.state.agent_registry = agent_registry
+    uds_app.state.ca = ca
+    uds_app.state.ca_cert_pem = ca.cert_pem.decode("ascii")
+    uds_app.state.enrollment_tokens = enrollment_tokens
+    uds_app.state.leader_url = tcp_app.state.leader_url
     uds_app.include_router(openai_router)
     uds_app.include_router(admin_router)
     uds_app.include_router(metrics_router)
@@ -193,6 +216,7 @@ def build_app(
     backends: dict[str, Backend],
     models_dir: Path,
     topology: Topology | None = None,
+    serve_home: Path | None = None,
 ) -> FastAPI:
     """Single-app factory retained for tests that exercise the full surface."""
     _, uds_app = build_apps(
@@ -201,5 +225,6 @@ def build_app(
         backends=backends,
         models_dir=models_dir,
         topology=topology,
+        serve_home=serve_home,
     )
     return uds_app

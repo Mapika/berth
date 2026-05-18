@@ -47,6 +47,7 @@ def app(tmp_path, monkeypatch):
         backends={"vllm": VLLMBackend()},
         models_dir=tmp_path,
         topology=topology,
+        serve_home=tmp_path,
     )
 
 
