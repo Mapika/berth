@@ -340,14 +340,17 @@ function NodeDetail({
   const isLocal = node.label === 'local'
 
   return (
-    <aside className="border border-rule p-6 space-y-8 bg-elev/30">
-      <header className="flex items-baseline justify-between pb-4 border-b border-rule-soft">
+    <aside className="border border-rule bg-elev/30">
+      <header className="flex items-baseline justify-between px-6 py-4 border-b border-rule">
         <div className="flex items-baseline gap-3">
           <span className={`dot ${statusDot(node.status)}`} />
           <h3 className="text-lg font-light tracking-tightish">{node.label}</h3>
           <span className={`text-[10px] tracking-wider ${statusColor(node.status)}`}>
             {node.status}
           </span>
+          {isLocal && (
+            <span className="text-mute text-[10px] tracking-wider ml-1">— this host</span>
+          )}
         </div>
         {!isLocal && onRemove && (
           <button onClick={onRemove} className="btn-link-danger text-[11px] tracking-wider">
@@ -356,50 +359,60 @@ function NodeDetail({
         )}
       </header>
 
-      <section className="grid grid-cols-2 gap-6 text-[12px]">
-        <div className="space-y-1">
-          <div className="label">cpu / ram</div>
-          <div className="tnum text-dim">
-            {node.cpu_count || '-'} cpu / {fmtMb(node.total_ram_mb)}
-          </div>
-        </div>
-        <div className="space-y-1">
-          <div className="label">gpu total</div>
-          <div className="tnum text-dim">
-            {node.gpu_count} gpu / {fmtMb(node.total_vram_mb)}
-          </div>
-        </div>
-        <div className="space-y-1">
-          <div className="label">agent version</div>
-          <div className="text-dim">{node.agent_version ?? '—'}</div>
-        </div>
-        <div className="space-y-1">
-          <div className="label">last heartbeat</div>
-          <div className="text-dim">{fmtRelative(node.last_seen)}</div>
-        </div>
-      </section>
+      <div className="grid grid-cols-1 lg:grid-cols-2 divide-y lg:divide-y-0 lg:divide-x divide-rule-soft">
+        {/* Left column: stats + fingerprint */}
+        <div className="p-6 space-y-6">
+          <section className="grid grid-cols-2 gap-6 text-[12px]">
+            <div className="space-y-1">
+              <div className="label">cpu / ram</div>
+              <div className="tnum text-dim">
+                {node.cpu_count || '-'} cpu / {fmtMb(node.total_ram_mb)}
+              </div>
+            </div>
+            <div className="space-y-1">
+              <div className="label">gpu total</div>
+              <div className="tnum text-dim">
+                {node.gpu_count} gpu / {fmtMb(node.total_vram_mb)}
+              </div>
+            </div>
+            <div className="space-y-1">
+              <div className="label">agent version</div>
+              <div className="text-dim">{node.agent_version ?? '—'}</div>
+            </div>
+            <div className="space-y-1">
+              <div className="label">last heartbeat</div>
+              <div className="text-dim">{fmtRelative(node.last_seen)}</div>
+            </div>
+          </section>
 
-      <section className="space-y-3">
-        <div className="label">cert fingerprint</div>
-        {isLocal ? (
-          <div className="text-mute text-[11px] tracking-wider">
-            local node — no agent certificate
-          </div>
-        ) : (
-          <FingerprintBlock fp={node.fingerprint} />
-        )}
-      </section>
+          <section className="space-y-3 pt-2">
+            <div className="label">cert fingerprint</div>
+            {isLocal ? (
+              <div className="text-mute text-[11px] tracking-wider">
+                local node — no agent certificate (control runs in-process)
+              </div>
+            ) : (
+              <FingerprintBlock fp={node.fingerprint} />
+            )}
+          </section>
+        </div>
 
-      {gpus.length > 0 && (
-        <section className="space-y-4">
+        {/* Right column: gpu inventory */}
+        <div className="p-6 space-y-4">
           <div className="label">gpu inventory</div>
-          <div className="space-y-4">
-            {gpus.map(g => (
-              <GpuStrip key={g.gpu_index} gpu={g} totalInNode={totalVram} />
-            ))}
-          </div>
-        </section>
-      )}
+          {gpus.length === 0 ? (
+            <div className="text-mute text-[11px] tracking-wider">
+              {detail.isLoading ? 'loading…' : 'no gpus reported'}
+            </div>
+          ) : (
+            <div className="space-y-4">
+              {gpus.map(g => (
+                <GpuStrip key={g.gpu_index} gpu={g} totalInNode={totalVram} />
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
     </aside>
   )
 }
@@ -713,54 +726,59 @@ export default function Cluster() {
       {/* Transport summary */}
       {clusterQ.data && <TransportSummary info={clusterQ.data} />}
 
-      {/* Nodes + detail */}
+      {/* Fleet — node cards in a full-width grid */}
       <section className="space-y-6">
         <div className="flex items-baseline justify-between">
-          <div className="label">fleet</div>
+          <div className="label">fleet · {nodes.length} node{nodes.length === 1 ? '' : 's'}</div>
           {remove.isError && (
             <div className="text-err text-[11px] tracking-wider">
               {(remove.error as Error).message}
             </div>
           )}
         </div>
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-          <div className="lg:col-span-2 grid grid-cols-1 md:grid-cols-2 gap-4">
-            {sortedNodes.map(n => (
-              <NodeCard
-                key={n.id}
-                node={n}
-                selected={selectedId === n.id}
-                onSelect={() => setSelectedId(n.id)}
-              />
-            ))}
-          </div>
-          <div className="lg:col-span-1">
-            {selected ? (
-              <NodeDetail
-                node={selected}
-                onRemove={
-                  selected.label === 'local'
-                    ? undefined
-                    : () => {
-                        if (
-                          confirm(
-                            `remove node "${selected.label}"?\n` +
-                              "any live connection is dropped and its cert fingerprint stops authenticating.",
-                          )
-                        ) {
-                          remove.mutate(selected.id)
-                        }
-                      }
-                }
-              />
-            ) : (
-              <aside className="border border-rule-soft p-6 text-mute text-[11px] tracking-wider">
-                select a node for details
-              </aside>
-            )}
-          </div>
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+          {sortedNodes.map(n => (
+            <NodeCard
+              key={n.id}
+              node={n}
+              selected={selectedId === n.id}
+              onSelect={() => setSelectedId(n.id)}
+            />
+          ))}
         </div>
+        {sortedNodes.length > 0 && (
+          <p className="text-mute text-[11px] tracking-wider">
+            click any node to view its certificate and gpu inventory below
+          </p>
+        )}
       </section>
+
+      {/* Selected-node detail — visually separated as a drill-down section */}
+      {selected && (
+        <section className="space-y-4">
+          <div className="flex items-baseline gap-3">
+            <div className="label">selected · {selected.label}</div>
+            <div className="h-px bg-rule flex-1" />
+          </div>
+          <NodeDetail
+            node={selected}
+            onRemove={
+              selected.label === 'local'
+                ? undefined
+                : () => {
+                    if (
+                      confirm(
+                        `remove node "${selected.label}"?\n` +
+                          "any live connection is dropped and its cert fingerprint stops authenticating.",
+                      )
+                    ) {
+                      remove.mutate(selected.id)
+                    }
+                  }
+            }
+          />
+        </section>
+      )}
 
       {/* Enrollment */}
       <section className="space-y-4">
