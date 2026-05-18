@@ -126,3 +126,40 @@ def plan_placement(
             "no fit even after evicting all auto deployments"
         )
     )
+
+
+def _max_free_mb(topo: Topology, allocated: list[AllocatedDeployment]) -> int:
+    avail = _available_mb(topo, allocated)
+    return max(avail.values(), default=0)
+
+
+def plan_placement_multi(
+    nodes: dict[int, tuple[Topology, list[AllocatedDeployment]]],
+    request: PlacementRequest,
+) -> tuple[int | None, Decision]:
+    """Pick a (node_id, Decision) pair across multiple ready nodes.
+
+    Strategy: rank candidate nodes by free VRAM headroom (descending) and
+    try each via the single-node planner. Return the first Fit; otherwise
+    fall back to the first EvictThenFit; otherwise NoRoom.
+    """
+    if not nodes:
+        return None, NoRoom(reason="no nodes available")
+
+    ordered = sorted(
+        nodes.items(),
+        key=lambda kv: -_max_free_mb(kv[1][0], kv[1][1]),
+    )
+    evict_fallback: tuple[int, EvictThenFit] | None = None
+    last_no_room: NoRoom | None = None
+    for node_id, (topo, allocated) in ordered:
+        decision = plan_placement(topo, allocated=allocated, request=request)
+        if isinstance(decision, Fit):
+            return node_id, decision
+        if isinstance(decision, EvictThenFit) and evict_fallback is None:
+            evict_fallback = (node_id, decision)
+        elif isinstance(decision, NoRoom):
+            last_no_room = decision
+    if evict_fallback is not None:
+        return evict_fallback[0], evict_fallback[1]
+    return None, last_no_room or NoRoom(reason="no node has room")
