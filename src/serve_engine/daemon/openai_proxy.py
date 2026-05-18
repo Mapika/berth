@@ -283,29 +283,50 @@ async def _proxy(
             raise HTTPException(503, detail="deployment has no container yet")
 
         engine_path = backend.openai_base + openai_subpath
-        usage_tracker = _UsageTracker(is_sse=True)  # tunnelled-stream assume SSE
+        # Buffer the very first chunk to read the upstream content-type;
+        # client expects matching media-type (application/json for non-
+        # streaming, text/event-stream for streaming SSE).
+        agen = link.proxy_request(
+            container_id=active.container_id,
+            method="POST",
+            path=engine_path,
+            headers=headers,
+            body=body,
+        )
+        first_chunk = None
+        first_status = 502
+        first_headers: dict[str, str] = {}
+        async for ch in agen:
+            if ch.status is not None:
+                first_status = ch.status
+            if ch.headers is not None:
+                first_headers = dict(ch.headers)
+            first_chunk = ch
+            break
+        upstream_ct = first_headers.get(
+            "content-type", "application/json",
+        )
+        usage_tracker = _UsageTracker(is_sse="event-stream" in upstream_ct)
 
         async def remote_streamer():
             first_byte_seen = False
-            status_code = 502
             try:
-                async for ch in link.proxy_request(
-                    container_id=active.container_id,
-                    method="POST",
-                    path=engine_path,
-                    headers=headers,
-                    body=body,
-                ):
-                    if ch.status is not None:
-                        status_code = ch.status
-                    if not first_byte_seen and ch.body:
-                        first_byte_seen = True
-                        tracer.update(trace, first_byte_at=time.monotonic())
-                    if ch.body:
-                        usage_tracker.feed(ch.body)
-                        yield ch.body
-                    if ch.eof:
-                        break
+                # Yield the buffered first chunk's body before continuing.
+                if first_chunk is not None and first_chunk.body:
+                    first_byte_seen = True
+                    tracer.update(trace, first_byte_at=time.monotonic())
+                    usage_tracker.feed(first_chunk.body)
+                    yield first_chunk.body
+                if first_chunk is None or not first_chunk.eof:
+                    async for ch in agen:
+                        if not first_byte_seen and ch.body:
+                            first_byte_seen = True
+                            tracer.update(trace, first_byte_at=time.monotonic())
+                        if ch.body:
+                            usage_tracker.feed(ch.body)
+                            yield ch.body
+                        if ch.eof:
+                            break
             finally:
                 tin, tout = usage_tracker.extract()
                 if tin or tout:
@@ -318,13 +339,20 @@ async def _proxy(
                         tokens_in=tin, tokens_out=tout,
                     )
                 tracer.finalize(
-                    trace, status_code=status_code,
+                    trace, status_code=first_status,
                     tokens_in=tin, tokens_out=tout,
                 )
+
+        # Strip hop-by-hop / framing headers; preserve the rest.
+        forward_headers = {
+            k: v for k, v in first_headers.items()
+            if k.lower() not in _HOP_BY_HOP | {"content-type"}
+        }
         return StreamingResponse(
             remote_streamer(),
-            status_code=200,  # tunnelled — actual status surfaces in stream
-            media_type="text/event-stream",
+            status_code=first_status,
+            headers=forward_headers,
+            media_type=upstream_ct,
         )
 
     # ----------- Local dispatch (direct httpx) -----------------------

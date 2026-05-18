@@ -59,6 +59,14 @@ class HealthMonitor:
                     continue
                 if d.container_address is None or d.container_port is None:
                     continue
+                # Remote deployments live on agent hosts; their
+                # container_address is the "tunnel" sentinel which isn't
+                # reachable by a direct httpx call. Skip the probe — the
+                # WS link's liveness already covers that node. (Future:
+                # add an AgentLink.probe_container endpoint that proxies
+                # the engine's /health.)
+                if d.container_address == "tunnel":
+                    continue
                 url = (
                     f"http://{d.container_address}:{d.container_port}"
                     f"{backend.health_path}"

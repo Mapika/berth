@@ -562,8 +562,21 @@ class LifecycleManager:
         and let the user re-load.
         """
         async with self._lock:
+            local_node_id = self._local_node_id()
             for d in dep_store.list_all(self._conn):
                 if d.status not in dep_store.ACTIVE_STATUSES and d.status != "stopping":
+                    continue
+                # Remote deployments live on agent hosts; the leader's
+                # docker can't see those containers. The agent's own
+                # state is the source of truth — when it reconnects,
+                # the row is either still valid (link.is_ready) or stale.
+                # For now leave remote 'ready' rows untouched on
+                # reconcile so a leader restart doesn't kill them.
+                if d.node_id != 0 and d.node_id != local_node_id:
+                    log.info(
+                        "reconcile: deployment %s is on remote node %s; leaving as-is",
+                        d.id, d.node_id,
+                    )
                     continue
                 if d.container_id is None:
                     dep_store.update_status(
