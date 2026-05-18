@@ -10,6 +10,7 @@ app = typer.Typer(
 
 from serve_engine.cli import (  # noqa: E402
     adapter_cmd,  # noqa: F401  registers `adapter` sub-app
+    agent_cmd,  # noqa: F401  registers `agent` sub-app
     daemon_cmd,  # noqa: F401  registers `daemon` sub-app
     doctor_cmd,  # noqa: F401  registers command
     key_cmd,  # noqa: F401  registers `key` sub-app
