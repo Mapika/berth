@@ -156,12 +156,79 @@ class AgentFrameDispatcher:
 
 class _DockerAdapter:
     """Adapter from DockerClient's sync API to the awaitables the
-    dispatcher expects."""
+    dispatcher expects.
 
-    def __init__(self, dc):
+    Handles two plan shapes:
+
+    1. Legacy / local-style: caller pre-built `volumes` (full leader-side
+       paths) and `command` argv (with absolute model path inside the
+       container). We just hand it to docker.run.
+
+    2. Remote-deploy: caller sends only HF coordinates + a `model_sentinel`
+       placeholder in the argv. We download the model into the agent's
+       own ~/.serve/models, materialise the engine config file inline if
+       supplied, mount both as volumes, and substitute the sentinel with
+       the in-container model path before running.
+    """
+
+    def __init__(self, dc, *, models_dir: Path | None = None, configs_dir: Path | None = None):
         self._dc = dc
+        # Default to the same on-disk layout the leader uses, but rooted
+        # at the agent's own SERVE_HOME.
+        from serve_engine import config as _cfg
+        self._models_dir = models_dir or _cfg.MODELS_DIR
+        self._configs_dir = configs_dir or _cfg.CONFIGS_DIR
 
     async def start(self, plan):
+        # Remote-style plan: HF download + sentinel substitution required.
+        if "model_hf_repo" in plan:
+            from serve_engine.lifecycle.downloader import download_model
+
+            self._models_dir.mkdir(parents=True, exist_ok=True)
+            self._configs_dir.mkdir(parents=True, exist_ok=True)
+
+            local_path = await asyncio.to_thread(
+                download_model,
+                hf_repo=plan["model_hf_repo"],
+                revision=plan.get("model_revision", "main"),
+                cache_dir=self._models_dir,
+            )
+            container_model_path = "/cache/" + str(
+                Path(local_path).resolve().relative_to(self._models_dir.resolve())
+            )
+            sentinel = plan["model_sentinel"]
+            command = [
+                a.replace(sentinel, container_model_path)
+                for a in plan["command"]
+            ]
+            volumes: dict[str, dict] = {
+                str(self._models_dir.resolve()): {"bind": "/cache", "mode": "ro"},
+            }
+            # Materialise the per-deployment engine config locally so the
+            # container can read it. The leader doesn't have a file path
+            # to share; it shipped the YAML body inline.
+            cfg_body = plan.get("engine_config_body")
+            cfg_container_path = plan.get("engine_config_container_path")
+            if cfg_body and cfg_container_path:
+                dep_id = plan.get("deployment_id", "remote")
+                host_cfg = self._configs_dir / f"{dep_id}.yml"
+                host_cfg.write_text(cfg_body)
+                volumes[str(self._configs_dir.resolve())] = {
+                    "bind": "/serve/configs", "mode": "ro",
+                }
+            h = await asyncio.to_thread(
+                self._dc.run,
+                image=plan["image"],
+                name=plan["name"],
+                command=command,
+                environment=plan["environment"],
+                kwargs=plan["kwargs"],
+                volumes=volumes,
+                internal_port=plan["internal_port"],
+            )
+            return (h.id, h.address, h.port)
+
+        # Legacy / local-style plan — pass through unchanged.
         h = await asyncio.to_thread(
             self._dc.run,
             image=plan["image"],

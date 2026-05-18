@@ -246,7 +246,6 @@ async def _proxy(
         except (TypeError, json.JSONDecodeError):
             pass  # body already validated as JSON above; should not happen
 
-    base = f"http://{active.container_address}:{active.container_port}{backend.openai_base}"
     _HOP_BY_HOP = {"host", "content-length", "transfer-encoding", "connection"}
     headers = {
         k: v for k, v in request.headers.items() if k.lower() not in _HOP_BY_HOP
@@ -256,6 +255,80 @@ async def _proxy(
     headers.pop("Authorization", None)
 
     tracer.update(trace, dispatched_at=time.monotonic())
+
+    # Decide between direct-HTTP and tunneled-WS dispatch by node_id.
+    # Local node → existing direct httpx path (lowest overhead).
+    # Remote node → stream chunks through the AgentLink's WS.
+    from serve_engine.store import nodes as _nodes_store
+    local_node = _nodes_store.find_by_label(conn, "local")
+    local_node_id = local_node.id if local_node else 0
+    is_remote = (
+        active.node_id != 0
+        and active.node_id != local_node_id
+    )
+
+    if is_remote:
+        registry: AgentRegistry = request.app.state.agent_registry
+        link = registry.get(active.node_id)
+        if link is None or not link.is_ready:
+            tracer.finalize(
+                trace, status_code=503,
+                error=f"node {active.node_id} not connected",
+            )
+            raise HTTPException(
+                503, detail=f"node {active.node_id} agent not connected",
+            )
+        if active.container_id is None:
+            tracer.finalize(trace, status_code=503, error="no container id")
+            raise HTTPException(503, detail="deployment has no container yet")
+
+        engine_path = backend.openai_base + openai_subpath
+        usage_tracker = _UsageTracker(is_sse=True)  # tunnelled-stream assume SSE
+
+        async def remote_streamer():
+            first_byte_seen = False
+            status_code = 502
+            try:
+                async for ch in link.proxy_request(
+                    container_id=active.container_id,
+                    method="POST",
+                    path=engine_path,
+                    headers=headers,
+                    body=body,
+                ):
+                    if ch.status is not None:
+                        status_code = ch.status
+                    if not first_byte_seen and ch.body:
+                        first_byte_seen = True
+                        tracer.update(trace, first_byte_at=time.monotonic())
+                    if ch.body:
+                        usage_tracker.feed(ch.body)
+                        yield ch.body
+                    if ch.eof:
+                        break
+            finally:
+                tin, tout = usage_tracker.extract()
+                if tin or tout:
+                    _usage_events_store.set_tokens(
+                        conn, usage_event_id, tokens_in=tin, tokens_out=tout,
+                    )
+                if key is not None and key.usage_event_id is not None:
+                    _key_usage_store.set_tokens(
+                        conn, key.usage_event_id,
+                        tokens_in=tin, tokens_out=tout,
+                    )
+                tracer.finalize(
+                    trace, status_code=status_code,
+                    tokens_in=tin, tokens_out=tout,
+                )
+        return StreamingResponse(
+            remote_streamer(),
+            status_code=200,  # tunnelled — actual status surfaces in stream
+            media_type="text/event-stream",
+        )
+
+    # ----------- Local dispatch (direct httpx) -----------------------
+    base = f"http://{active.container_address}:{active.container_port}{backend.openai_base}"
     # Open the upstream stream BEFORE returning so we can read its status
     # and headers and forward them faithfully to the caller.
     client = make_engine_client(base)

@@ -335,9 +335,24 @@ function NodeDetail({
     queryFn: () => api.getNode(node.id),
     refetchInterval: 5000,
   })
+  const deps = useQuery({
+    queryKey: ['deps'],
+    queryFn: api.listDeployments,
+    refetchInterval: 5000,
+  })
+  const models = useQuery({
+    queryKey: ['models'],
+    queryFn: api.listModels,
+    staleTime: 30_000,
+  })
   const gpus = detail.data?.gpus ?? []
   const totalVram = gpus.reduce((a, g) => a + g.total_vram_mb, 0)
   const isLocal = node.label === 'local'
+  const onNode = ((deps.data ?? []) as any[]).filter(
+    d =>
+      (d.node_id === node.id || (isLocal && (!d.node_id || d.node_id === 0))) &&
+      d.status !== 'stopped',
+  )
 
   return (
     <aside className="border border-rule bg-elev/30">
@@ -397,20 +412,59 @@ function NodeDetail({
           </section>
         </div>
 
-        {/* Right column: gpu inventory */}
-        <div className="p-6 space-y-4">
-          <div className="label">gpu inventory</div>
-          {gpus.length === 0 ? (
-            <div className="text-mute text-[11px] tracking-wider">
-              {detail.isLoading ? 'loading…' : 'no gpus reported'}
+        {/* Right column: gpu inventory + deployments-on-this-node */}
+        <div className="p-6 space-y-6">
+          <section className="space-y-3">
+            <div className="label">gpu inventory</div>
+            {gpus.length === 0 ? (
+              <div className="text-mute text-[11px] tracking-wider">
+                {detail.isLoading ? 'loading…' : 'no gpus reported'}
+              </div>
+            ) : (
+              <div className="space-y-4">
+                {gpus.map(g => (
+                  <GpuStrip key={g.gpu_index} gpu={g} totalInNode={totalVram} />
+                ))}
+              </div>
+            )}
+          </section>
+
+          <section className="space-y-3 pt-2 border-t border-rule-soft">
+            <div className="label">
+              deployments on this node · {onNode.length}
             </div>
-          ) : (
-            <div className="space-y-4">
-              {gpus.map(g => (
-                <GpuStrip key={g.gpu_index} gpu={g} totalInNode={totalVram} />
-              ))}
-            </div>
-          )}
+            {onNode.length === 0 ? (
+              <div className="text-mute text-[11px] tracking-wider">
+                no active deployments
+              </div>
+            ) : (
+              <div className="space-y-2">
+                {onNode.map((d: any) => {
+                  const m = (models.data ?? []).find(
+                    (x: any) => x.id === d.model_id,
+                  )
+                  return (
+                    <div
+                      key={d.id}
+                      className="flex items-center gap-3 text-[12px]"
+                      title={d.last_error || undefined}
+                    >
+                      <span className={`dot dot-${d.status}`} />
+                      <span className="text-ink truncate">
+                        {m?.name ?? `#${d.id}`}
+                      </span>
+                      <span className="text-mute text-[10px] tracking-wider">
+                        {d.backend}
+                      </span>
+                      <span className="text-dim tnum ml-auto">
+                        gpu {(d.gpu_ids ?? []).join(',') || '-'}
+                      </span>
+                    </div>
+                  )
+                })}
+              </div>
+            )}
+          </section>
         </div>
       </div>
     </aside>

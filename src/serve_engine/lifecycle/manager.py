@@ -33,6 +33,7 @@ from serve_engine.store import deployment_adapters as da_store
 from serve_engine.store import deployment_plans as plan_store
 from serve_engine.store import deployments as dep_store
 from serve_engine.store import models as model_store
+from serve_engine.store import nodes as nodes_store
 
 log = logging.getLogger(__name__)
 
@@ -129,8 +130,35 @@ class LifecycleManager:
         if self._events is not None:
             await self._events.publish(Event(kind=kind, payload=payload))
 
+    def _resolve_target_node_id(self, plan: DeploymentPlan) -> int:
+        """Resolve plan.node_label → node_id. Defaults to the local node.
+
+        Validates remote targets are currently `ready` and have a live
+        AgentLink — fails fast with a clear message rather than letting
+        dispatch error mid-flight. For the local default, a missing
+        `nodes` row falls back to 0 so single-node tests / older DBs
+        (pre-migration-014) still load."""
+        label = (plan.node_label or "local").strip() or "local"
+        node = nodes_store.find_by_label(self._conn, label)
+        if label == "local":
+            return node.id if node is not None else 0
+        if node is None:
+            raise RuntimeError(f"node {label!r} not found")
+        if node.status != "ready":
+            raise RuntimeError(
+                f"node {label!r} is {node.status!r}; need 'ready' to deploy"
+            )
+        if self._registry is None or self._registry.get(node.id) is None:
+            raise RuntimeError(
+                f"node {label!r} has no live AgentLink (agent process not connected)"
+            )
+        return node.id
+
     async def load(self, plan: DeploymentPlan):
         async with self._lock:
+            target_node_id = self._resolve_target_node_id(plan)
+            is_remote = (plan.node_label or "local") not in ("", "local")
+
             # 1. Ensure model row
             model = model_store.get_by_name(self._conn, plan.model_name)
             if model is None:
@@ -141,7 +169,11 @@ class LifecycleManager:
                     revision=plan.revision,
                 )
 
-            # 2. Ensure weights are local
+            # 2. Ensure weights are local on the LEADER, but only to read
+            # config.json for KV/concurrency estimation. The agent will
+            # download its own copy when StartDeployment fires. For local
+            # deploys, this download IS the on-disk copy the engine
+            # container mounts; for remote deploys it's just metadata.
             local_path = model.local_path
             if local_path is None:
                 local_path = await download_model_async(
@@ -192,46 +224,61 @@ class LifecycleManager:
             for prior in priors:
                 await self._stop_locked(prior.id)
 
-            # 5. Placement
-            if self._topology is None:
-                raise RuntimeError(
-                    "topology not initialized; "
-                    "pass topology=read_topology() to LifecycleManager"
-                )
-            ready = dep_store.list_ready(self._conn)
-            # Map id -> LRU rank (lower rank = more evictable). Pinned are absent.
-            lru_rank = {
-                d.id: idx
-                for idx, d in enumerate(dep_store.list_evictable(self._conn))
-            }
-            allocated = sorted(
-                [
-                    AllocatedDeployment(
-                        id=d.id,
-                        gpu_ids=d.gpu_ids,
-                        vram_reserved_mb=d.vram_reserved_mb,
-                        pinned=d.pinned,
+            # 5. Placement (local target only — remote nodes manage their
+            # own GPU layout; the operator picks gpu_ids explicitly in
+            # plan.gpu_ids for now and we trust it. A future iteration
+            # could ask the agent for live GPU stats and run placement
+            # against the remote topology.)
+            if is_remote:
+                gpu_ids = list(plan.gpu_ids)
+                if not gpu_ids:
+                    raise RuntimeError(
+                        "remote deployments require explicit gpu_ids "
+                        "(target node's GPU indices)"
                     )
-                    for d in ready
-                ],
-                # Pinned last (never evicted); within auto, LRU rank ascending
-                key=lambda a: (a.pinned, lru_rank.get(a.id, 0)),
-            )
-            request = PlacementRequest(
-                tensor_parallel=plan.tensor_parallel,
-                vram_reserved_mb=vram_mb,
-                model_name=plan.model_name,
-            )
-            decision = plan_placement(self._topology, allocated=allocated, request=request)
+            else:
+                if self._topology is None:
+                    raise RuntimeError(
+                        "topology not initialized; "
+                        "pass topology=read_topology() to LifecycleManager"
+                    )
+                ready = dep_store.list_ready(self._conn)
+                # Map id -> LRU rank (lower rank = more evictable). Pinned absent.
+                lru_rank = {
+                    d.id: idx
+                    for idx, d in enumerate(dep_store.list_evictable(self._conn))
+                }
+                allocated = sorted(
+                    [
+                        AllocatedDeployment(
+                            id=d.id,
+                            gpu_ids=d.gpu_ids,
+                            vram_reserved_mb=d.vram_reserved_mb,
+                            pinned=d.pinned,
+                        )
+                        for d in ready
+                        if d.node_id == 0 or d.node_id == target_node_id
+                    ],
+                    # Pinned last (never evicted); within auto, LRU rank ascending
+                    key=lambda a: (a.pinned, lru_rank.get(a.id, 0)),
+                )
+                request = PlacementRequest(
+                    tensor_parallel=plan.tensor_parallel,
+                    vram_reserved_mb=vram_mb,
+                    model_name=plan.model_name,
+                )
+                decision = plan_placement(
+                    self._topology, allocated=allocated, request=request,
+                )
 
-            if isinstance(decision, NoRoom):
-                raise RuntimeError(decision.reason)
-            if isinstance(decision, EvictThenFit):
-                for victim_id in decision.evict_ids:
-                    await self._stop_locked(victim_id)
-                gpu_ids = decision.gpu_ids
-            else:  # Fit
-                gpu_ids = decision.gpu_ids
+                if isinstance(decision, NoRoom):
+                    raise RuntimeError(decision.reason)
+                if isinstance(decision, EvictThenFit):
+                    for victim_id in decision.evict_ids:
+                        await self._stop_locked(victim_id)
+                    gpu_ids = decision.gpu_ids
+                else:  # Fit
+                    gpu_ids = decision.gpu_ids
 
             # 5. Create row + spawn container
             dep = dep_store.create(
@@ -266,24 +313,27 @@ class LifecycleManager:
             )
 
             backend = self._backends[plan.backend]
-            container_model_path = "/cache/" + str(
-                Path(local_path).resolve().relative_to(self._models_dir.resolve())
-            )
-            # Rebuild plan with the placement-chosen GPU set AND a per-deployment
-            # gpu_memory_utilization derived from our reservation. Without this
-            # override every vLLM container takes its requested fraction of the
-            # *whole* GPU, so two co-located deployments fight for memory and
-            # the later one OOMs. We compute fraction = (our share per GPU)
-            # / (per-GPU total), bounded by a minimum that gives vLLM room
-            # for weights + CUDA workspace + a usable KV cache. The KV estimator's
-            # output is the model's minimum need; vLLM itself wants headroom
-            # for paged-attention blocks, NCCL buffers, compiled kernels, etc.
             tp = len(gpu_ids)
-            per_gpu_mb = self._topology.gpus[gpu_ids[0]].total_mb
-            mem_util = backend.headroom.effective_util(
-                reserved_mb=int(vram_mb / tp),
-                per_gpu_mb=per_gpu_mb,
-            )
+
+            if is_remote:
+                # Remote: skip the leader-side gpu_memory_utilization tuning
+                # (we don't know the agent's per-GPU MB without asking it).
+                # The backend's default util factor + the agent's docker run
+                # is enough for the demo. Future: query agent gpu stats.
+                mem_util = plan.gpu_memory_utilization
+            else:
+                # Rebuild plan with the placement-chosen GPU set AND a
+                # per-deployment gpu_memory_utilization derived from our
+                # reservation. Without this override every vLLM container
+                # takes its requested fraction of the *whole* GPU, so two
+                # co-located deployments fight for memory and the later
+                # one OOMs.
+                assert self._topology is not None
+                per_gpu_mb = self._topology.gpus[gpu_ids[0]].total_mb
+                mem_util = backend.headroom.effective_util(
+                    reserved_mb=int(vram_mb / tp),
+                    per_gpu_mb=per_gpu_mb,
+                )
             effective_plan = replace(
                 plan,
                 gpu_ids=list(gpu_ids),
@@ -291,17 +341,93 @@ class LifecycleManager:
                 gpu_memory_utilization=mem_util,
                 target_concurrency=target_concurrency,
             )
-            # 6. Per-deployment engine YAML (TRT-LLM uses --config to enable
-            # iter-perf stats and the CUDA-graph batch-size ladder). Backends
-            # that don't need a config return None from engine_config().
+
+            # 6. Per-deployment engine YAML. For LOCAL deploys we write
+            # it to the leader's configs dir; for REMOTE deploys we
+            # ship the YAML body inline in the plan dict so the agent
+            # can materialise it on its own host before mounting.
             container_config_path: str | None = None
-            volumes = {str(self._models_dir.resolve()): {"bind": "/cache", "mode": "ro"}}
+            engine_config_body: str | None = None
             cfg = backend.engine_config(effective_plan)
             if cfg is not None:
-                self._configs_dir.mkdir(parents=True, exist_ok=True)
-                host_cfg = self._configs_dir / f"{dep.id}.yml"
-                host_cfg.write_text(yaml.safe_dump(cfg, sort_keys=True))
+                engine_config_body = yaml.safe_dump(cfg, sort_keys=True)
+                if not is_remote:
+                    self._configs_dir.mkdir(parents=True, exist_ok=True)
+                    host_cfg = self._configs_dir / f"{dep.id}.yml"
+                    host_cfg.write_text(engine_config_body)
                 container_config_path = f"/serve/configs/{dep.id}.yml"
+
+            container_env = backend.container_env(effective_plan)
+
+            if is_remote:
+                # ------------------------------------------------------------
+                # Remote dispatch: build a self-contained plan dict the
+                # agent can execute with no leader-side filesystem
+                # dependencies. The agent downloads the model itself,
+                # writes the per-deployment config locally, and runs
+                # docker on its own host.
+                # ------------------------------------------------------------
+                assert self._registry is not None
+                link = self._registry.get(target_node_id)
+                if link is None:
+                    raise RuntimeError(
+                        f"node {plan.node_label!r} link disappeared before dispatch"
+                    )
+
+                # Container model path will be agent-local. We tell the
+                # agent the HF coordinates; it resolves the on-disk path
+                # before substituting into argv via a known sentinel.
+                MODEL_SENTINEL = "__SERVE_MODEL_PATH__"
+                argv = backend.build_argv(
+                    effective_plan,
+                    local_model_path=MODEL_SENTINEL,
+                    config_path=container_config_path,
+                )
+
+                agent_plan = {
+                    "image": plan.image_tag,
+                    "name": f"serve-{plan.backend}-{plan.model_name}-{dep.id}",
+                    "command": argv,
+                    "environment": container_env,
+                    "kwargs": backend.container_kwargs(effective_plan),
+                    "internal_port": backend.internal_port,
+                    # Agent-side staging instructions.
+                    "model_hf_repo": plan.hf_repo,
+                    "model_revision": plan.revision,
+                    "model_sentinel": MODEL_SENTINEL,
+                    "engine_config_body": engine_config_body,
+                    "engine_config_container_path": container_config_path,
+                    "deployment_id": dep.id,
+                }
+                started = await link.start_deployment(agent_plan)
+                dep_store.set_container(
+                    self._conn, dep.id,
+                    container_id=started.container_id,
+                    container_name=agent_plan["name"],
+                    container_port=started.port,
+                    container_address=started.address,
+                    node_id=target_node_id,
+                )
+                # No leader-side wait_healthy for v1: the agent's OpResult
+                # is the success signal (its docker.run completed).
+                # /v1/* traffic flows through the WS tunnel via _proxy_via_link.
+                await self._emit(
+                    "deployment.spawned",
+                    dep_id=dep.id, container_id=started.container_id,
+                )
+                dep_store.update_status(self._conn, dep.id, "ready")
+                plan_store.mark_ready(self._conn, plan_record_id)
+                await self._emit("deployment.ready", dep_id=dep.id)
+                return dep_store.get_by_id(self._conn, dep.id)
+
+            # ----------------------------------------------------------------
+            # Local dispatch: original docker.run path.
+            # ----------------------------------------------------------------
+            container_model_path = "/cache/" + str(
+                Path(local_path).resolve().relative_to(self._models_dir.resolve())
+            )
+            volumes = {str(self._models_dir.resolve()): {"bind": "/cache", "mode": "ro"}}
+            if container_config_path is not None:
                 volumes[str(self._configs_dir.resolve())] = {
                     "bind": "/serve/configs", "mode": "ro",
                 }
@@ -312,8 +438,6 @@ class LifecycleManager:
                 config_path=container_config_path,
             )
 
-            container_env = backend.container_env(effective_plan)
-
             handle = self._docker.run(
                 image=plan.image_tag,
                 name=f"serve-{plan.backend}-{plan.model_name}-{dep.id}",
@@ -323,23 +447,15 @@ class LifecycleManager:
                 volumes=volumes,
                 internal_port=backend.internal_port,
             )
-            # Persist node_id alongside container info — when a cluster
-            # registry is wired in, the local node is whichever AgentLink
-            # holds the in-process LocalAgentLink. Single-node deployments
-            # (no registry) leave node_id at its row default.
-            local_node_id: int | None = None
-            if self._registry is not None:
-                for link in self._registry.all():
-                    if link.is_ready and link.node_id is not None:
-                        local_node_id = link.node_id
-                        break
+            # Persist node_id alongside container info. The local node is
+            # node_id == target_node_id (the leader is target by default).
             dep_store.set_container(
                 self._conn, dep.id,
                 container_id=handle.id,
                 container_name=handle.name,
                 container_port=handle.port,
                 container_address=handle.address,
-                node_id=local_node_id,
+                node_id=target_node_id,
             )
             # Capture the docker image's content-addressable id so the row
             # records what actually ran, not just the tag. Tags are mutable;
@@ -473,10 +589,36 @@ class LifecycleManager:
         if dep is None:
             return
         dep_store.update_status(self._conn, dep.id, "stopping")
+        # Decide whether the container lives on this host or on a remote
+        # agent. node_id 0 (or matching the local node) → local docker;
+        # otherwise dispatch the stop through the AgentLink for that node.
+        local_node_id = self._local_node_id()
+        is_remote = (
+            dep.node_id != 0
+            and dep.node_id != local_node_id
+        )
         if dep.container_id:
-            self._docker.stop(dep.container_id, timeout=30)
+            if is_remote and self._registry is not None:
+                link = self._registry.get(dep.node_id)
+                if link is not None and link.is_ready:
+                    try:
+                        await link.stop_deployment(dep.container_id)
+                    except Exception as e:
+                        log.warning(
+                            "remote stop_deployment failed for dep %s on node %s: %s",
+                            dep.id, dep.node_id, e,
+                        )
+                else:
+                    log.warning(
+                        "remote node %s offline; can't stop remote container %s; "
+                        "row will still be marked stopped",
+                        dep.node_id, dep.container_id,
+                    )
+            else:
+                self._docker.stop(dep.container_id, timeout=30)
         da_store.detach_all(self._conn, dep.id)
-        # Remove the per-deployment engine config file if one was written.
+        # Remove the per-deployment engine config file if one was written
+        # locally (remote configs live on the agent host, never here).
         cfg_path = self._configs_dir / f"{dep.id}.yml"
         if cfg_path.exists():
             try:
@@ -485,3 +627,8 @@ class LifecycleManager:
                 pass
         dep_store.update_status(self._conn, dep.id, "stopped")
         await self._emit("deployment.stopped", dep_id=dep_id)
+
+    def _local_node_id(self) -> int:
+        """The leader's own node_id from the DB (0 if the row is missing)."""
+        local = nodes_store.find_by_label(self._conn, "local")
+        return local.id if local is not None else 0

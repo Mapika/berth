@@ -7,6 +7,7 @@ type LauncherForm = {
   maxModelLen: string
   gpuIds: string   // comma-separated, e.g. "0" or "0,1"
   pinned: boolean
+  nodeLabel: string  // '' or 'local' = leader; else remote agent label
 }
 
 const DEFAULT_FORM: LauncherForm = {
@@ -14,6 +15,7 @@ const DEFAULT_FORM: LauncherForm = {
   maxModelLen: '4096',
   gpuIds: '0',
   pinned: false,
+  nodeLabel: '',
 }
 
 export default function Models() {
@@ -21,6 +23,7 @@ export default function Models() {
   const models = useQuery({ queryKey: ['models'], queryFn: api.listModels })
   const backends = useQuery({ queryKey: ['backends'], queryFn: api.listBackends })
   const gpus = useQuery({ queryKey: ['gpus'], queryFn: api.listGpus })
+  const nodes = useQuery({ queryKey: ['nodes'], queryFn: api.listNodes })
   const [repo, setRepo] = useState('')
   const [name, setName] = useState('')
   const [openLauncher, setOpenLauncher] = useState<string | null>(null)
@@ -59,6 +62,9 @@ export default function Models() {
         pinned: form.pinned,
       }
       if (form.backend) payload.backend = form.backend
+      if (form.nodeLabel && form.nodeLabel !== 'local') {
+        payload.node_label = form.nodeLabel
+      }
       return api.loadModel(payload)
     },
     onMutate: () => setLaunchError(''),
@@ -160,7 +166,7 @@ export default function Models() {
                     <tr>
                       <td colSpan={4} className="!pt-2 !pb-6">
                         <div className="bg-elev/40 border border-rule p-5 space-y-4">
-                          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                          <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
                             <div className="space-y-1">
                               <div className="label">backend</div>
                               <select
@@ -173,6 +179,28 @@ export default function Models() {
                                   <option key={b.name} value={b.name}>{b.name}</option>
                                 ))}
                               </select>
+                            </div>
+                            <div className="space-y-1">
+                              <div className="label">node</div>
+                              <select
+                                className="field font-mono w-full text-[12px]"
+                                value={form.nodeLabel}
+                                onChange={e => setForm(f => ({ ...f, nodeLabel: e.target.value }))}
+                              >
+                                <option value="">leader (local)</option>
+                                {(nodes.data?.nodes ?? [])
+                                  .filter(n => n.label !== 'local' && n.status === 'ready')
+                                  .map(n => (
+                                    <option key={n.id} value={n.label}>
+                                      {n.label} · {n.gpu_count} gpu
+                                    </option>
+                                  ))}
+                              </select>
+                              {(nodes.data?.nodes ?? []).filter(n => n.label !== 'local').length === 0 && (
+                                <div className="text-mute text-[10px] tracking-wider">
+                                  no agents enrolled
+                                </div>
+                              )}
                             </div>
                             <div className="space-y-1">
                               <div className="label">max model len</div>
@@ -191,10 +219,16 @@ export default function Models() {
                                 onChange={e => setForm(f => ({ ...f, gpuIds: e.target.value }))}
                                 placeholder="0 or 0,1"
                               />
-                              {(gpus.data ?? []).length > 0 && (
+                              {form.nodeLabel && form.nodeLabel !== 'local' ? (
                                 <div className="text-mute text-[10px] tracking-wider">
-                                  available: {(gpus.data ?? []).map((g: any) => g.index).join(', ')}
+                                  on agent {form.nodeLabel}
                                 </div>
+                              ) : (
+                                (gpus.data ?? []).length > 0 && (
+                                  <div className="text-mute text-[10px] tracking-wider">
+                                    available: {(gpus.data ?? []).map((g: any) => g.index).join(', ')}
+                                  </div>
+                                )
                               )}
                             </div>
                             <div className="space-y-1">

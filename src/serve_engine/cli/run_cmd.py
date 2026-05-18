@@ -50,6 +50,12 @@ def run(
              "(enables --enable-lora on vLLM, equivalent on SGLang). 0 = "
              "adapters disabled. Adapters loaded later via `serve adapter load`.",
     ),
+    node: str = typer.Option(
+        None, "--node",
+        help="Target node label. Default: leader host. Other values must "
+             "match an enrolled, currently-ready agent (see `serve nodes ls`). "
+             "When set, the engine container runs on the remote agent's host.",
+    ),
 ):
     """Load a model and make it active. Replaces any existing deployment
     of the same name (errors if that deployment is pinned)."""
@@ -107,8 +113,11 @@ def run(
         body["max_loras"] = max_loras
     if extra_args:
         body["extra_args"] = extra_args
+    if node:
+        body["node_label"] = node
 
-    typer.echo(f"loading {local_name} on GPU(s) {gpu_ids} ...")
+    target = f"node={node!r}" if node and node != "local" else "leader"
+    typer.echo(f"loading {local_name} on {target} GPU(s) {gpu_ids} ...")
     try:
         result = asyncio.run(ipc.post(config.SOCK_PATH, "/admin/deployments", json=body))
     except RuntimeError as e:

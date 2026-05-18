@@ -225,6 +225,7 @@ export default function Dashboard() {
               <th>#</th>
               <th>model</th>
               <th>backend</th>
+              <th>node</th>
               <th>status</th>
               <th className="text-right">vram</th>
               <th className="text-right">gpu</th>
@@ -234,13 +235,15 @@ export default function Dashboard() {
           <tbody>
             {visible.length === 0 && (
               <tr>
-                <td colSpan={7} className="!py-12 text-center text-mute">
+                <td colSpan={8} className="!py-12 text-center text-mute">
                   no active deployments. load one from <span className="text-dim">models</span>
                 </td>
               </tr>
             )}
             {visible.map((d: any) => {
               const m = (models.data ?? []).find((m: any) => m.id === d.model_id)
+              const node = (nodes.data?.nodes ?? []).find((n: any) => n.id === d.node_id)
+              const nodeLabel = node?.label ?? (d.node_id ? `#${d.node_id}` : 'local')
               const live = d.status === 'ready' || d.status === 'loading'
               const busy = pendingId === d.id
               return (
@@ -248,6 +251,11 @@ export default function Dashboard() {
                   <td className="text-mute tnum">{d.id}</td>
                   <td>{m?.name ?? '-'}</td>
                   <td className="text-dim">{d.backend}</td>
+                  <td>
+                    <span className={nodeLabel === 'local' ? 'text-mute' : 'text-accent'}>
+                      {nodeLabel}
+                    </span>
+                  </td>
                   <td>
                     <span className={`dot dot-${d.status}`} />
                     <span className="text-dim">{d.status}</span>

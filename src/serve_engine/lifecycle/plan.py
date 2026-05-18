@@ -46,6 +46,11 @@ class DeploymentPlan:
     # adapter's rank against this limit instead of letting the engine
     # error out cryptically on first hot-load.
     max_lora_rank: int = 0
+    # Target node for this deployment. None / "local" → runs on the leader
+    # host via the in-process docker client. Any other label resolves to
+    # an enrolled agent's node_id; the manager dispatches via that node's
+    # AgentLink and the engine container lives on that host.
+    node_label: str | None = None
 
     def __post_init__(self) -> None:
         if self.backend not in SUPPORTED_BACKENDS:

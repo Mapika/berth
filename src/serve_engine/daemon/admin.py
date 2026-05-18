@@ -114,6 +114,9 @@ class CreateDeploymentRequest(BaseModel):
     target_concurrency: int | None = None
     max_loras: int = 0
     extra_args: dict[str, str] = {}
+    # Target node label. None / "" / "local" → run on the leader host.
+    # Anything else must be the label of an enrolled, currently-ready node.
+    node_label: str | None = None
 
 
 class CreateServiceProfileRequest(BaseModel):
@@ -257,6 +260,7 @@ async def create_deployment(
             max_loras=body.max_loras,
             max_lora_rank=max_lora_rank,
             extra_args=dict(body.extra_args),
+            node_label=body.node_label,
         )
     except ValueError as e:
         raise HTTPException(400, str(e)) from e
