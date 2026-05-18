@@ -134,6 +134,7 @@ async def serve(cfg: config.ResolvedConfig, sock_path: Path) -> None:
         app=cluster_app,
         host=cfg.cluster_bind, port=cfg.cluster_port,
         ssl_keyfile=str(cluster_key), ssl_certfile=str(cluster_crt),
+        ssl_ca_certs=str(config.SERVE_DIR / "ca" / "ca.crt"),
         ssl_cert_reqs=ssl.CERT_OPTIONAL,
         ws=TLSAwareWebSocketProtocol,
         log_level="info",
