@@ -67,6 +67,5 @@ def test_different_agents_get_different_fingerprints(tmp_path):
 def test_ca_key_is_mode_600(tmp_path):
     ca_dir = tmp_path / "ca"
     generate_ca(ca_dir, common_name="x")
-    import stat
     mode = (ca_dir / "ca.key").stat().st_mode & 0o777
     assert mode == 0o600

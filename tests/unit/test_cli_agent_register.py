@@ -48,7 +48,6 @@ def test_register_writes_config(tmp_path, monkeypatch):
     assert (tmp_path / "agent.key").exists()
     assert (tmp_path / "ca.crt").exists()
     # Key file should be 0o600.
-    import stat
     mode = (tmp_path / "agent.key").stat().st_mode & 0o777
     assert mode == 0o600
 

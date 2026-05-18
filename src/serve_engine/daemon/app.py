@@ -10,14 +10,13 @@ from fastapi import FastAPI
 
 from serve_engine import __version__ as _serve_version
 from serve_engine.auth.stream_tokens import StreamTokenStore
+from serve_engine.auth.tiers import load_tiers
+from serve_engine.backends.base import Backend
 from serve_engine.cluster.agent_registry import AgentRegistry
 from serve_engine.cluster.health_watcher import run_health_watcher
 from serve_engine.cluster.leader_hub import LeaderHub
 from serve_engine.cluster.local_agent import LocalAgentLink
 from serve_engine.cluster.local_bootstrap import ensure_local_node
-from serve_engine.store import nodes as nodes_store
-from serve_engine.auth.tiers import load_tiers
-from serve_engine.backends.base import Backend
 from serve_engine.daemon.admin import router as admin_router
 from serve_engine.daemon.admin import unauthed_router as admin_unauthed_router
 from serve_engine.daemon.metrics_router import router as metrics_router
@@ -27,6 +26,7 @@ from serve_engine.lifecycle.docker_client import DockerClient
 from serve_engine.lifecycle.manager import LifecycleManager
 from serve_engine.lifecycle.topology import Topology
 from serve_engine.observability.events import EventBus
+from serve_engine.store import nodes as nodes_store
 
 log = logging.getLogger(__name__)
 

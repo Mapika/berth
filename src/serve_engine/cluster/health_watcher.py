@@ -43,6 +43,6 @@ async def run_health_watcher(
     while True:
         try:
             sweep(conn, registry, stale_after_s=stale_after_s)
-        except Exception:  # noqa: BLE001 — never let the watcher die silently
+        except Exception:
             log.exception("health watcher sweep failed")
         await asyncio.sleep(interval_s)

@@ -456,7 +456,7 @@ async def stream_requests(request: Request) -> StreamingResponse:
                     break
                 try:
                     msg = await asyncio.wait_for(sub.queue.get(), timeout=15.0)
-                except asyncio.TimeoutError:
+                except TimeoutError:
                     yield b": keep-alive\n\n"
                     continue
                 yield (

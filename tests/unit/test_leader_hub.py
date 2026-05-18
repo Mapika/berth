@@ -65,7 +65,8 @@ def test_unknown_fingerprint_rejected(tmp_path):
     reg = AgentRegistry()
     app = _app_with_hub(conn, reg, "sha256:unknown")
     client = TestClient(app)
-    with pytest.raises(Exception):
+    from starlette.websockets import WebSocketDisconnect
+    with pytest.raises(WebSocketDisconnect):
         with client.websocket_connect("/cluster/agent") as ws:
             ws.receive_text()
 
@@ -75,7 +76,8 @@ def test_no_fingerprint_header_rejected(tmp_path):
     reg = AgentRegistry()
     app = _app_with_hub(conn, reg, None)
     client = TestClient(app)
-    with pytest.raises(Exception):
+    from starlette.websockets import WebSocketDisconnect
+    with pytest.raises(WebSocketDisconnect):
         with client.websocket_connect("/cluster/agent") as ws:
             ws.receive_text()
 

@@ -22,7 +22,7 @@ def test_register_get_unregister():
     r.register(_Stub(7))
     got = r.get(7)
     assert got is not None and got.node_id == 7
-    assert {l.node_id for l in r.all()} == {7}
+    assert {link.node_id for link in r.all()} == {7}
     r.unregister(7)
     assert r.get(7) is None
 
@@ -47,4 +47,4 @@ def test_all_returns_snapshot_not_live_view():
     r.register(_Stub(1))
     snap = r.all()
     r.register(_Stub(2))
-    assert {l.node_id for l in snap} == {1}
+    assert {link.node_id for link in snap} == {1}

@@ -80,7 +80,7 @@ class AgentFrameDispatcher:
     async def _handle_start(self, frame: StartDeployment) -> None:
         try:
             cid, addr, port = await self._docker.start(frame.plan)
-        except Exception as e:  # noqa: BLE001 — surface to leader
+        except Exception as e:
             await self._send(encode_frame(OpResult(
                 request_id=frame.request_id, ok=False, error=str(e),
             )))
@@ -94,7 +94,7 @@ class AgentFrameDispatcher:
     async def _handle_stop(self, frame: StopDeployment) -> None:
         try:
             await self._docker.stop(frame.container_id, remove=True)
-        except Exception as e:  # noqa: BLE001
+        except Exception as e:
             await self._send(encode_frame(OpResult(
                 request_id=frame.request_id, ok=False, error=str(e),
             )))
@@ -135,7 +135,7 @@ class AgentFrameDispatcher:
                     return
         except asyncio.CancelledError:
             raise
-        except Exception as e:  # noqa: BLE001
+        except Exception as e:
             await self._send(encode_frame(HttpChunk(
                 stream_id=frame.stream_id, status=502,
                 headers={

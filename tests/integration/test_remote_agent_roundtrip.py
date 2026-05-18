@@ -23,18 +23,16 @@ from serve_engine.backends.vllm import VLLMBackend
 from serve_engine.cluster.agent_registry import AgentRegistry
 from serve_engine.cluster.leader_hub import _WSAdapter  # noqa: F401 — used implicitly
 from serve_engine.cluster.protocol import (
-    Hello,
     HttpChunk,
     HttpRequest,
     OpResult,
     StartDeployment,
-    Welcome,
     decode_frame,
     encode_frame,
 )
 from serve_engine.cluster.remote_agent import RemoteAgentLink
-from serve_engine.daemon.openai_proxy import _proxy_via_link
 from serve_engine.daemon.app import build_app
+from serve_engine.daemon.openai_proxy import _proxy_via_link
 from serve_engine.lifecycle.docker_client import ContainerHandle
 from serve_engine.store import db
 from serve_engine.store import nodes as nodes_store
@@ -161,10 +159,11 @@ async def test_enrollment_then_router_routes_through_remote_link(tmp_path):
             data={"container_id": "remote-cid", "address": "tunnel", "port": 0},
         )))
 
-    asyncio.create_task(fake_agent_starts())
+    answerer = asyncio.create_task(fake_agent_starts())
     started = await asyncio.wait_for(
         link.start_deployment({"image": "x", "name": "d"}), timeout=3.0,
     )
+    await answerer
     assert started.container_id == "remote-cid"
     assert started.address == "tunnel"
 

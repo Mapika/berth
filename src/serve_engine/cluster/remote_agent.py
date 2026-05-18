@@ -169,5 +169,5 @@ class RemoteAgentLink:
             if not self._shutdown:
                 try:
                     await self._send(HttpCancel(stream_id=stream_id))
-                except Exception:  # noqa: BLE001
+                except Exception:
                     pass
