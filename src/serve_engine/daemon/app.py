@@ -10,7 +10,11 @@ from fastapi import FastAPI
 
 from serve_engine import __version__ as _serve_version
 from serve_engine.auth.stream_tokens import StreamTokenStore
+from serve_engine.cluster.agent_registry import AgentRegistry
+from serve_engine.cluster.leader_hub import LeaderHub
+from serve_engine.cluster.local_agent import LocalAgentLink
 from serve_engine.cluster.local_bootstrap import ensure_local_node
+from serve_engine.store import nodes as nodes_store
 from serve_engine.auth.tiers import load_tiers
 from serve_engine.backends.base import Backend
 from serve_engine.daemon.admin import router as admin_router
@@ -67,6 +71,16 @@ def build_apps(
     """
     # Ensure the local-node row exists before anything that reads it.
     ensure_local_node(conn, agent_version=_serve_version)
+
+    # Wire up the AgentLink registry. Local node first; remote agents join
+    # via LeaderHub WS handshake.
+    agent_registry = AgentRegistry()
+    local_node = nodes_store.find_by_label(conn, "local")
+    if local_node is None:
+        raise RuntimeError("local node row missing after ensure_local_node")
+    agent_registry.register(LocalAgentLink(
+        node_id=local_node.id, docker_client=docker_client,
+    ))
 
     event_bus = EventBus()
     stream_tokens = StreamTokenStore()
@@ -146,9 +160,11 @@ def build_apps(
         request_tracer=request_tracer,
     )
     tcp_app.state.predictor_task = predictor_task
+    tcp_app.state.agent_registry = agent_registry
     tcp_app.include_router(openai_router)
     tcp_app.include_router(metrics_router)
     tcp_app.include_router(admin_router)
+    tcp_app.include_router(LeaderHub(conn=conn, registry=agent_registry).router)
     install_ui(tcp_app)
 
     uds_app = FastAPI(title="serve-engine (control)", version="0.0.1")
@@ -162,6 +178,7 @@ def build_apps(
         request_tracer=request_tracer,
     )
     uds_app.state.predictor_task = predictor_task
+    uds_app.state.agent_registry = agent_registry
     uds_app.include_router(openai_router)
     uds_app.include_router(admin_router)
     uds_app.include_router(metrics_router)
