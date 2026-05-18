@@ -77,6 +77,24 @@ def resolve_target(conn: sqlite3.Connection, model_field: str) -> ResolvedTarget
     return ResolvedTarget(base_model_name=model_field, adapter_name=None)
 
 
+def _filter_by_reachable_nodes(candidates, registry):
+    """Drop deployment rows whose node_id has no live, ready AgentLink.
+
+    Used by router-layer code to refuse routing to deployments on
+    unreachable nodes (heartbeat stale, agent disconnected). When the
+    registry is None, the filter is a no-op — preserves single-node
+    behavior for tests that don't construct a cluster.
+    """
+    if registry is None:
+        return list(candidates)
+    out = []
+    for dep in candidates:
+        link = registry.get(dep.node_id)
+        if link is not None and link.is_ready:
+            out.append(dep)
+    return out
+
+
 def find_deployment_for(
     conn: sqlite3.Connection,
     base_model_name: str,
