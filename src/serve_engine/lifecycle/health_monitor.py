@@ -59,24 +59,41 @@ class HealthMonitor:
                     continue
                 if d.container_address is None or d.container_port is None:
                     continue
-                # Remote deployments live on agent hosts; their
-                # container_address is the "tunnel" sentinel which isn't
-                # reachable by a direct httpx call. Skip the probe — the
-                # WS link's liveness already covers that node. (Future:
-                # add an AgentLink.probe_container endpoint that proxies
-                # the engine's /health.)
-                if d.container_address == "tunnel":
-                    continue
-                url = (
-                    f"http://{d.container_address}:{d.container_port}"
-                    f"{backend.health_path}"
-                )
                 ok = False
-                try:
-                    r = await client.get(url)
-                    ok = 200 <= r.status_code < 300
-                except (httpx.HTTPError, OSError):
-                    ok = False
+                url: str
+                if d.container_address == "tunnel":
+                    # Remote deployment — probe through the AgentLink.
+                    # The agent does a localhost httpx call inside its
+                    # own host and ships back the status.
+                    url = f"<tunnel>{backend.health_path}"
+                    registry = getattr(
+                        self._manager, "_registry", None,
+                    )
+                    link = registry.get(d.node_id) if registry else None
+                    if link is None or not link.is_ready:
+                        # Agent disconnected — don't penalise the row; the
+                        # node-status watcher already flagged it.
+                        continue
+                    if d.container_id is None:
+                        continue
+                    try:
+                        status_code = await link.probe_container(
+                            container_id=d.container_id,
+                            path=backend.health_path,
+                        )
+                        ok = 200 <= status_code < 300
+                    except Exception:
+                        ok = False
+                else:
+                    url = (
+                        f"http://{d.container_address}:{d.container_port}"
+                        f"{backend.health_path}"
+                    )
+                    try:
+                        r = await client.get(url)
+                        ok = 200 <= r.status_code < 300
+                    except (httpx.HTTPError, OSError):
+                        ok = False
 
                 if ok:
                     if d.id in self._failures:

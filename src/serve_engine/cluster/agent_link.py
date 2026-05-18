@@ -52,3 +52,10 @@ class AgentLink(Protocol):
         headers: dict[str, str],
         body: bytes,
     ) -> AsyncIterator[ProxyResponseChunk]: ...
+    async def probe_container(
+        self, *, container_id: str, path: str,
+    ) -> int:
+        """Do a single GET against the container's HTTP, return the status
+        code. Used by HealthMonitor so remote engines can be probed
+        through the tunnel (no leader-side reachability needed)."""
+        ...

@@ -80,10 +80,43 @@ class HttpCancel:
     type: str = "http_cancel"
 
 
+@dataclass
+class LogStream:
+    """Leader → agent: start streaming docker logs for a container.
+
+    `tail` is the number of historical lines to ship before the live tail;
+    `follow=True` means keep streaming until LogCancel."""
+    stream_id: str
+    container_id: str
+    tail: int = 500
+    follow: bool = True
+    type: str = "log_stream"
+
+
+@dataclass
+class LogChunk:
+    """Agent → leader: a slice of docker log output.
+
+    `body_b64` carries raw bytes (mixed stdout/stderr). The final chunk
+    has `eof=True` and typically empty body."""
+    stream_id: str
+    body_b64: str
+    eof: bool
+    type: str = "log_chunk"
+
+
+@dataclass
+class LogCancel:
+    """Leader → agent: stop a log stream (client disconnected)."""
+    stream_id: str
+    type: str = "log_cancel"
+
+
 Frame = (
     Hello | Welcome | Heartbeat | GpuStats
     | StartDeployment | StopDeployment | OpResult
     | HttpRequest | HttpChunk | HttpCancel
+    | LogStream | LogChunk | LogCancel
 )
 
 
@@ -98,6 +131,9 @@ _REGISTRY: dict[str, type] = {
     "http_request": HttpRequest,
     "http_chunk": HttpChunk,
     "http_cancel": HttpCancel,
+    "log_stream": LogStream,
+    "log_chunk": LogChunk,
+    "log_cancel": LogCancel,
 }
 
 

@@ -80,6 +80,7 @@ export default function Services() {
   const routes = useQuery({ queryKey: ['routes'], queryFn: api.listRoutes })
   const models = useQuery({ queryKey: ['models'], queryFn: api.listModels })
   const backends = useQuery({ queryKey: ['backends'], queryFn: api.listBackends })
+  const nodes = useQuery({ queryKey: ['nodes'], queryFn: api.listNodes })
 
   const hasProfiles = (profiles.data ?? []).length > 0
 
@@ -91,6 +92,7 @@ export default function Services() {
     gpu_ids: '0',
     max_model_len: '8192',
     pinned: false,
+    node_label: '',
   })
   const [profileFormError, setProfileFormError] = useState('')
   const [profileActionError, setProfileActionError] = useState('')
@@ -116,6 +118,10 @@ export default function Services() {
         gpu_ids,
         max_model_len,
         pinned: profileForm.pinned,
+        node_label:
+          profileForm.node_label && profileForm.node_label !== 'local'
+            ? profileForm.node_label
+            : null,
       })
     },
     onMutate: () => setProfileFormError(''),
@@ -124,6 +130,7 @@ export default function Services() {
       setProfileForm({
         name: '', model_name: '', hf_repo: '', backend: '',
         gpu_ids: '0', max_model_len: '8192', pinned: false,
+        node_label: '',
       })
       qc.invalidateQueries({ queryKey: ['profiles'] })
     },
@@ -254,7 +261,7 @@ export default function Services() {
                 onChange={e => setProfileForm(f => ({ ...f, hf_repo: e.target.value }))}
               />
             </div>
-            <div className="space-y-1 col-span-6 md:col-span-3">
+            <div className="space-y-1 col-span-6 md:col-span-2">
               <div className="label">backend</div>
               <select
                 className="field font-mono w-full text-[12px]"
@@ -267,7 +274,24 @@ export default function Services() {
                 ))}
               </select>
             </div>
-            <div className="space-y-1 col-span-6 md:col-span-3">
+            <div className="space-y-1 col-span-6 md:col-span-2">
+              <div className="label">node</div>
+              <select
+                className="field font-mono w-full text-[12px]"
+                value={profileForm.node_label}
+                onChange={e => setProfileForm(f => ({ ...f, node_label: e.target.value }))}
+              >
+                <option value="">leader (local)</option>
+                {(nodes.data?.nodes ?? [])
+                  .filter(n => n.label !== 'local' && n.status === 'ready')
+                  .map(n => (
+                    <option key={n.id} value={n.label}>
+                      {n.label} · {n.gpu_count} gpu
+                    </option>
+                  ))}
+              </select>
+            </div>
+            <div className="space-y-1 col-span-6 md:col-span-2">
               <div className="label">gpu ids</div>
               <input
                 className="field font-mono w-full text-[12px] tnum"

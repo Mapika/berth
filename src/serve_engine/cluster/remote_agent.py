@@ -12,6 +12,9 @@ from serve_engine.cluster.protocol import (
     HttpCancel,
     HttpChunk,
     HttpRequest,
+    LogCancel,
+    LogChunk,
+    LogStream,
     OpResult,
     StartDeployment,
     StopDeployment,
@@ -41,6 +44,7 @@ class RemoteAgentLink:
         self._ws = ws
         self._pending_ops: dict[str, asyncio.Future[OpResult]] = {}
         self._streams: dict[str, asyncio.Queue[HttpChunk]] = {}
+        self._log_streams: dict[str, asyncio.Queue[LogChunk]] = {}
         self._send_lock = asyncio.Lock()
         self._shutdown = False
         self._ready = True
@@ -62,6 +66,8 @@ class RemoteAgentLink:
         self._pending_ops.clear()
         for q in self._streams.values():
             q.put_nowait(_END_OF_STREAM)
+        for lq in self._log_streams.values():
+            lq.put_nowait(LogChunk(stream_id="", body_b64="", eof=True))
 
     async def _send(self, frame: Frame) -> None:
         async with self._send_lock:
@@ -78,6 +84,10 @@ class RemoteAgentLink:
             q = self._streams.get(frame.stream_id)
             if q is not None:
                 await q.put(frame)
+        elif isinstance(frame, LogChunk):
+            lq = self._log_streams.get(frame.stream_id)
+            if lq is not None:
+                await lq.put(frame)
 
     async def run(self) -> None:
         """Consume frames from the WS forever (until shutdown or close).
@@ -127,6 +137,58 @@ class RemoteAgentLink:
         )
         if not res.ok:
             raise RuntimeError(res.error or "stop_deployment failed")
+
+    async def stream_logs(
+        self, *, container_id: str, tail: int = 500, follow: bool = True,
+    ) -> AsyncIterator[bytes]:
+        """Stream docker logs for `container_id` from the remote agent.
+
+        Yields raw bytes as the agent ships them. Cancellation sends a
+        LogCancel so the agent stops its docker iterator (best effort)."""
+        stream_id = secrets.token_hex(8)
+        q: asyncio.Queue[LogChunk] = asyncio.Queue()
+        self._log_streams[stream_id] = q
+        try:
+            await self._send(LogStream(
+                stream_id=stream_id,
+                container_id=container_id,
+                tail=tail, follow=follow,
+            ))
+            while True:
+                chunk = await q.get()
+                if chunk.body_b64:
+                    yield base64.b64decode(chunk.body_b64)
+                if chunk.eof:
+                    break
+        finally:
+            self._log_streams.pop(stream_id, None)
+            if not self._shutdown:
+                try:
+                    await self._send(LogCancel(stream_id=stream_id))
+                except Exception:
+                    pass
+
+    async def probe_container(
+        self, *, container_id: str, path: str,
+    ) -> int:
+        """Send a single GET to the remote container's HTTP and return the
+        status code. Implemented on top of proxy_request — reads only the
+        first chunk (which carries the status), cancels the rest."""
+        try:
+            async for ch in self.proxy_request(
+                container_id=container_id,
+                method="GET",
+                path=path,
+                headers={},
+                body=b"",
+            ):
+                if ch.status is not None:
+                    return ch.status
+                if ch.eof:
+                    break
+            return 0
+        except Exception:
+            return 0
 
     async def proxy_request(
         self,

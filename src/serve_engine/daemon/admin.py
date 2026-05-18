@@ -136,6 +136,7 @@ class CreateServiceProfileRequest(BaseModel):
     target_concurrency: int | None = None
     max_loras: int = 0
     extra_args: dict[str, str] = {}
+    node_label: str | None = None
 
 
 class CreateServiceRouteRequest(BaseModel):
@@ -196,6 +197,7 @@ def _profile_to_plan(profile: profile_store.ServiceProfile) -> DeploymentPlan:
         max_loras=profile.max_loras,
         max_lora_rank=profile.max_lora_rank,
         extra_args=dict(profile.extra_args),
+        node_label=profile.node_label,
     )
 
 
@@ -313,6 +315,7 @@ def create_service_profile(
             max_loras=body.max_loras,
             max_lora_rank=max_lora_rank,
             extra_args=dict(body.extra_args),
+            node_label=body.node_label,
         )
     except ValueError as e:
         raise HTTPException(400, str(e)) from e
@@ -336,6 +339,7 @@ def create_service_profile(
             max_loras=plan.max_loras,
             max_lora_rank=plan.max_lora_rank,
             extra_args=plan.extra_args,
+            node_label=plan.node_label,
         )
     except profile_store.AlreadyExists as e:
         raise HTTPException(409, str(e)) from e
@@ -1061,21 +1065,53 @@ def stream_current_logs(request: Request):
 async def stream_engine_logs_sse(dep_id: int, request: Request) -> StreamingResponse:
     """SSE: stdout/stderr of the engine container for this deployment.
 
-    Designed for the browser EventSource - each docker log chunk is reframed
-    as one or more `data: <line>` SSE events. Includes the last 500 lines as
-    history before following. The underlying sync iterator from docker-py is
-    bridged into the event loop via asyncio.to_thread; on client disconnect
-    the consumer task is cancelled but the docker iterator may continue to
-    drain in the background until the container stops (small thread leak,
-    acceptable since these are bounded by container lifetime).
+    Local deployments stream from the leader's docker; remote deployments
+    stream through the AgentLink (LogStream/LogChunk frames). Each chunk
+    is reframed as `data: <line>` SSE events. Includes the last 500
+    lines of history before following.
     """
     conn: sqlite3.Connection = request.app.state.conn
-    docker_client = request.app.state.manager._docker
     dep = dep_store.get_by_id(conn, dep_id)
     if dep is None:
         raise HTTPException(404, f"no deployment with id {dep_id}")
     if dep.container_id is None:
         raise HTTPException(404, f"deployment {dep_id} has no container")
+
+    local_node = nodes_store.find_by_label(conn, "local")
+    local_node_id = local_node.id if local_node else 0
+    is_remote = dep.node_id != 0 and dep.node_id != local_node_id
+
+    if is_remote:
+        registry = request.app.state.agent_registry
+        link = registry.get(dep.node_id)
+        if link is None or not link.is_ready:
+            raise HTTPException(
+                503, f"node {dep.node_id} agent not connected; cannot stream logs",
+            )
+
+        async def gen_remote():
+            yield ":ok\n\n"
+            try:
+                async for chunk in link.stream_logs(
+                    container_id=dep.container_id, tail=500, follow=True,
+                ):
+                    if not chunk:
+                        continue
+                    if isinstance(chunk, bytes):
+                        text = chunk.decode("utf-8", errors="replace")
+                    else:
+                        text = str(chunk)
+                    for line in text.splitlines():
+                        if line:
+                            yield f"data: {line}\n\n"
+            except Exception as e:
+                yield f"data: [serve-engine] log stream error: {e}\n\n"
+            yield "data: [serve-engine] log stream ended\n\n"
+
+        return StreamingResponse(gen_remote(), media_type="text/event-stream")
+
+    # Local deployment — existing direct-docker path.
+    docker_client = request.app.state.manager._docker
 
     async def gen():
         yield ":ok\n\n"
@@ -1379,9 +1415,6 @@ def admin_cluster_info(request: Request):
         except Exception as e:  # pragma: no cover — defensive
             server_info = {"present": True, "error": str(e)}
 
-    public_tls_configured = bool(
-        request.app.state.__dict__.get("public_tls_configured", False)
-    )
     # The daemon's resolved config isn't kept on app.state today; recompute
     # via the same resolver so the UI shows what the running process is
     # advertising. resolve_config is cheap (file + autodetect + dataclass).
@@ -1399,7 +1432,7 @@ def admin_cluster_info(request: Request):
 
 
 @router.get("/config")
-def admin_config(request: Request):  # noqa: ARG001
+def admin_config(request: Request):
     """Resolved address/TLS config + which source layer each field came from.
 
     Mirrors `serve config show` for the UI's Settings page."""

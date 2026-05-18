@@ -103,3 +103,21 @@ class LocalAgentLink:
         link instance existed (e.g., after a daemon process restart that
         rediscovered a still-running container)."""
         self._endpoints[container_id] = (address, port)
+
+    async def probe_container(
+        self, *, container_id: str, path: str,
+    ) -> int:
+        endpoint = self._endpoints.get(container_id)
+        if endpoint is None:
+            return 0
+        addr, port = endpoint
+        async with httpx.AsyncClient(
+            base_url=f"http://{addr}:{port}",
+            transport=self._transport,
+            timeout=httpx.Timeout(connect=2.0, read=5.0, write=2.0, pool=2.0),
+        ) as c:
+            try:
+                r = await c.get(path)
+                return r.status_code
+            except httpx.HTTPError:
+                return 0

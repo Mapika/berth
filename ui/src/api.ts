@@ -63,6 +63,7 @@ export type CreateProfileBody = {
   max_model_len?: number
   pinned?: boolean
   target_concurrency?: number | null
+  node_label?: string | null
 }
 
 export type CreateRouteBody = {

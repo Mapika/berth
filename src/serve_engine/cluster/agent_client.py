@@ -19,6 +19,9 @@ from serve_engine.cluster.protocol import (
     HttpCancel,
     HttpChunk,
     HttpRequest,
+    LogCancel,
+    LogChunk,
+    LogStream,
     OpResult,
     StartDeployment,
     StopDeployment,
@@ -71,6 +74,14 @@ class AgentFrameDispatcher:
                 self._run_http_stream(frame)
             )
         elif isinstance(frame, HttpCancel):
+            t = self._inflight.pop(frame.stream_id, None)
+            if t is not None:
+                t.cancel()
+        elif isinstance(frame, LogStream):
+            self._inflight[frame.stream_id] = asyncio.create_task(
+                self._run_log_stream(frame)
+            )
+        elif isinstance(frame, LogCancel):
             t = self._inflight.pop(frame.stream_id, None)
             if t is not None:
                 t.cancel()
@@ -168,6 +179,70 @@ def _rehydrate_docker_kwargs(kw: dict) -> dict:
     return out
 
 
+    async def _run_log_stream(self, frame: LogStream) -> None:
+        """Stream docker logs for `frame.container_id` back as LogChunks.
+
+        Uses docker-py's blocking iterator on a worker thread; bridges
+        each yielded chunk into an asyncio.Queue the main task drains.
+        Cancellation closes the queue and lets the thread drain
+        naturally (small drain-thread leak, bounded by container life)."""
+        q: asyncio.Queue = asyncio.Queue()
+        SENTINEL = object()
+        loop = asyncio.get_running_loop()
+
+        def _pump():
+            try:
+                it = self._docker.stream_logs_iter(
+                    frame.container_id,
+                    tail=frame.tail,
+                    follow=frame.follow,
+                )
+                for chunk in it:
+                    if not isinstance(chunk, bytes):
+                        chunk = str(chunk).encode("utf-8", errors="replace")
+                    asyncio.run_coroutine_threadsafe(q.put(chunk), loop)
+            except Exception as e:
+                asyncio.run_coroutine_threadsafe(
+                    q.put(f"[serve-engine] log error: {e}\n".encode()),
+                    loop,
+                )
+            finally:
+                asyncio.run_coroutine_threadsafe(q.put(SENTINEL), loop)
+
+        import threading
+        t = threading.Thread(target=_pump, daemon=True)
+        t.start()
+        try:
+            while True:
+                chunk = await q.get()
+                if chunk is SENTINEL:
+                    await self._send(encode_frame(LogChunk(
+                        stream_id=frame.stream_id,
+                        body_b64="", eof=True,
+                    )))
+                    break
+                await self._send(encode_frame(LogChunk(
+                    stream_id=frame.stream_id,
+                    body_b64=base64.b64encode(chunk).decode("ascii"),
+                    eof=False,
+                )))
+        except asyncio.CancelledError:
+            raise
+        except Exception as e:
+            try:
+                await self._send(encode_frame(LogChunk(
+                    stream_id=frame.stream_id,
+                    body_b64=base64.b64encode(
+                        f"[serve-engine] {e}\n".encode()
+                    ).decode("ascii"),
+                    eof=True,
+                )))
+            except Exception:
+                pass
+        finally:
+            self._inflight.pop(frame.stream_id, None)
+
+
 class _DockerAdapter:
     """Adapter from DockerClient's sync API to the awaitables the
     dispatcher expects.
@@ -258,6 +333,10 @@ class _DockerAdapter:
     async def stop(self, cid, *, remove):
         await asyncio.to_thread(self._dc.stop, cid, remove=remove)
 
+    def stream_logs_iter(self, container_id: str, *, tail: int, follow: bool):
+        """Sync iterator (called from a worker thread by _run_log_stream)."""
+        return self._dc.stream_logs(container_id, follow=follow, tail=tail)
+
 
 class _HttpxAdapter:
     """Adapter that hands the dispatcher an async iterator of HTTP chunks."""
@@ -329,6 +408,39 @@ async def run_agent(serve_home: Path) -> None:
     docker = _DockerAdapter(dc)
     http = _HttpxAdapter()
 
+    # Re-attach to running engine containers from a previous agent
+    # process. The dispatcher's _endpoints dict is in-memory only — if
+    # the agent restarted while remote deployments were live, those
+    # rows on the leader stay 'ready' but every /v1/* proxy fails with
+    # no-endpoint. Walk docker on startup and rebuild the map.
+    preloaded_endpoints: dict[str, tuple[str, int]] = {}
+    try:
+        for c in dc._client.containers.list(filters={"name": "serve-"}):
+            if c.status != "running":
+                continue
+            ports = (c.attrs.get("NetworkSettings", {}) or {}).get("Ports", {}) or {}
+            host_port: int | None = None
+            host_addr = "127.0.0.1"
+            for _internal, bindings in ports.items():
+                if not bindings:
+                    continue
+                try:
+                    host_port = int(bindings[0]["HostPort"])
+                    host_addr = bindings[0].get("HostIp") or "127.0.0.1"
+                    if host_addr in ("0.0.0.0", ""):
+                        host_addr = "127.0.0.1"
+                    break
+                except (KeyError, TypeError, ValueError):
+                    continue
+            if host_port is not None:
+                preloaded_endpoints[c.id] = (host_addr, host_port)
+                log.info(
+                    "agent re-attached endpoint for container %s (%s:%d)",
+                    c.id[:12], host_addr, host_port,
+                )
+    except Exception as e:
+        log.warning("agent endpoint re-attach failed (continuing): %s", e)
+
     ws_url = (
         cfg["leader_url"]
         .replace("https://", "wss://")
@@ -348,6 +460,12 @@ async def run_agent(serve_home: Path) -> None:
                 disp = AgentFrameDispatcher(
                     docker=docker, http=http, send=send,
                 )
+                # Restore endpoints discovered at startup so existing
+                # remote deployments answer immediately after a reconnect.
+                for _cid, (_addr, _port) in preloaded_endpoints.items():
+                    disp.register_endpoint(
+                        container_id=_cid, address=_addr, port=_port,
+                    )
                 info = collect_host_info()
                 await ws.send(encode_frame(Hello(
                     agent_version=_v,

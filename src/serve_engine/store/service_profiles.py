@@ -28,6 +28,10 @@ class ServiceProfile:
     max_loras: int
     max_lora_rank: int
     extra_args: dict[str, str] = field(default_factory=dict)
+    # None / 'local' = leader. Otherwise the label of an enrolled agent
+    # node — `deploy_profile(name)` resolves it to a node_id and routes
+    # the engine container there.
+    node_label: str | None = None
 
 
 def _row_to_profile(row: sqlite3.Row) -> ServiceProfile:
@@ -39,6 +43,10 @@ def _row_to_profile(row: sqlite3.Row) -> ServiceProfile:
         extra = {}
     if not isinstance(extra, dict):
         extra = {}
+    try:
+        node_label = row["node_label"]
+    except (IndexError, KeyError):
+        node_label = None
     return ServiceProfile(
         id=row["id"],
         name=row["name"],
@@ -57,6 +65,7 @@ def _row_to_profile(row: sqlite3.Row) -> ServiceProfile:
         max_loras=row["max_loras"],
         max_lora_rank=row["max_lora_rank"],
         extra_args={str(k): str(v) for k, v in extra.items()},
+        node_label=node_label,
     )
 
 
@@ -79,6 +88,7 @@ def create(
     max_loras: int = 0,
     max_lora_rank: int = 0,
     extra_args: dict[str, str] | None = None,
+    node_label: str | None = None,
 ) -> ServiceProfile:
     gpu_csv = ",".join(str(g) for g in gpu_ids)
     extra_json = json.dumps(extra_args or {}, sort_keys=True)
@@ -89,14 +99,14 @@ def create(
                 name, model_name, hf_repo, revision, backend, image_tag,
                 gpu_ids, tensor_parallel, max_model_len, dtype, pinned,
                 idle_timeout_s, target_concurrency, max_loras, max_lora_rank,
-                extra_args_json
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                extra_args_json, node_label
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 name, model_name, hf_repo, revision, backend, image_tag,
                 gpu_csv, tensor_parallel, max_model_len, dtype, 1 if pinned else 0,
                 idle_timeout_s, target_concurrency, max_loras, max_lora_rank,
-                extra_json,
+                extra_json, node_label,
             ),
         )
     except sqlite3.IntegrityError as e:
