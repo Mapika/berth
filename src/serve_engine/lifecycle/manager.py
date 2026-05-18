@@ -432,7 +432,25 @@ class LifecycleManager:
                     "engine_config_container_path": container_config_path,
                     "deployment_id": dep.id,
                 }
-                started = await link.start_deployment(agent_plan)
+                # Any failure dispatching to the remote agent must mark
+                # the row failed so it doesn't sit in 'loading' forever
+                # — the local path has wait_healthy doing this, the
+                # remote path needs its own.
+                try:
+                    started = await link.start_deployment(agent_plan)
+                except Exception as e:
+                    msg = f"remote start_deployment failed: {e}"
+                    log.exception(
+                        "remote deploy %s on node %s failed",
+                        dep.id, target_node_id,
+                    )
+                    dep_store.update_status(
+                        self._conn, dep.id, "failed", last_error=msg,
+                    )
+                    await self._emit(
+                        "deployment.failed", dep_id=dep.id, error=msg,
+                    )
+                    raise RuntimeError(msg) from e
                 dep_store.set_container(
                     self._conn, dep.id,
                     container_id=started.container_id,
