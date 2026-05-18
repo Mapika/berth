@@ -117,6 +117,7 @@ async def serve(cfg: config.ResolvedConfig, sock_path: Path) -> None:
         topology=topology,
         configs_dir=config.CONFIGS_DIR,
         leader_url=cfg.cluster_url,
+        resolved_cfg=cfg,
     )
 
     if sock_path.exists():

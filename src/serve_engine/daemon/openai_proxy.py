@@ -10,6 +10,7 @@ from fastapi.responses import StreamingResponse
 
 from serve_engine.auth.middleware import require_auth_dep
 from serve_engine.backends.base import Backend
+from serve_engine.cluster.agent_link import ENGINE_TIMEOUT
 from serve_engine.cluster.agent_registry import AgentRegistry
 from serve_engine.lifecycle.adapter_router import (
     UnknownModel,
@@ -27,9 +28,6 @@ from serve_engine.store import service_routes as _route_store
 from serve_engine.store import usage_events as _usage_events_store
 
 router = APIRouter()
-
-ENGINE_TIMEOUT = httpx.Timeout(connect=10.0, read=None, write=30.0, pool=30.0)
-
 
 def make_engine_client(base_url: str) -> httpx.AsyncClient:
     """Factory wrapper so tests can monkeypatch transport."""

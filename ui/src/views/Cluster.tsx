@@ -325,9 +325,13 @@ function GpuStrip({ gpu, totalInNode }: { gpu: NodeGpu; totalInNode: number }) {
 
 function NodeDetail({
   node,
+  deployments,
+  models,
   onRemove,
 }: {
   node: Node
+  deployments: any[]
+  models: any[]
   onRemove?: () => void
 }) {
   const detail = useQuery({
@@ -335,20 +339,10 @@ function NodeDetail({
     queryFn: () => api.getNode(node.id),
     refetchInterval: 5000,
   })
-  const deps = useQuery({
-    queryKey: ['deps'],
-    queryFn: api.listDeployments,
-    refetchInterval: 5000,
-  })
-  const models = useQuery({
-    queryKey: ['models'],
-    queryFn: api.listModels,
-    staleTime: 30_000,
-  })
   const gpus = detail.data?.gpus ?? []
   const totalVram = gpus.reduce((a, g) => a + g.total_vram_mb, 0)
   const isLocal = node.label === 'local'
-  const onNode = ((deps.data ?? []) as any[]).filter(
+  const onNode = deployments.filter(
     d =>
       (d.node_id === node.id || (isLocal && (!d.node_id || d.node_id === 0))) &&
       d.status !== 'stopped',
@@ -440,7 +434,7 @@ function NodeDetail({
             ) : (
               <div className="space-y-2">
                 {onNode.map((d: any) => {
-                  const m = (models.data ?? []).find(
+                  const m = models.find(
                     (x: any) => x.id === d.model_id,
                   )
                   return (
@@ -701,6 +695,16 @@ export default function Cluster() {
     queryFn: api.getClusterInfo,
     staleTime: 60_000,
   })
+  const depsQ = useQuery({
+    queryKey: ['deps'],
+    queryFn: api.listDeployments,
+    refetchInterval: 5000,
+  })
+  const modelsQ = useQuery({
+    queryKey: ['models'],
+    queryFn: api.listModels,
+    staleTime: 30_000,
+  })
   const [selectedId, setSelectedId] = useState<number | null>(null)
 
   const nodes = nodesQ.data?.nodes ?? []
@@ -816,6 +820,8 @@ export default function Cluster() {
           </div>
           <NodeDetail
             node={selected}
+            deployments={depsQ.data ?? []}
+            models={modelsQ.data ?? []}
             onRemove={
               selected.label === 'local'
                 ? undefined

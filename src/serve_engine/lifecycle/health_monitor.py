@@ -33,6 +33,7 @@ class HealthMonitor:
         conn: sqlite3.Connection,
         backends: dict[str, Backend],
         manager,
+        agent_registry=None,
         interval_s: float = 30.0,
         max_consecutive_failures: int = 3,
         client_factory: Callable[[], httpx.AsyncClient] = _default_client_factory,
@@ -40,6 +41,9 @@ class HealthMonitor:
         self._conn = conn
         self._backends = backends
         self._manager = manager
+        # Registry is optional so single-node tests can construct a
+        # HealthMonitor without wiring a cluster. Remote probes need it.
+        self._registry = agent_registry
         self._interval_s = interval_s
         self._max_failures = max_consecutive_failures
         self._client_factory = client_factory
@@ -66,15 +70,16 @@ class HealthMonitor:
                     # The agent does a localhost httpx call inside its
                     # own host and ships back the status.
                     url = f"<tunnel>{backend.health_path}"
-                    registry = getattr(
-                        self._manager, "_registry", None,
+                    link = (
+                        self._registry.get(d.node_id) if self._registry else None
                     )
-                    link = registry.get(d.node_id) if registry else None
-                    if link is None or not link.is_ready:
-                        # Agent disconnected — don't penalise the row; the
-                        # node-status watcher already flagged it.
-                        continue
-                    if d.container_id is None:
+                    if (
+                        link is None
+                        or not link.is_ready
+                        or d.container_id is None
+                    ):
+                        # Agent disconnected or row mid-creation — don't
+                        # penalise; node-status watcher handles liveness.
                         continue
                     try:
                         status_code = await link.probe_container(

@@ -158,6 +158,63 @@ class AgentFrameDispatcher:
         finally:
             self._inflight.pop(frame.stream_id, None)
 
+    async def _run_log_stream(self, frame: LogStream) -> None:
+        """Stream docker logs for `frame.container_id` back as LogChunks.
+
+        Bridges docker-py's blocking iterator on a worker thread into an
+        asyncio.Queue the main task drains. Always emits a final eof
+        chunk so the leader-side queue unblocks even on cancellation."""
+        import threading
+
+        q: asyncio.Queue = asyncio.Queue()
+        sentinel: object = object()
+        loop = asyncio.get_running_loop()
+
+        def _pump() -> None:
+            try:
+                for chunk in self._docker.stream_logs_iter(
+                    frame.container_id, tail=frame.tail, follow=frame.follow,
+                ):
+                    if not isinstance(chunk, bytes):
+                        chunk = str(chunk).encode("utf-8", errors="replace")
+                    asyncio.run_coroutine_threadsafe(q.put(chunk), loop)
+            except Exception as e:
+                asyncio.run_coroutine_threadsafe(
+                    q.put(f"[serve-engine] log error: {e}\n".encode()), loop,
+                )
+            finally:
+                asyncio.run_coroutine_threadsafe(q.put(sentinel), loop)
+
+        threading.Thread(target=_pump, daemon=True).start()
+
+        async def _emit(body: bytes, *, eof: bool) -> None:
+            await self._send(encode_frame(LogChunk(
+                stream_id=frame.stream_id,
+                body_b64=base64.b64encode(body).decode("ascii") if body else "",
+                eof=eof,
+            )))
+
+        try:
+            while True:
+                chunk = await q.get()
+                if chunk is sentinel:
+                    await _emit(b"", eof=True)
+                    return
+                await _emit(chunk, eof=False)
+        except asyncio.CancelledError:
+            try:
+                await _emit(b"", eof=True)
+            except Exception:
+                pass
+            raise
+        except Exception as e:
+            try:
+                await _emit(f"[serve-engine] {e}\n".encode(), eof=True)
+            except Exception:
+                pass
+        finally:
+            self._inflight.pop(frame.stream_id, None)
+
 
 # ---------------------------------------------------------------------------
 # Production runner — connects to the leader over mTLS WSS and reconnects
@@ -171,76 +228,12 @@ def _rehydrate_docker_kwargs(kw: dict) -> dict:
     from docker.types import Ulimit  # type: ignore[import-untyped]
     out = dict(kw)
     ulimits = out.get("ulimits")
-    if ulimits and isinstance(ulimits, list) and ulimits and isinstance(ulimits[0], dict):
+    if ulimits and isinstance(ulimits, list) and isinstance(ulimits[0], dict):
         out["ulimits"] = [
             Ulimit(name=u.get("name"), soft=u.get("soft"), hard=u.get("hard"))
             for u in ulimits
         ]
     return out
-
-
-    async def _run_log_stream(self, frame: LogStream) -> None:
-        """Stream docker logs for `frame.container_id` back as LogChunks.
-
-        Uses docker-py's blocking iterator on a worker thread; bridges
-        each yielded chunk into an asyncio.Queue the main task drains.
-        Cancellation closes the queue and lets the thread drain
-        naturally (small drain-thread leak, bounded by container life)."""
-        q: asyncio.Queue = asyncio.Queue()
-        SENTINEL = object()
-        loop = asyncio.get_running_loop()
-
-        def _pump():
-            try:
-                it = self._docker.stream_logs_iter(
-                    frame.container_id,
-                    tail=frame.tail,
-                    follow=frame.follow,
-                )
-                for chunk in it:
-                    if not isinstance(chunk, bytes):
-                        chunk = str(chunk).encode("utf-8", errors="replace")
-                    asyncio.run_coroutine_threadsafe(q.put(chunk), loop)
-            except Exception as e:
-                asyncio.run_coroutine_threadsafe(
-                    q.put(f"[serve-engine] log error: {e}\n".encode()),
-                    loop,
-                )
-            finally:
-                asyncio.run_coroutine_threadsafe(q.put(SENTINEL), loop)
-
-        import threading
-        t = threading.Thread(target=_pump, daemon=True)
-        t.start()
-        try:
-            while True:
-                chunk = await q.get()
-                if chunk is SENTINEL:
-                    await self._send(encode_frame(LogChunk(
-                        stream_id=frame.stream_id,
-                        body_b64="", eof=True,
-                    )))
-                    break
-                await self._send(encode_frame(LogChunk(
-                    stream_id=frame.stream_id,
-                    body_b64=base64.b64encode(chunk).decode("ascii"),
-                    eof=False,
-                )))
-        except asyncio.CancelledError:
-            raise
-        except Exception as e:
-            try:
-                await self._send(encode_frame(LogChunk(
-                    stream_id=frame.stream_id,
-                    body_b64=base64.b64encode(
-                        f"[serve-engine] {e}\n".encode()
-                    ).decode("ascii"),
-                    eof=True,
-                )))
-            except Exception:
-                pass
-        finally:
-            self._inflight.pop(frame.stream_id, None)
 
 
 class _DockerAdapter:
@@ -342,9 +335,8 @@ class _HttpxAdapter:
     """Adapter that hands the dispatcher an async iterator of HTTP chunks."""
 
     def __init__(self):
-        self._client = httpx.AsyncClient(
-            timeout=httpx.Timeout(connect=10.0, read=None, write=30.0, pool=30.0),
-        )
+        from serve_engine.cluster.agent_link import ENGINE_TIMEOUT
+        self._client = httpx.AsyncClient(timeout=ENGINE_TIMEOUT)
 
     async def stream(self, method, url, headers, body):
         async def gen():

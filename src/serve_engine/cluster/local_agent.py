@@ -6,7 +6,11 @@ from typing import Any
 
 import httpx
 
-from serve_engine.cluster.agent_link import ProxyResponseChunk, StartedContainer
+from serve_engine.cluster.agent_link import (
+    ENGINE_TIMEOUT,
+    ProxyResponseChunk,
+    StartedContainer,
+)
 from serve_engine.lifecycle.docker_client import DockerClient
 
 
@@ -74,7 +78,7 @@ class LocalAgentLink:
         client = httpx.AsyncClient(
             base_url=base,
             transport=self._transport,
-            timeout=httpx.Timeout(connect=10.0, read=None, write=30.0, pool=30.0),
+            timeout=ENGINE_TIMEOUT,
         )
         try:
             async with client.stream(method, path, headers=headers, content=body) as resp:

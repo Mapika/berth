@@ -65,6 +65,7 @@ def build_apps(
     configs_dir: Path | None = None,
     serve_home: Path | None = None,
     leader_url: str | None = None,
+    resolved_cfg: object | None = None,
 ) -> tuple[FastAPI, FastAPI, FastAPI]:
     """Returns (public_app, cluster_app, uds_app) sharing one LifecycleManager.
 
@@ -130,6 +131,7 @@ def build_apps(
         conn=conn,
         backends=backends,
         manager=manager,
+        agent_registry=agent_registry,
     )
     # Predictor pre-warms likely-needed adapters on a fixed interval.
     # Operators tune it with ~/.serve/predictor.yaml.
@@ -199,6 +201,11 @@ def build_apps(
         app.state.ca_fingerprint = ca_fingerprint
         app.state.enrollment_tokens = enrollment_tokens
         app.state.leader_url = resolved_leader_url
+        # Stash the resolved config so /admin/cluster + /admin/config
+        # don't re-parse config.toml on every poll. None for the
+        # build_app legacy path (tests) — admin routes fall back to a
+        # fresh resolve when absent.
+        app.state.resolved_cfg = resolved_cfg
 
     # public_app: external client surface. Owns the lifespan.
     public_app = FastAPI(

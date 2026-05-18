@@ -13,6 +13,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
+from serve_engine import config as _cfg
 from serve_engine.auth.middleware import require_auth_dep
 from serve_engine.backends.base import Backend
 from serve_engine.lifecycle.manager import LifecycleManager
@@ -98,7 +99,11 @@ def get_backends(request: Request) -> dict[str, Backend]:
     return request.app.state.backends
 
 
-class CreateDeploymentRequest(BaseModel):
+class _DeploymentRequestBase(BaseModel):
+    """Shared fields between create-deployment and create-service-profile.
+
+    `node_label`: None / "" / "local" → run on the leader host. Any other
+    value must match the label of an enrolled, currently-ready node."""
     model_config = {"protected_namespaces": ()}
     model_name: str
     hf_repo: str
@@ -114,29 +119,15 @@ class CreateDeploymentRequest(BaseModel):
     target_concurrency: int | None = None
     max_loras: int = 0
     extra_args: dict[str, str] = {}
-    # Target node label. None / "" / "local" → run on the leader host.
-    # Anything else must be the label of an enrolled, currently-ready node.
     node_label: str | None = None
 
 
-class CreateServiceProfileRequest(BaseModel):
-    model_config = {"protected_namespaces": ()}
+class CreateDeploymentRequest(_DeploymentRequestBase):
+    pass
+
+
+class CreateServiceProfileRequest(_DeploymentRequestBase):
     name: str
-    model_name: str
-    hf_repo: str
-    revision: str = "main"
-    backend: str | None = None
-    image_tag: str | None = None
-    gpu_ids: list[int]
-    tensor_parallel: int | None = None
-    max_model_len: int = 8192
-    dtype: str = "auto"
-    pinned: bool = False
-    idle_timeout_s: int | None = None
-    target_concurrency: int | None = None
-    max_loras: int = 0
-    extra_args: dict[str, str] = {}
-    node_label: str | None = None
 
 
 class CreateServiceRouteRequest(BaseModel):
@@ -201,6 +192,36 @@ def _profile_to_plan(profile: profile_store.ServiceProfile) -> DeploymentPlan:
     )
 
 
+def _request_to_plan(
+    body: _DeploymentRequestBase,
+    *,
+    backend_name: str,
+    image_tag: str,
+    tensor_parallel: int,
+    max_lora_rank: int,
+) -> DeploymentPlan:
+    """Shared DeploymentPlan construction for create-deployment +
+    create-service-profile. Field set must match _DeploymentRequestBase."""
+    return DeploymentPlan(
+        model_name=body.model_name,
+        hf_repo=body.hf_repo,
+        revision=body.revision,
+        backend=backend_name,
+        image_tag=image_tag,
+        gpu_ids=body.gpu_ids,
+        tensor_parallel=tensor_parallel,
+        max_model_len=body.max_model_len,
+        dtype=body.dtype,
+        pinned=body.pinned,
+        idle_timeout_s=body.idle_timeout_s,
+        target_concurrency=body.target_concurrency,
+        max_loras=body.max_loras,
+        max_lora_rank=max_lora_rank,
+        extra_args=dict(body.extra_args),
+        node_label=body.node_label,
+    )
+
+
 @router.get("/deployments")
 def list_deployments(
     conn: sqlite3.Connection = Depends(get_conn),
@@ -246,23 +267,9 @@ async def create_deployment(
     # the engine container.
     max_lora_rank = _max_lora_rank_from_extra(body.extra_args)
     try:
-        plan = DeploymentPlan(
-            model_name=body.model_name,
-            hf_repo=body.hf_repo,
-            revision=body.revision,
-            backend=backend_name,
-            image_tag=image_tag,
-            gpu_ids=body.gpu_ids,
-            tensor_parallel=tp,
-            max_model_len=body.max_model_len,
-            dtype=body.dtype,
-            pinned=body.pinned,
-            idle_timeout_s=body.idle_timeout_s,
-            target_concurrency=body.target_concurrency,
-            max_loras=body.max_loras,
-            max_lora_rank=max_lora_rank,
-            extra_args=dict(body.extra_args),
-            node_label=body.node_label,
+        plan = _request_to_plan(
+            body, backend_name=backend_name, image_tag=image_tag,
+            tensor_parallel=tp, max_lora_rank=max_lora_rank,
         )
     except ValueError as e:
         raise HTTPException(400, str(e)) from e
@@ -299,23 +306,9 @@ def create_service_profile(
     tp = body.tensor_parallel or len(body.gpu_ids)
     max_lora_rank = _max_lora_rank_from_extra(body.extra_args)
     try:
-        plan = DeploymentPlan(
-            model_name=body.model_name,
-            hf_repo=body.hf_repo,
-            revision=body.revision,
-            backend=backend_name,
-            image_tag=image_tag,
-            gpu_ids=body.gpu_ids,
-            tensor_parallel=tp,
-            max_model_len=body.max_model_len,
-            dtype=body.dtype,
-            pinned=body.pinned,
-            idle_timeout_s=body.idle_timeout_s,
-            target_concurrency=body.target_concurrency,
-            max_loras=body.max_loras,
-            max_lora_rank=max_lora_rank,
-            extra_args=dict(body.extra_args),
-            node_label=body.node_label,
+        plan = _request_to_plan(
+            body, backend_name=backend_name, image_tag=image_tag,
+            tensor_parallel=tp, max_lora_rank=max_lora_rank,
         )
     except ValueError as e:
         raise HTTPException(400, str(e)) from e
@@ -1377,6 +1370,15 @@ def admin_nodes_remove(
 # ---------------------------------------------------------------------------
 
 
+def _resolved_cfg(request: Request):
+    """Cached ResolvedConfig from app.state, or freshly resolved as a
+    fallback (the build_app legacy path used by tests doesn't pass one)."""
+    cached = getattr(request.app.state, "resolved_cfg", None)
+    if cached is not None:
+        return cached
+    return _cfg.resolve_config()
+
+
 @router.get("/cluster")
 def admin_cluster_info(request: Request):
     """Snapshot of cluster transport state: leader URLs the daemon advertises,
@@ -1386,8 +1388,6 @@ def admin_cluster_info(request: Request):
     from datetime import UTC, datetime
 
     from cryptography import x509
-
-    from serve_engine import config as _cfg
 
     server_crt_path = _cfg.LEADER_DIR / "server.crt"
     server_info: dict[str, object] = {"present": False}
@@ -1415,10 +1415,7 @@ def admin_cluster_info(request: Request):
         except Exception as e:  # pragma: no cover — defensive
             server_info = {"present": True, "error": str(e)}
 
-    # The daemon's resolved config isn't kept on app.state today; recompute
-    # via the same resolver so the UI shows what the running process is
-    # advertising. resolve_config is cheap (file + autodetect + dataclass).
-    cfg = _cfg.resolve_config()
+    cfg = _resolved_cfg(request)
     return {
         "leader_url": request.app.state.leader_url,
         "ca_fingerprint": request.app.state.ca_fingerprint,
@@ -1436,9 +1433,7 @@ def admin_config(request: Request):
     """Resolved address/TLS config + which source layer each field came from.
 
     Mirrors `serve config show` for the UI's Settings page."""
-    from serve_engine import config as _cfg
-
-    cfg = _cfg.resolve_config()
+    cfg = _resolved_cfg(request)
     return {
         "values": {
             "public_host": cfg.public_host,

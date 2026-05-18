@@ -47,7 +47,6 @@ class RemoteAgentLink:
         self._log_streams: dict[str, asyncio.Queue[LogChunk]] = {}
         self._send_lock = asyncio.Lock()
         self._shutdown = False
-        self._ready = True
 
     @property
     def node_id(self) -> int:
@@ -55,11 +54,10 @@ class RemoteAgentLink:
 
     @property
     def is_ready(self) -> bool:
-        return self._ready and not self._shutdown
+        return not self._shutdown
 
     def shutdown(self) -> None:
         self._shutdown = True
-        self._ready = False
         for fut in self._pending_ops.values():
             if not fut.done():
                 fut.set_exception(ConnectionError("agent disconnected"))

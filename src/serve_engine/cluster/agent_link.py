@@ -4,6 +4,15 @@ from collections.abc import AsyncIterator
 from dataclasses import dataclass
 from typing import Any, Protocol
 
+import httpx
+
+# Shared httpx timeout for engine-proxy traffic: long connect for cold
+# starts, no read deadline (streaming responses can run for minutes),
+# bounded write/pool. Used by every component that talks HTTP to an
+# engine container — direct proxy, LocalAgentLink, and the agent's
+# internal _HttpxAdapter.
+ENGINE_TIMEOUT = httpx.Timeout(connect=10.0, read=None, write=30.0, pool=30.0)
+
 
 @dataclass(frozen=True)
 class StartedContainer:

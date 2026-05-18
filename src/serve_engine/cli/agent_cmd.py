@@ -17,6 +17,9 @@ app.add_typer(agent_app, name="agent")
 
 
 def _serve_home() -> Path:
+    """Lazy ~/.serve resolution honouring SERVE_HOME at call time so tests
+    that monkeypatch the env var see the override (config.SERVE_DIR is
+    fixed at import time)."""
     return Path(os.environ.get("SERVE_HOME", str(Path.home() / ".serve")))
 
 
