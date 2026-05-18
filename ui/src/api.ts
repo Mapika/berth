@@ -156,6 +156,99 @@ export const api = {
 
   // Request inspector.
   listRequests: () => jfetch<RequestTrace[]>('GET', '/admin/requests'),
+
+  // Cluster / nodes.
+  listNodes: () => jfetch<{ nodes: Node[] }>('GET', '/admin/nodes'),
+  getNode: (id: number) =>
+    jfetch<{ node: Node; gpus: NodeGpu[] }>('GET', `/admin/nodes/${id}`),
+  enrollNode: (label: string) =>
+    jfetch<EnrollResponse>('POST', '/admin/nodes/enroll', { label }),
+  removeNode: (id: number) => jfetch<void>('DELETE', `/admin/nodes/${id}`),
+  getClusterInfo: () => jfetch<ClusterInfo>('GET', '/admin/cluster'),
+  getConfig: () => jfetch<DaemonConfig>('GET', '/admin/config'),
+}
+
+// Cluster types.
+
+export type Node = {
+  id: number
+  label: string
+  fingerprint: string
+  reachable_as: string | null
+  status: 'ready' | 'unreachable' | 'gone' | string
+  first_seen: number
+  last_seen: number
+  agent_version: string | null
+  cpu_count: number
+  total_ram_mb: number
+  gpu_count: number
+  total_vram_mb: number
+}
+
+export type NodeGpu = {
+  node_id: number
+  gpu_index: number
+  name: string
+  total_vram_mb: number
+  driver_version: string | null
+}
+
+export type EnrollResponse = {
+  token: string
+  leader_url: string
+  ca_cert: string
+  ca_fingerprint: string
+}
+
+export function enrollmentUri(r: EnrollResponse): string {
+  const q = new URLSearchParams({
+    leader: r.leader_url,
+    token: r.token,
+    ca_fp: r.ca_fingerprint,
+  })
+  return `serve://enroll?${q.toString()}`
+}
+
+export type LeaderServerCert =
+  | { present: false }
+  | {
+      present: true
+      san: string[]
+      not_after: string
+      days_left: number
+    }
+  | { present: true; error: string }
+
+export type ClusterInfo = {
+  leader_url: string
+  ca_fingerprint: string
+  public_url: string
+  cluster_url: string
+  public_bind: string
+  cluster_bind: string
+  public_tls_configured: boolean
+  leader_server_cert: LeaderServerCert
+}
+
+export type ConfigSource =
+  | 'flag' | 'env' | 'file' | 'autodetect' | 'default'
+  | `inherit:${string}` | `env:${string}` | string
+
+export type DaemonConfig = {
+  values: {
+    public_host: string
+    public_port: number
+    public_bind: string
+    cluster_host: string
+    cluster_port: number
+    cluster_bind: string
+    public_cert_path: string | null
+    public_key_path: string | null
+    leader_url_override: string | null
+  }
+  sources: Record<string, ConfigSource>
+  config_file: string
+  config_file_exists: boolean
 }
 
 export type RequestTrace = {

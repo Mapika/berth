@@ -10,9 +10,12 @@ import Keys from './views/Keys'
 import Logs from './views/Logs'
 import Services from './views/Services'
 import Requests from './views/Requests'
+import Cluster from './views/Cluster'
+import Settings from './views/Settings'
 
 type View =
   | 'dashboard'
+  | 'cluster'
   | 'models'
   | 'adapters'
   | 'services'
@@ -21,9 +24,11 @@ type View =
   | 'requests'
   | 'keys'
   | 'logs'
+  | 'settings'
 
 const VIEWS: { id: View; label: string }[] = [
   { id: 'dashboard', label: 'dashboard' },
+  { id: 'cluster', label: 'cluster' },
   { id: 'models', label: 'models' },
   { id: 'adapters', label: 'adapters' },
   { id: 'services', label: 'services' },
@@ -32,6 +37,7 @@ const VIEWS: { id: View; label: string }[] = [
   { id: 'requests', label: 'requests' },
   { id: 'keys', label: 'keys' },
   { id: 'logs', label: 'logs' },
+  { id: 'settings', label: 'settings' },
 ]
 
 export default function App() {
@@ -80,6 +86,7 @@ export default function App() {
         <main className="flex-1 overflow-y-auto">
           <div key={view} className="max-w-[1280px] mx-auto px-8 py-12 enter">
             {view === 'dashboard' && <Dashboard />}
+            {view === 'cluster' && <Cluster />}
             {view === 'models' && <Models />}
             {view === 'adapters' && <Adapters />}
             {view === 'services' && <Services />}
@@ -88,6 +95,7 @@ export default function App() {
             {view === 'requests' && <Requests />}
             {view === 'keys' && <Keys />}
             {view === 'logs' && <Logs />}
+            {view === 'settings' && <Settings />}
           </div>
         </main>
       </div>

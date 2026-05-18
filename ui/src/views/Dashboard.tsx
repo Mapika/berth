@@ -137,6 +137,7 @@ export default function Dashboard() {
   const deps = useQuery({ queryKey: ['deps'], queryFn: api.listDeployments, refetchInterval: 2000 })
   const gpus = useQuery({ queryKey: ['gpus'], queryFn: api.listGpus, refetchInterval: 2000 })
   const models = useQuery({ queryKey: ['models'], queryFn: api.listModels, refetchInterval: 5000 })
+  const nodes = useQuery({ queryKey: ['nodes'], queryFn: api.listNodes, refetchInterval: 5000 })
   const [showAll, setShowAll] = useState(false)
   const [pendingId, setPendingId] = useState<number | null>(null)
   const [actionError, setActionError] = useState('')
@@ -164,7 +165,26 @@ export default function Dashboard() {
     <div className="space-y-14">
       <header className="flex items-baseline justify-between">
         <h2 className="text-2xl font-light tracking-tightish caret">dashboard</h2>
-        <div className="label">{(gpus.data ?? []).length} gpu / {active.length} active</div>
+        <div className="flex items-baseline gap-6">
+          {(() => {
+            const ns = nodes.data?.nodes ?? []
+            const ready = ns.filter((n: any) => n.status === 'ready').length
+            const remote = ns.filter((n: any) => n.label !== 'local').length
+            if (ns.length === 0) return null
+            return (
+              <div className="label" title="cluster nodes">
+                {remote === 0 ? (
+                  <>single-node</>
+                ) : (
+                  <>
+                    cluster <span className="text-dim">{ready}/{ns.length}</span>
+                  </>
+                )}
+              </div>
+            )
+          })()}
+          <div className="label">{(gpus.data ?? []).length} gpu / {active.length} active</div>
+        </div>
       </header>
 
       <section className="space-y-6">

@@ -10,8 +10,9 @@ export default defineConfig({
   },
   server: {
     proxy: {
-      '/admin': 'http://127.0.0.1:11500',
-      '/v1':    'http://127.0.0.1:11500',
+      // Daemon serves TLS on 11500 now; secure:false skips self-signed verify.
+      '/admin': { target: 'https://127.0.0.1:11500', secure: false, changeOrigin: true },
+      '/v1':    { target: 'https://127.0.0.1:11500', secure: false, changeOrigin: true },
     },
   },
 })

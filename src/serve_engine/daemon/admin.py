@@ -1332,6 +1332,99 @@ def admin_nodes_remove(
 
 
 # ---------------------------------------------------------------------------
+# Cluster + config inspection — read-only views over the daemon's running
+# state, for the UI's Cluster / Settings pages.
+# ---------------------------------------------------------------------------
+
+
+@router.get("/cluster")
+def admin_cluster_info(request: Request):
+    """Snapshot of cluster transport state: leader URLs the daemon advertises,
+    CA fingerprint, server cert SAN/expiry, listener bindings.
+
+    Used by the UI's Cluster page to render the trust-domain summary."""
+    from datetime import UTC, datetime
+
+    from cryptography import x509
+
+    from serve_engine import config as _cfg
+
+    server_crt_path = _cfg.LEADER_DIR / "server.crt"
+    server_info: dict[str, object] = {"present": False}
+    if server_crt_path.exists():
+        try:
+            cert = x509.load_pem_x509_certificate(server_crt_path.read_bytes())
+            try:
+                san = cert.extensions.get_extension_for_class(
+                    x509.SubjectAlternativeName,
+                ).value
+                sans = [
+                    str(e.value) if isinstance(e, x509.IPAddress) else e.value
+                    for e in san
+                ]
+            except x509.ExtensionNotFound:
+                sans = []
+            not_after = cert.not_valid_after_utc
+            days_left = (not_after - datetime.now(UTC)).days
+            server_info = {
+                "present": True,
+                "san": sans,
+                "not_after": not_after.isoformat(),
+                "days_left": days_left,
+            }
+        except Exception as e:  # pragma: no cover — defensive
+            server_info = {"present": True, "error": str(e)}
+
+    public_tls_configured = bool(
+        request.app.state.__dict__.get("public_tls_configured", False)
+    )
+    # The daemon's resolved config isn't kept on app.state today; recompute
+    # via the same resolver so the UI shows what the running process is
+    # advertising. resolve_config is cheap (file + autodetect + dataclass).
+    cfg = _cfg.resolve_config()
+    return {
+        "leader_url": request.app.state.leader_url,
+        "ca_fingerprint": request.app.state.ca_fingerprint,
+        "public_url": cfg.public_url,
+        "cluster_url": cfg.cluster_url,
+        "public_bind": f"{cfg.public_bind}:{cfg.public_port}",
+        "cluster_bind": f"{cfg.cluster_bind}:{cfg.cluster_port}",
+        "public_tls_configured": cfg.public_cert_path is not None,
+        "leader_server_cert": server_info,
+    }
+
+
+@router.get("/config")
+def admin_config(request: Request):  # noqa: ARG001
+    """Resolved address/TLS config + which source layer each field came from.
+
+    Mirrors `serve config show` for the UI's Settings page."""
+    from serve_engine import config as _cfg
+
+    cfg = _cfg.resolve_config()
+    return {
+        "values": {
+            "public_host": cfg.public_host,
+            "public_port": cfg.public_port,
+            "public_bind": cfg.public_bind,
+            "cluster_host": cfg.cluster_host,
+            "cluster_port": cfg.cluster_port,
+            "cluster_bind": cfg.cluster_bind,
+            "public_cert_path": (
+                str(cfg.public_cert_path) if cfg.public_cert_path else None
+            ),
+            "public_key_path": (
+                str(cfg.public_key_path) if cfg.public_key_path else None
+            ),
+            "leader_url_override": cfg.leader_url_override,
+        },
+        "sources": cfg.source,
+        "config_file": str(_cfg.CONFIG_FILE),
+        "config_file_exists": _cfg.CONFIG_FILE.exists(),
+    }
+
+
+# ---------------------------------------------------------------------------
 # Cert exchange — POST /admin/nodes/register
 #
 # This is the bootstrap path for a new agent: the enrollment token IS the
