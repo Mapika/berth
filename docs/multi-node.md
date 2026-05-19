@@ -607,6 +607,13 @@ engine, so no more bytes are pulled until the client drains a chunk.
 - **Early-close cleanup**: if the client disconnects, the streamer's
   `finally` cancels the reader task — no lingering pull on the upstream.
 
+## Production deploy
+
+For standing up a public-facing leader (Caddy + ACME TLS, systemd,
+proper auth + backups), see [deploy.md](deploy.md) and
+[caddy.md](caddy.md). `serve backup create` snapshots the DR set
+(db, ca/, key_pepper, config.toml).
+
 ## Roadmap
 
 Tracked in the design docs, in priority order:
