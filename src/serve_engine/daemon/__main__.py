@@ -95,7 +95,18 @@ async def serve(cfg: config.ResolvedConfig, sock_path: Path) -> None:
 
     public_cert = cfg.public_cert_path
     public_key = cfg.public_key_path
-    if public_cert is None or public_key is None:
+    behind_proxy = cfg.public_scheme.lower() == "http"
+    if behind_proxy:
+        # Reverse-proxy mode: Caddy/Nginx terminates TLS upstream and
+        # forwards to a plain-HTTP listener here.
+        public_cert = None
+        public_key = None
+        log_.info(
+            "public listener in reverse-proxy mode (plain HTTP). "
+            "Reverse proxy at %s must terminate TLS and forward to %s:%d.",
+            cfg.forwarded_allow_ips, cfg.public_bind, cfg.public_port,
+        )
+    elif public_cert is None or public_key is None:
         public_cert = cluster_crt
         public_key = cluster_key
         log_.warning(
@@ -123,12 +134,24 @@ async def serve(cfg: config.ResolvedConfig, sock_path: Path) -> None:
     if sock_path.exists():
         sock_path.unlink()
 
-    public_cfg = uvicorn.Config(
-        app=public_app,
-        host=cfg.public_bind, port=cfg.public_port,
-        ssl_keyfile=str(public_key), ssl_certfile=str(public_cert),
-        log_level="info",
-    )
+    public_uvicorn_kwargs: dict = {
+        "app": public_app,
+        "host": cfg.public_bind,
+        "port": cfg.public_port,
+        "log_level": "info",
+    }
+    if behind_proxy:
+        public_uvicorn_kwargs["proxy_headers"] = True
+        public_uvicorn_kwargs["forwarded_allow_ips"] = cfg.forwarded_allow_ips
+    else:
+        public_uvicorn_kwargs["ssl_keyfile"] = str(public_key)
+        public_uvicorn_kwargs["ssl_certfile"] = str(public_cert)
+        if cfg.trust_proxy_headers:
+            # Operator opted-in even with our own TLS (e.g. CDN that also
+            # terminates TLS). Honour the headers.
+            public_uvicorn_kwargs["proxy_headers"] = True
+            public_uvicorn_kwargs["forwarded_allow_ips"] = cfg.forwarded_allow_ips
+    public_cfg = uvicorn.Config(**public_uvicorn_kwargs)
     from serve_engine.cluster.tls_ws_protocol import TLSAwareWebSocketProtocol
 
     cluster_cfg = uvicorn.Config(

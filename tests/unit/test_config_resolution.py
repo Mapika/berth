@@ -67,6 +67,28 @@ def test_leader_url_override(monkeypatch):
     assert r.source["leader_url"] == "env:SERVE_LEADER_URL"
 
 
+def test_reverse_proxy_mode_defaults(monkeypatch):
+    """Default config keeps TLS-direct semantics — no proxy mode."""
+    monkeypatch.setattr(config, "autodetect_outbound_ip", lambda: None)
+    r = config.resolve_config(env={})
+    assert r.public_scheme == "https"
+    assert r.trust_proxy_headers is False
+    assert r.forwarded_allow_ips == "127.0.0.1"
+
+
+def test_reverse_proxy_mode_from_env(monkeypatch):
+    monkeypatch.setattr(config, "autodetect_outbound_ip", lambda: None)
+    r = config.resolve_config(env={
+        "SERVE_PUBLIC_SCHEME": "http",
+        "SERVE_TRUST_PROXY_HEADERS": "true",
+        "SERVE_FORWARDED_ALLOW_IPS": "10.0.0.5,10.0.0.6",
+    })
+    assert r.public_scheme == "http"
+    assert r.trust_proxy_headers is True
+    assert r.forwarded_allow_ips == "10.0.0.5,10.0.0.6"
+    assert r.public_url == f"http://{r.public_host}:{r.public_port}"
+
+
 def test_save_config_file_round_trip(_isolated_serve_home):
     config.save_config_file({
         "public": {"host": "a.com", "port": 8443},

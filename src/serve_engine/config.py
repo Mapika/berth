@@ -45,12 +45,15 @@ class ResolvedConfig:
     cluster_bind: str
     public_cert_path: Path | None
     public_key_path: Path | None
-    leader_url_override: str | None  # SERVE_LEADER_URL
+    public_scheme: str = "https"  # "http" when behind a TLS-terminating proxy
+    trust_proxy_headers: bool = False
+    forwarded_allow_ips: str = "127.0.0.1"
+    leader_url_override: str | None = None  # SERVE_LEADER_URL
     source: dict[str, str] = field(default_factory=dict)
 
     @property
     def public_url(self) -> str:
-        return f"https://{self.public_host}:{self.public_port}"
+        return f"{self.public_scheme}://{self.public_host}:{self.public_port}"
 
     @property
     def cluster_url(self) -> str:
@@ -177,6 +180,10 @@ def resolve_config(
         if env_key and env.get(env_key):
             source[field_name] = "env"
             v = env[env_key]
+            # bool first — bool is a subclass of int in Python; int() of
+            # "true" would otherwise raise.
+            if isinstance(default, bool):
+                return v
             return int(v) if isinstance(default, int) else v
         if file_key in file_section:
             source[field_name] = "file"
@@ -227,6 +234,26 @@ def resolve_config(
         "public_key_path", cli_public_key, "SERVE_PUBLIC_KEY",
         tls_file, "key", None,
     )
+    # Reverse-proxy mode. When set, the daemon binds plain HTTP on the
+    # public listener (Caddy/Nginx terminates TLS upstream) and trusts
+    # X-Forwarded-* headers from the configured proxy IPs.
+    public_scheme = _pick(
+        "public_scheme", None, "SERVE_PUBLIC_SCHEME",
+        public_file, "scheme", "https",
+    )
+    trust_proxy_headers_raw = _pick(
+        "trust_proxy_headers", None, "SERVE_TRUST_PROXY_HEADERS",
+        public_file, "trust_proxy_headers", False,
+    )
+    trust_proxy_headers = (
+        str(trust_proxy_headers_raw).lower() in {"1", "true", "yes"}
+        if not isinstance(trust_proxy_headers_raw, bool)
+        else trust_proxy_headers_raw
+    )
+    forwarded_allow_ips = _pick(
+        "forwarded_allow_ips", None, "SERVE_FORWARDED_ALLOW_IPS",
+        public_file, "forwarded_allow_ips", "127.0.0.1",
+    )
     leader_override = env.get("SERVE_LEADER_URL")
     if leader_override:
         source["leader_url"] = "env:SERVE_LEADER_URL"
@@ -240,6 +267,9 @@ def resolve_config(
         cluster_bind=str(cluster_bind),
         public_cert_path=Path(public_cert) if public_cert else None,
         public_key_path=Path(public_key) if public_key else None,
+        public_scheme=str(public_scheme),
+        trust_proxy_headers=bool(trust_proxy_headers),
+        forwarded_allow_ips=str(forwarded_allow_ips),
         leader_url_override=leader_override,
         source=source,
     )
