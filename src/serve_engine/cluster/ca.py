@@ -34,6 +34,13 @@ def _name(cn: str) -> x509.Name:
 def generate_ca(ca_dir: Path, *, common_name: str) -> None:
     ca_dir = Path(ca_dir)
     ca_dir.mkdir(parents=True, exist_ok=True)
+    # 0o700 on the dir is belt-and-braces — the CA private key inside
+    # is mode 0o600, but if backups or other tools list the directory
+    # we want the listing itself locked down.
+    try:
+        ca_dir.chmod(0o700)
+    except OSError:
+        pass
     key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
     now = _dt.datetime.now(_dt.UTC)
     ski = x509.SubjectKeyIdentifier.from_public_key(key.public_key())

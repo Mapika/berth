@@ -1,0 +1,67 @@
+"""`serve backup` — snapshot the daemon's recoverable state to a tarball.
+
+The DR set is: ~/.serve/db.sqlite (taken via SQLite's `.backup` so the
+WAL is consistent), ~/.serve/ca/ (CA cert + private key — the
+keys-to-the-kingdom for the cluster), ~/.serve/key_pepper (without it
+every API key falls), and ~/.serve/config.toml. Model weights and the
+logs/ directory are deliberately excluded — model weights are large
+and re-downloadable, logs are an operations artefact.
+"""
+from __future__ import annotations
+
+import sqlite3
+import tarfile
+import time
+from pathlib import Path
+
+import typer
+
+from serve_engine import config
+from serve_engine.cli import app
+
+backup_app = typer.Typer(help="Snapshot and restore daemon state.")
+app.add_typer(backup_app, name="backup")
+
+
+@backup_app.command("create")
+def create_backup(
+    dest: str = typer.Argument(
+        ...,
+        help="Path to write the tarball, e.g. /var/backups/serve-2026-05-20.tar.gz",
+    ),
+) -> None:
+    """Tarball db.sqlite (consistent .backup snapshot), ca/, key_pepper, config.toml."""
+    dest_path = Path(dest)
+    dest_path.parent.mkdir(parents=True, exist_ok=True)
+
+    # Take a hot-snapshot of the sqlite file. Using .backup avoids the
+    # well-known WAL-tail truncation bug of a naive `cp db.sqlite`.
+    snapshot_path = (
+        config.SERVE_DIR / f".db-backup-{int(time.time())}.sqlite"
+    )
+    src = sqlite3.connect(config.DB_PATH)
+    dst = sqlite3.connect(snapshot_path)
+    try:
+        with dst:
+            src.backup(dst)
+    finally:
+        src.close()
+        dst.close()
+
+    try:
+        with tarfile.open(dest_path, "w:gz") as tar:
+            tar.add(str(snapshot_path), arcname="db.sqlite")
+            if (config.SERVE_DIR / "ca").exists():
+                tar.add(
+                    str(config.SERVE_DIR / "ca"), arcname="ca",
+                )
+            if (config.SERVE_DIR / "key_pepper").exists():
+                tar.add(
+                    str(config.SERVE_DIR / "key_pepper"),
+                    arcname="key_pepper",
+                )
+            if config.CONFIG_FILE.exists():
+                tar.add(str(config.CONFIG_FILE), arcname="config.toml")
+    finally:
+        snapshot_path.unlink(missing_ok=True)
+    typer.echo(f"wrote backup → {dest_path}")
