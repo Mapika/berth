@@ -1,0 +1,12 @@
+[public]
+host = "serve.example.com"
+scheme = "http"
+bind = "127.0.0.1"
+port = 11500
+trust_proxy_headers = true
+forwarded_allow_ips = "127.0.0.1"
+
+[cluster]
+host = "serve.example.com"
+bind = "0.0.0.0"
+port = 11501

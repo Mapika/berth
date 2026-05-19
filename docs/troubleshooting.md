@@ -1,0 +1,162 @@
+# Troubleshooting
+
+Start with:
+
+```bash
+serve doctor
+serve daemon status
+serve ps
+serve logs
+```
+
+Most failures are Docker, NVIDIA runtime, Hugging Face auth, TLS, or an engine
+that never became healthy.
+
+## Docker Cannot See The GPU
+
+Symptoms:
+
+- `serve doctor` warns about Docker GPU access.
+- Engine containers start and immediately fail.
+- Docker errors mention `nvidia`, `device_requests`, or CDI.
+
+Checks:
+
+```bash
+docker run --rm --gpus all nvidia/cuda:12.4.1-base-ubuntu22.04 nvidia-smi
+docker info | grep -i nvidia
+```
+
+Fix:
+
+- Install or repair `nvidia-container-toolkit`.
+- Restart Docker.
+- Re-run `serve doctor`.
+
+## Browser Warns About The Certificate
+
+First-run serve-engine uses a generated local CA when `[public_tls]` is not
+configured. Browsers and SDKs will not trust it by default.
+
+For quick local API testing:
+
+```bash
+curl -k https://127.0.0.1:11500/healthz
+```
+
+For a real exposed service, prefer:
+
+```bash
+serve deploy bootstrap --domain serve.example.com --behind-proxy
+```
+
+Then put Caddy or Nginx in front. See `docs/caddy.md`.
+
+## Model Download Fails
+
+Symptoms:
+
+- `serve pull` fails with a 401, 403, or gated-model message.
+- The model exists on Hugging Face but cannot be fetched.
+
+Fix:
+
+```bash
+export HF_TOKEN=hf_...
+serve pull owner/repo --name local-name
+```
+
+For private or gated models, make sure the token belongs to an account with
+access to the repo.
+
+## Engine Never Becomes Healthy
+
+Symptoms:
+
+- Deployment stays `loading`, then moves to `failed`.
+- `serve logs` shows engine startup errors.
+
+Checks:
+
+```bash
+serve ps
+serve logs
+docker ps -a --filter name=serve-
+```
+
+Common causes:
+
+- Bad engine image tag.
+- Model does not fit with the requested context/concurrency.
+- Engine-specific launch flag is invalid.
+- Hugging Face download path is incomplete.
+
+Try a smaller context or lower concurrency:
+
+```bash
+serve run qwen-0_5b --gpu 0 --engine vllm --ctx 1024 --max-seqs 4
+```
+
+## Placement Refuses To Start
+
+This is usually intentional. serve-engine estimated the requested deployment
+would not fit beside what is already loaded.
+
+Useful commands:
+
+```bash
+serve ps
+serve stop <deployment-id>
+serve run <model> --gpu 0 --ctx 2048 --max-seqs 8
+```
+
+Pinned deployments are not evicted automatically. Unpin or stop them first:
+
+```bash
+serve unpin <model-name>
+serve stop <deployment-id>
+```
+
+## Port Or Listener Confusion
+
+Defaults:
+
+- Public API/UI: `https://<public_host>:11500`
+- Cluster agent listener: `https://<cluster_host>:11501`
+- Local CLI control socket: `~/.serve/sock`
+
+Show resolved config:
+
+```bash
+serve config show
+```
+
+For local-only testing:
+
+```bash
+SERVE_PUBLIC_BIND=127.0.0.1 serve daemon start
+```
+
+For reverse proxy mode, use `docs/caddy.md` or:
+
+```bash
+serve deploy bootstrap --domain serve.example.com --behind-proxy
+```
+
+## API Key Fails
+
+Create a new admin key over the local socket:
+
+```bash
+serve key create web --tier admin
+```
+
+Then:
+
+```bash
+export SERVE_TOKEN=sk-...
+curl -k "$SERVE_URL/v1/models" -H "Authorization: Bearer $SERVE_TOKEN"
+```
+
+If the key pepper file was lost from `~/.serve/key_pepper`, old keys cannot be
+verified. Mint new keys and back up `db.sqlite` and `key_pepper` together.

@@ -1,5 +1,10 @@
 # serve-engine
 
+[![CI](https://github.com/Mapika/serve-engine/actions/workflows/ci.yml/badge.svg)](https://github.com/Mapika/serve-engine/actions/workflows/ci.yml)
+[![Release](https://github.com/Mapika/serve-engine/actions/workflows/release.yml/badge.svg)](https://github.com/Mapika/serve-engine/actions/workflows/release.yml)
+![Python](https://img.shields.io/badge/python-3.11%2B-blue)
+![License](https://img.shields.io/badge/license-Apache--2.0-blue)
+
 serve-engine is a small inference control plane for GPU boxes.
 
 It gives a host one OpenAI-compatible endpoint and manages the boring parts
@@ -18,6 +23,25 @@ The taste of the project is deliberately narrow:
 
 This is not trying to be a full ML platform. It is the thing I wanted between
 "run this container by hand" and "stand up a cluster stack".
+
+![serve-engine dashboard](docs/assets/ui-dashboard.png)
+
+## When To Use It
+
+Use serve-engine if:
+
+- You have one GPU box, or a few GPU boxes, and want one API endpoint.
+- You want vLLM/SGLang/TRT-LLM to stay replaceable.
+- You care about explicit routes, API keys, metrics, logs, and predictable
+  cleanup.
+- You would rather fail a launch than discover overload through a host OOM.
+
+Do not use it if:
+
+- You need Kubernetes-scale scheduling.
+- You are training or fine-tuning.
+- You need multi-host tensor parallelism.
+- You want a managed cloud abstraction.
 
 ## What Works
 
@@ -53,6 +77,20 @@ actually useful.
 - Python 3.11+
 - [`uv`](https://docs.astral.sh/uv/) recommended
 
+## Compatibility
+
+This is the test surface I actively care about right now:
+
+| Area | Current posture |
+|---|---|
+| OS | Linux |
+| GPU | NVIDIA |
+| Container runtime | Docker 24+ with NVIDIA GPU access |
+| Python | 3.11+ |
+| Engines | vLLM and SGLang tested end to end; TensorRT-LLM adapter present |
+| State | SQLite under `~/.serve` |
+| UI | Bundled Vite/React build served by the daemon |
+
 ## Install
 
 From source:
@@ -63,6 +101,17 @@ cd serve-engine
 uv tool install --editable .
 serve doctor
 ```
+
+From a GitHub release wheel:
+
+```bash
+uv tool install \
+  https://github.com/Mapika/serve-engine/releases/download/v0.2.0/serve_engine-0.2.0-py3-none-any.whl
+serve doctor
+```
+
+The project is not published to PyPI yet. Releases are GitHub artifacts for
+now.
 
 For development:
 
@@ -168,6 +217,25 @@ Stop it:
 
 ```bash
 serve stop
+```
+
+The happy path looks roughly like this:
+
+```text
+$ serve pull Qwen/Qwen2.5-0.5B-Instruct --name qwen-0_5b
+registered qwen-0_5b
+downloaded model files
+
+$ serve run qwen-0_5b --gpu 0 --engine vllm --pin
+deployment 1 loading
+deployment 1 ready
+
+$ serve ps
+ID  MODEL     BACKEND  GPU  STATUS  PIN
+1   qwen-0_5b vllm     0    ready   yes
+
+$ curl -k "$SERVE_URL/v1/chat/completions" ...
+{"choices":[{"message":{"role":"assistant","content":"OK"}}]}
 ```
 
 ## Service Routes
@@ -369,6 +437,17 @@ By default, serve-engine owns `~/.serve`. Override it with `SERVE_HOME`.
 - Use `--idle-timeout` for services that should leave the GPU when quiet.
 - Use service profiles when launch arguments need to be repeatable.
 - Use routes when the public model name should not be tied to one backend.
+- If something weird happens, see [docs/troubleshooting.md](docs/troubleshooting.md).
+
+## More Docs
+
+- [Deployment guide](docs/deploy.md)
+- [Caddy reverse proxy notes](docs/caddy.md)
+- [Multi-node guide](docs/multi-node.md)
+- [Predictor/prewarm notes](docs/predictor.md)
+- [Troubleshooting](docs/troubleshooting.md)
+- [Release process](docs/release.md)
+- [Examples](examples/)
 
 ## Performance Snapshot
 

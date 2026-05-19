@@ -1,0 +1,7 @@
+{
+  "name": "chat-default",
+  "match_model": "chat",
+  "profile_name": "qwen-vllm",
+  "priority": 10,
+  "enabled": true
+}

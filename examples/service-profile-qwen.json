@@ -1,0 +1,11 @@
+{
+  "name": "qwen-vllm",
+  "model_name": "qwen-vllm",
+  "hf_repo": "Qwen/Qwen2.5-0.5B-Instruct",
+  "revision": "main",
+  "backend": "vllm",
+  "gpu_ids": [0],
+  "max_model_len": 1024,
+  "target_concurrency": 4,
+  "pinned": true
+}
