@@ -146,6 +146,7 @@ class RemoteAgentLink:
         stream_id = secrets.token_hex(8)
         q: asyncio.Queue[LogChunk] = asyncio.Queue()
         self._log_streams[stream_id] = q
+        completed = False
         try:
             await self._send(LogStream(
                 stream_id=stream_id,
@@ -157,10 +158,11 @@ class RemoteAgentLink:
                 if chunk.body_b64:
                     yield base64.b64decode(chunk.body_b64)
                 if chunk.eof:
+                    completed = True
                     break
         finally:
             self._log_streams.pop(stream_id, None)
-            if not self._shutdown:
+            if not completed and not self._shutdown:
                 try:
                     await self._send(LogCancel(stream_id=stream_id))
                 except Exception:
@@ -200,6 +202,7 @@ class RemoteAgentLink:
         stream_id = secrets.token_hex(8)
         q: asyncio.Queue[HttpChunk] = asyncio.Queue()
         self._streams[stream_id] = q
+        completed = False
         try:
             await self._send(HttpRequest(
                 stream_id=stream_id,
@@ -222,11 +225,12 @@ class RemoteAgentLink:
                 )
                 first = False
                 if chunk.eof:
+                    completed = True
                     break
         finally:
             self._streams.pop(stream_id, None)
             # Best-effort cancel notice; ignore failures (link may be down).
-            if not self._shutdown:
+            if not completed and not self._shutdown:
                 try:
                     await self._send(HttpCancel(stream_id=stream_id))
                 except Exception:

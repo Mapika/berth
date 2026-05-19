@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.2.2 - 2026-05-19
+
+- Allowed daemon startup on hosts where NVML is installed but no NVIDIA driver
+  is available, reporting an empty GPU topology instead of crashing.
+- Stopped sending remote-agent HTTP/log cancel frames after a clean EOF.
+
 ## 0.2.1 - 2026-05-19
 
 - Added tagged GitHub release artifacts and GHCR daemon image publishing.

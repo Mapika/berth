@@ -40,8 +40,8 @@ uv run --frozen python -m zipfile -l dist/serve_engine-*.whl \
 
 ```bash
 git push origin main
-git tag -a v0.2.1 -m "serve-engine 0.2.1"
-git push origin v0.2.1
+git tag -a v0.2.2 -m "serve-engine 0.2.2"
+git push origin v0.2.2
 ```
 
 Pushing a `v*` tag runs `.github/workflows/release.yml`. That workflow uploads
@@ -55,7 +55,7 @@ ghcr.io/mapika/serve-engine/daemon:<tag>
 
 ```bash
 uv tool install \
-  https://github.com/Mapika/serve-engine/releases/download/v0.2.1/serve_engine-0.2.1-py3-none-any.whl
+  https://github.com/Mapika/serve-engine/releases/download/v0.2.2/serve_engine-0.2.2-py3-none-any.whl
 ```
 
 ## Smoke Test A Built Wheel
@@ -63,6 +63,6 @@ uv tool install \
 ```bash
 tmp=$(mktemp -d)
 uv venv "$tmp/.venv"
-"$tmp/.venv/bin/python" -m pip install dist/serve_engine-0.2.1-py3-none-any.whl
+"$tmp/.venv/bin/python" -m pip install dist/serve_engine-0.2.2-py3-none-any.whl
 "$tmp/.venv/bin/serve" --help
 ```

@@ -80,7 +80,11 @@ def read_topology() -> Topology:
         log.warning("pynvml unavailable - no GPUs visible")
         return Topology(gpus=[], _islands={})
 
-    pynvml.nvmlInit()
+    try:
+        pynvml.nvmlInit()
+    except Exception as e:
+        log.warning("nvml unavailable - no GPUs visible: %s", e)
+        return Topology(gpus=[], _islands={})
     count = pynvml.nvmlDeviceGetCount()
     gpus: list[GPUInfo] = []
     for i in range(count):

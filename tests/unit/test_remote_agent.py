@@ -6,6 +6,7 @@ import base64
 import pytest
 
 from serve_engine.cluster.protocol import (
+    HttpCancel,
     HttpChunk,
     HttpRequest,
     OpResult,
@@ -158,6 +159,74 @@ async def test_proxy_request_streams_chunks():
     assert chunks[0].status == 200
     assert b"".join(c.body for c in chunks) == b"hi!"
     assert chunks[-1].eof is True
+
+    link.shutdown()
+    await ws.push_from_agent(None)
+    await asyncio.gather(run_task, return_exceptions=True)
+
+
+@pytest.mark.asyncio
+async def test_proxy_request_does_not_cancel_after_clean_eof():
+    ws = _FakeWS()
+    link = RemoteAgentLink(node_id=7, ws=ws)
+    run_task = asyncio.create_task(link.run())
+
+    async def consumer():
+        async for _ in link.proxy_request(
+            container_id="cid", method="GET", path="/v1/models",
+            headers={}, body=b"",
+        ):
+            pass
+
+    consumer_task = asyncio.create_task(consumer())
+
+    sent = await ws.pop_to_agent()
+    req = decode_frame(sent)
+    assert isinstance(req, HttpRequest)
+
+    await ws.push_from_agent(encode_frame(HttpChunk(
+        stream_id=req.stream_id, body_b64="", eof=True, status=200, headers={},
+    )))
+
+    await asyncio.wait_for(consumer_task, timeout=2.0)
+    with pytest.raises(asyncio.TimeoutError):
+        await asyncio.wait_for(ws.pop_to_agent(), timeout=0.05)
+
+    link.shutdown()
+    await ws.push_from_agent(None)
+    await asyncio.gather(run_task, return_exceptions=True)
+
+
+@pytest.mark.asyncio
+async def test_proxy_request_sends_cancel_when_consumer_stops_early():
+    ws = _FakeWS()
+    link = RemoteAgentLink(node_id=7, ws=ws)
+    run_task = asyncio.create_task(link.run())
+
+    async def consumer():
+        async for _ in link.proxy_request(
+            container_id="cid", method="GET", path="/v1/models",
+            headers={}, body=b"",
+        ):
+            break
+
+    consumer_task = asyncio.create_task(consumer())
+
+    sent = await ws.pop_to_agent()
+    req = decode_frame(sent)
+    assert isinstance(req, HttpRequest)
+    await ws.push_from_agent(encode_frame(HttpChunk(
+        stream_id=req.stream_id,
+        body_b64=base64.b64encode(b"partial").decode(),
+        eof=False,
+        status=200,
+        headers={},
+    )))
+
+    await asyncio.wait_for(consumer_task, timeout=2.0)
+    cancel = decode_frame(await ws.pop_to_agent())
+    assert isinstance(cancel, HttpCancel)
+    assert cancel.stream_id == req.stream_id
 
     link.shutdown()
     await ws.push_from_agent(None)

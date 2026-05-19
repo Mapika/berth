@@ -45,3 +45,13 @@ def test_read_topology_no_pynvml():
     reset_cache()
     topo = read_topology()
     assert topo.gpus == []
+
+
+@patch("serve_engine.lifecycle.topology.pynvml")
+def test_read_topology_nvml_init_failure_returns_empty_topology(mock_nvml):
+    reset_cache()
+    mock_nvml.nvmlInit.side_effect = RuntimeError("NVML unavailable")
+
+    topo = read_topology()
+
+    assert topo.gpus == []
