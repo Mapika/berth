@@ -96,6 +96,20 @@ def build_apps(
     # Ensure the local-node row exists before anything that reads it.
     ensure_local_node(conn, agent_version=_serve_version)
 
+    # Startup warning: the daemon bypasses auth entirely when no API
+    # keys exist (a convenience for first-run via the local UDS). If the
+    # daemon also exposes a public listener, an operator who walked
+    # away after `serve daemon start` has an open inference endpoint
+    # until they mint a key. `serve deploy bootstrap` mints a starter
+    # key as part of provisioning so the window closes immediately;
+    # operators bring it up by hand need to know.
+    from serve_engine.store import api_keys as _ak_store
+    if _ak_store.count_active(conn) == 0:
+        log.warning(
+            "auth bypass active: no API keys exist; /v1/* and /admin/* "
+            "are unauthenticated until you run `serve keys create`",
+        )
+
     # Wire up the AgentLink registry. Local node first; remote agents join
     # via LeaderHub WS handshake.
     agent_registry = AgentRegistry()

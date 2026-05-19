@@ -24,7 +24,12 @@ def require_auth_dep(request: Request) -> api_keys.ApiKey | None:
 
     Auth source: `Authorization: Bearer sk-...` header.
 
-    If no keys exist in the table, auth is bypassed (returns None).
+    Bootstrap exemption: when no keys exist in the table, auth is
+    bypassed for any caller (including TCP). This is the operator
+    bring-up window. The deploy bootstrap mints the first admin key
+    automatically so the window is closed before the public listener
+    sees external traffic; a startup warning fires for operators who
+    bring the daemon up by hand.
     """
     conn: sqlite3.Connection = request.app.state.conn
     if api_keys.count_active(conn) == 0:
