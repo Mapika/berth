@@ -111,7 +111,7 @@ From a GitHub release wheel:
 
 ```bash
 uv tool install \
-  https://github.com/Mapika/berth/releases/download/v0.2.2/serve_engine-0.2.2-py3-none-any.whl
+  https://github.com/Mapika/berth/releases/download/v0.3.0/serve_engine-0.3.0-py3-none-any.whl
 berth doctor
 ```
 

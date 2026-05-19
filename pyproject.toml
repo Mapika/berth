@@ -1,6 +1,6 @@
 [project]
 name = "serve-engine"
-version = "0.2.2"
+version = "0.3.0"
 description = "berth — single-node inference control plane over vLLM and SGLang"
 license = "Apache-2.0"
 license-files = ["LICENSE"]

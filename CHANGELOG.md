@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.3.0 - unreleased
+## 0.3.0 - 2026-05-20
 
 Rebrand: the project is now **berth**. The PyPI distribution name remains
 `serve-engine` for this release; everything user-visible has moved.
