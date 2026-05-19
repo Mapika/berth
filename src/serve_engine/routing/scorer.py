@@ -38,10 +38,10 @@ def default_scorer(
 ) -> list[DeploymentCandidate]:
     """Return candidates ranked best-first.
 
-    Hard filter: drop candidates whose model wouldn't fit in
-    (mem_free - SAFETY_MARGIN_MB) on their node. Missing signals are
-    treated as worst-case (mem_free=0, in_flight=∞, p95=∞), which means
-    no-signal nodes fail the memory filter and get dropped.
+    Hard filter: drop candidates whose node has *known* memory-headroom
+    below what the model needs. Missing signals are kept (we don't have
+    evidence to drop) but rank last via worst-case in_flight + p95 — a
+    just-enrolled node shouldn't get preferred over one with data.
 
     Rank by (affinity_hit, -in_flight, -p95_latency_ms) lexicographically,
     larger-is-better.
@@ -53,15 +53,14 @@ def default_scorer(
     for c in candidates:
         s = signals_by_node.get(c.node_id)
         if s is None:
-            mem_free = 0
+            # No data → can't apply the memory filter; keep but rank last.
             in_flight = 10**9
             p95 = 10**9
         else:
-            mem_free = s.mem_free_mb
+            if s.mem_free_mb - SAFETY_MARGIN_MB < c.model_required_mb:
+                continue
             in_flight = s.in_flight
             p95 = s.latency_p95_ms
-        if mem_free - SAFETY_MARGIN_MB < c.model_required_mb:
-            continue
         affinity_hit = int(
             request.affinity_node_id is not None
             and c.node_id == request.affinity_node_id

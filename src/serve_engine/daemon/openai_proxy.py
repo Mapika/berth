@@ -18,6 +18,7 @@ from serve_engine.lifecycle.adapter_router import (
     find_deployment_for,
     resolve_target,
 )
+from serve_engine.routing.scorer import NodeSignals, RoutingRequest
 from serve_engine.store import adapters as ad_store
 from serve_engine.store import api_keys as _api_keys_store
 from serve_engine.store import deployment_adapters as da_store
@@ -28,6 +29,34 @@ from serve_engine.store import service_routes as _route_store
 from serve_engine.store import usage_events as _usage_events_store
 
 router = APIRouter()
+
+
+def _build_signals_by_node(aggregator) -> dict[int, NodeSignals]:
+    """Distill the aggregator's latest per-node samples into the
+    NodeSignals shape the scorer consumes. p95 across a node is the
+    max across its deployments — conservatively pessimistic, which is
+    the right bias for routing."""
+    out: dict[int, NodeSignals] = {}
+    for node_id, sample in aggregator.snapshot().items():
+        gpus = sample.get("gpus", [])
+        mem_free = sum(
+            max(0, int(g.get("mem_total_mb", 0)) - int(g.get("mem_used_mb", 0)))
+            for g in gpus
+        )
+        in_flight = sum(
+            int(d.get("in_flight", 0)) for d in sample.get("deployments", [])
+        )
+        p95 = max(
+            (int(d.get("latency_p95_ms", 0))
+             for d in sample.get("deployments", [])),
+            default=0,
+        )
+        out[node_id] = NodeSignals(
+            node_id=node_id, mem_free_mb=mem_free,
+            in_flight=in_flight, latency_p95_ms=p95,
+        )
+    return out
+
 
 def make_engine_client(base_url: str) -> httpx.AsyncClient:
     """Factory wrapper so tests can monkeypatch transport."""
@@ -135,6 +164,30 @@ async def _proxy(
         target_model=route.target_model_name if route else None,
     )
 
+    # Build per-node signals + affinity hint so the scorer picks the
+    # best candidate (lower in-flight, warmer KV cache). Skipping the
+    # routing setup when the aggregator/affinity aren't wired keeps
+    # legacy single-app builds working with the find_deployment_for
+    # legacy path.
+    aggregator = getattr(request.app.state, "metrics_aggregator", None)
+    affinity = getattr(request.app.state, "routing_affinity", None)
+    signals_by_node: dict[int, NodeSignals] | None = None
+    routing_request: RoutingRequest | None = None
+    affinity_key: str | None = None
+    if aggregator is not None:
+        signals_by_node = _build_signals_by_node(aggregator)
+        affinity_key = (
+            request.headers.get("x-session-id")
+            or request.headers.get("x-conversation-id")
+            or (f"key:{key.id}" if key is not None else None)
+        )
+        affinity_node_id = None
+        if affinity_key and affinity is not None:
+            affinity_node_id = affinity.lookup(affinity_key)
+        routing_request = RoutingRequest(
+            affinity_key=affinity_key, affinity_node_id=affinity_node_id,
+        )
+
     # Resolve `model` to (base, optional adapter). Bare base names route
     # exactly as v1 did. Adapter names cause us to (a) pick a deployment
     # of the adapter's base that has the adapter loaded or can hot-load
@@ -154,6 +207,8 @@ async def _proxy(
             conn,
             candidate_target.base_model_name,
             candidate_target.adapter_name,
+            signals_by_node=signals_by_node,
+            request=routing_request,
         )
         if candidate is not None and candidate.container_address is not None:
             target = candidate_target
@@ -179,7 +234,10 @@ async def _proxy(
         except UnknownModel as e:
             tracer.finalize(trace, status_code=404, error=str(e))
             raise HTTPException(404, detail=str(e)) from e
-        active = find_deployment_for(conn, target.base_model_name, target.adapter_name)
+        active = find_deployment_for(
+            conn, target.base_model_name, target.adapter_name,
+            signals_by_node=signals_by_node, request=routing_request,
+        )
 
     if active is None or active.container_address is None:
         if target.adapter_name:
@@ -225,6 +283,12 @@ async def _proxy(
     if _in_flight is not None:
         _in_flight.start(active.id)
     _dispatch_started_at = time.monotonic()
+    # Record affinity so follow-up requests on the same session land on
+    # the same node (and warm KV cache). Updated here optimistically
+    # before dispatch — if dispatch fails the affinity is still useful
+    # for the next attempt since the node was the scorer's first pick.
+    if affinity_key and affinity is not None:
+        affinity.set(affinity_key, node_id=active.node_id)
     # Log this request for the predictor. Tokens are 0 at dispatch time,
     # then patched in below via set_tokens once the upstream
     # stream completes and the usage tracker extracts them.

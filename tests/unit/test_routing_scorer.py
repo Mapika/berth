@@ -97,7 +97,10 @@ def test_scorer_prefers_affinity_hit_over_lower_load():
     assert [c.deployment_id for c in out] == [1, 2]
 
 
-def test_scorer_treats_missing_signals_as_worst_case():
+def test_scorer_keeps_missing_signal_candidates_but_ranks_last():
+    """A just-enrolled node has no aggregator entry yet. We can't apply
+    the memory filter (no data) so we keep the candidate, but rank it
+    last so a node with data is preferred."""
     candidates = [
         _cand(deployment_id=1, node_id=10),
         _cand(deployment_id=2, node_id=11),
@@ -107,6 +110,19 @@ def test_scorer_treats_missing_signals_as_worst_case():
         candidates=candidates, signals_by_node=signals,
         request=RoutingRequest(affinity_key=None),
     )
-    # node 11 has no signal → worst-case mem_free=0 → fails hard filter → dropped.
-    # node 10 fits.
-    assert [c.deployment_id for c in out] == [1]
+    assert [c.deployment_id for c in out] == [1, 2]
+
+
+def test_scorer_with_empty_signals_keeps_all_candidates_in_input_order():
+    """No aggregator data at all (fresh leader) — scorer keeps every
+    candidate; ordering is the stable lexicographic tie-break on
+    (in_flight, p95) which are equal, so input order is preserved."""
+    candidates = [
+        _cand(deployment_id=1, node_id=10),
+        _cand(deployment_id=2, node_id=11),
+    ]
+    out = default_scorer(
+        candidates=candidates, signals_by_node={},
+        request=RoutingRequest(affinity_key=None),
+    )
+    assert {c.deployment_id for c in out} == {1, 2}
