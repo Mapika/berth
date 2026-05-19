@@ -5,7 +5,7 @@ import json as _json
 import logging as _audit_logging
 import sqlite3
 import time as _rl_time
-from collections import defaultdict, deque
+from collections import OrderedDict, deque
 from dataclasses import asdict
 from pathlib import Path
 
@@ -1190,6 +1190,7 @@ class UpdateKeyRequest(BaseModel):
 
 @router.post("/stream-token")
 def create_stream_token(request: Request):
+    _rate_limit(request, route="stream-token", limit=60, window_s=60.0)
     token, expires_at = request.app.state.stream_tokens.issue()
     return {"token": token, "expires_at": expires_at}
 
@@ -1525,7 +1526,13 @@ unauthed_router = APIRouter(prefix="/admin")
 # ---------------------------------------------------------------------------
 
 _audit_log = _audit_logging.getLogger("serve_engine.audit")
-_rl_buckets: dict[str, deque[float]] = defaultdict(deque)
+# Bounded LRU cap on the rate-limit map. Without this, every distinct
+# probe IP permanently consumes a key — straightforward unbounded memory
+# growth from random-IP scanners. 10 000 entries is comfortably more than
+# any legitimate operator surface needs and tiny in absolute terms.
+_RL_MAX_BUCKETS = 10_000
+
+_rl_buckets: OrderedDict[str, deque[float]] = OrderedDict()
 
 
 def _client_ip(request: Request) -> str:
@@ -1539,12 +1546,21 @@ def _rate_limit(
     request: Request, *, route: str, limit: int, window_s: float = 60.0,
 ) -> None:
     """Raise 429 if `_client_ip` has exceeded `limit` calls to `route`
-    within the last `window_s` seconds. UDS callers are exempt."""
+    within the last `window_s` seconds. UDS callers are exempt.
+
+    The bucket map is bounded by `_RL_MAX_BUCKETS` with LRU eviction so
+    a scanner cycling through addresses can't blow up daemon memory.
+    """
     ip = _client_ip(request)
     if ip == "uds":
         return
     key = f"{route}|{ip}"
-    bucket = _rl_buckets[key]
+    bucket = _rl_buckets.get(key)
+    if bucket is None:
+        bucket = deque()
+        _rl_buckets[key] = bucket
+    else:
+        _rl_buckets.move_to_end(key)
     now = _rl_time.monotonic()
     cutoff = now - window_s
     while bucket and bucket[0] < cutoff:
@@ -1556,6 +1572,9 @@ def _rate_limit(
             headers={"Retry-After": str(int(window_s))},
         )
     bucket.append(now)
+    # LRU eviction — the oldest-untouched bucket falls off the back.
+    while len(_rl_buckets) > _RL_MAX_BUCKETS:
+        _rl_buckets.popitem(last=False)
 
 
 # ---------------------------------------------------------------------------

@@ -68,3 +68,20 @@ def test_rate_limit_window_resets(monkeypatch):
     # Advance past the window.
     now[0] += 20.0
     admin_mod._rate_limit(req, route="t", limit=2, window_s=10.0)
+
+
+def test_rate_limit_is_bounded_by_lru_capacity(monkeypatch):
+    """Distinct IPs that hit the limiter once must not leak keys forever.
+    With the LRU cap, the map size never exceeds _RL_MAX_BUCKETS."""
+    admin_mod._rl_buckets.clear()
+    # Shrink the cap so the test stays fast.
+    monkeypatch.setattr(admin_mod, "_RL_MAX_BUCKETS", 50)
+    for i in range(200):
+        admin_mod._rate_limit(
+            _make_request(f"10.0.0.{i}"),
+            route="t", limit=10, window_s=60.0,
+        )
+    assert len(admin_mod._rl_buckets) <= 50
+    # The most recent IPs are retained; the earliest evicted.
+    assert "t|10.0.0.199" in admin_mod._rl_buckets
+    assert "t|10.0.0.0" not in admin_mod._rl_buckets
