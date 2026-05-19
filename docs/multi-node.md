@@ -563,21 +563,39 @@ When the health watcher demotes a node to `unreachable`, it emits a
 affinity entries pointing at that node. Routing decisions thereafter
 treat the node as gone until it re-handshakes.
 
-### Pending follow-ups
+### Request-level retry
 
-- **Pre-first-byte retry across distinct nodes.** The `dispatch_with_retry`
-  helper (`src/serve_engine/daemon/retry_dispatcher.py`) and the
-  pre-first-byte classifier (`src/serve_engine/daemon/dispatch_errors.py`)
-  are landed and unit-tested. Wiring them into the proxy's dispatch
-  site requires carving the existing remote/local branching out of
-  `openai_proxy.py` into a dedicated `daemon/dispatch.py` — a focused
-  refactor scheduled as a separate change.
-- **SSE backpressure.** A bounded `asyncio.Queue` between the engine
-  reader and client writer so a slow consumer pauses generation. Same
-  proxy file; lands with the dispatch carve.
-- **Mid-stream failover** is explicitly out of scope. A node dying
-  mid-generation propagates the error; KV-cache transfer is not on the
+`dispatch_with_retry` (`src/serve_engine/daemon/retry_dispatcher.py`)
+wraps the dispatch step. For a bare-base request the proxy gets the
+full scorer-ranked candidate list and walks it, retrying when the
+chosen node raises a retryable pre-first-byte error: connection
+refused, timeout, 502/503/504 upstream, or `NodeUnreachableError`
+(the AgentLink isn't ready or has no container for that deployment).
+
+- **Budget**: 2 retries (3 total attempts) by default for bare-base
+  requests; **0 retries** for adapter requests — the adapter is loaded
+  on the chosen head deployment only, so falling through to another
+  candidate would land on an engine without the right LoRA slot.
+- **Distinct nodes**: each node is tried at most once per request.
+  Multiple candidates on the same node don't burn extra attempts.
+- **Pre-first-byte only**: once any body byte has been sent to the
+  client, the streamer commits to that upstream. A node dying mid-
+  generation propagates the error — KV-cache transfer is not on the
   roadmap.
+
+The dispatch step itself was carved out of `openai_proxy.py` into
+`src/serve_engine/daemon/dispatch.py:open_upstream_stream`. The unit
+knows nothing about request context or usage tracking — it just opens
+a stream and returns once status + headers are known. The proxy wraps
+the returned `body_iter` in one unified streamer that handles
+in-flight/latency/usage attribution against the **landing** deployment.
+
+### Pending follow-up
+
+- **SSE backpressure.** A bounded `asyncio.Queue` between the engine
+  reader and client writer so a slow consumer pauses generation rather
+  than buffering unbounded. The dispatch carve makes this a localized
+  change in the unified streamer.
 
 ## Roadmap
 
