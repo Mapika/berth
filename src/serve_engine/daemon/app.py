@@ -172,11 +172,53 @@ def build_apps(
         predictor_task.start()
         rollup_task.start()
         import asyncio as _asyncio
+
+        async def _local_metrics_tick() -> None:
+            """Push the leader's own collector data into the aggregator
+            on the same cadence as the agent heartbeat. The leader does
+            not heartbeat itself, so without this its local-node metrics
+            never reach /metrics, /admin/metrics/snapshot, or the
+            scorer's signals_by_node."""
+            import time as _time
+            from serve_engine.cluster.metrics_collector import build_snapshot
+            started = _time.time()
+            local_node = nodes_store.find_by_label(conn, "local")
+            if local_node is None:
+                return
+            in_flight = public_app.state.in_flight
+            latency = public_app.state.latency
+            while True:
+                try:
+                    deployment_models = {
+                        d.id: d.model_name
+                        for d in _dep_store.list_all(conn)
+                    }
+                    sample = build_snapshot(
+                        in_flight=in_flight,
+                        latency=latency,
+                        deployment_models=deployment_models,
+                        uptime_s=_time.time() - started,
+                    )
+                    metrics_aggregator.ingest(
+                        node_id=local_node.id,
+                        sample=sample,
+                        ts=_time.time(),
+                    )
+                except Exception:
+                    log.exception("local metrics tick failed")
+                await _asyncio.sleep(5.0)
+
         cluster_watcher = _asyncio.create_task(
             run_health_watcher(conn, agent_registry)
         )
+        local_metrics_task = _asyncio.create_task(_local_metrics_tick())
         yield
         # Shutdown
+        local_metrics_task.cancel()
+        try:
+            await local_metrics_task
+        except (Exception, _asyncio.CancelledError):
+            pass
         cluster_watcher.cancel()
         try:
             await cluster_watcher
