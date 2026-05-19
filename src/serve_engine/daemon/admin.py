@@ -1536,9 +1536,25 @@ _rl_buckets: OrderedDict[str, deque[float]] = OrderedDict()
 
 
 def _client_ip(request: Request) -> str:
+    """Return the request's apparent client IP.
+
+    When the daemon trusts proxy headers (reverse-proxy mode set in
+    config), the rightmost untrusted IP in X-Forwarded-For wins —
+    otherwise every request looks like the reverse proxy's loopback
+    address and the rate limiter collapses to one global bucket.
+    """
     client = request.scope.get("client")
     if client is None:
         return "uds"
+    trust = bool(getattr(request.app.state, "trust_proxy_headers", False))
+    if trust:
+        xff = request.headers.get("x-forwarded-for")
+        if xff:
+            # rightmost untrusted — for our use case the immediate
+            # client is the value we want for per-IP bucketing.
+            return xff.split(",")[-1].strip() or (
+                client[0] if isinstance(client, tuple) else str(client)
+            )
     return client[0] if isinstance(client, tuple) else str(client)
 
 

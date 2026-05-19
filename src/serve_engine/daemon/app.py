@@ -292,6 +292,11 @@ def build_apps(
         app.state.agent_registry = agent_registry
         app.state.metrics_aggregator = metrics_aggregator
         app.state.routing_affinity = routing_affinity
+        # The rate limiter checks this flag to decide whether to honour
+        # X-Forwarded-For. Defaults to False (legacy direct-TLS mode).
+        app.state.trust_proxy_headers = bool(
+            getattr(resolved_cfg, "trust_proxy_headers", False)
+        )
         app.state.ca = ca
         app.state.ca_cert_pem = ca.cert_pem.decode("ascii")
         app.state.ca_fingerprint = ca_fingerprint
