@@ -12,6 +12,11 @@ import httpx
 import websockets
 import yaml
 
+from serve_engine.cluster.metrics_collector import (
+    InFlightCounter,
+    LatencyRecorder,
+    build_snapshot,
+)
 from serve_engine.cluster.protocol import (
     Frame,
     Heartbeat,
@@ -29,6 +34,34 @@ from serve_engine.cluster.protocol import (
     decode_frame,
     encode_frame,
 )
+
+
+def build_heartbeat_frame(
+    *,
+    in_flight: InFlightCounter | None,
+    latency: LatencyRecorder | None,
+    deployment_models: dict[int, str],
+    uptime_s: float,
+) -> Heartbeat:
+    """Assemble the Heartbeat frame sent by the agent's heartbeat task.
+
+    Carries a metrics snapshot when collectors are provided, otherwise a
+    bare ts-only heartbeat (for callers that haven't wired collectors
+    yet). Kept module-level for unit testability without spinning up
+    the WS loop in `run_agent`.
+    """
+    import time as _t
+    if in_flight is None or latency is None:
+        return Heartbeat(ts=_t.time())
+    return Heartbeat(
+        ts=_t.time(),
+        metrics=build_snapshot(
+            in_flight=in_flight,
+            latency=latency,
+            deployment_models=deployment_models,
+            uptime_s=uptime_s,
+        ),
+    )
 
 log = logging.getLogger(__name__)
 
@@ -400,6 +433,14 @@ async def run_agent(serve_home: Path) -> None:
     docker = _DockerAdapter(dc)
     http = _HttpxAdapter()
 
+    # Agent-process collectors. Populated as the agent serves
+    # leader-proxied requests via AgentFrameDispatcher; instrumentation
+    # of the dispatcher's request path is a follow-up. GPU stats already
+    # flow via build_snapshot regardless.
+    agent_in_flight = InFlightCounter()
+    agent_latency = LatencyRecorder()
+    agent_deployment_models: dict[int, str] = {}
+
     # Re-attach to running engine containers from a previous agent
     # process. The dispatcher's _endpoints dict is in-memory only — if
     # the agent restarted while remote deployments were live, those
@@ -479,10 +520,18 @@ async def run_agent(serve_home: Path) -> None:
                     welcome.node_id,
                 )
 
+                import time as _t
+                agent_started_at = _t.time()
+
                 async def heartbeat():
-                    import time as _t
                     while True:
-                        await ws.send(encode_frame(Heartbeat(ts=_t.time())))
+                        frame = build_heartbeat_frame(
+                            in_flight=agent_in_flight,
+                            latency=agent_latency,
+                            deployment_models=agent_deployment_models,
+                            uptime_s=_t.time() - agent_started_at,
+                        )
+                        await ws.send(encode_frame(frame))
                         await asyncio.sleep(5.0)
 
                 hb = asyncio.create_task(heartbeat())

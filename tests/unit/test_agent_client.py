@@ -163,3 +163,44 @@ async def test_http_request_with_engine_failure_returns_502():
     assert isinstance(last, HttpChunk)
     assert last.status == 502
     assert last.eof is True
+
+
+def test_build_heartbeat_frame_without_collectors_is_bare():
+    from serve_engine.cluster.agent_client import build_heartbeat_frame
+    from serve_engine.cluster.protocol import Heartbeat
+
+    frame = build_heartbeat_frame(
+        in_flight=None, latency=None,
+        deployment_models={}, uptime_s=0.0,
+    )
+    assert isinstance(frame, Heartbeat)
+    assert frame.metrics is None
+
+
+def test_build_heartbeat_frame_with_collectors_carries_metrics(monkeypatch):
+    from serve_engine.cluster.agent_client import build_heartbeat_frame
+    from serve_engine.cluster import metrics_collector as mc
+    from serve_engine.cluster.protocol import Heartbeat, decode_frame, encode_frame
+
+    # Stub out NVML so the test doesn't depend on a GPU host.
+    monkeypatch.setattr(mc, "read_gpu_stats", lambda: [])
+
+    in_flight = mc.InFlightCounter()
+    in_flight.start(7)
+    latency = mc.LatencyRecorder()
+    latency.record(deployment_id=7, latency_ms=120, error=False)
+
+    frame = build_heartbeat_frame(
+        in_flight=in_flight, latency=latency,
+        deployment_models={7: "llama3-8b"}, uptime_s=10.0,
+    )
+    assert isinstance(frame, Heartbeat)
+    assert frame.metrics is not None
+    assert frame.metrics["deployments"][0]["deployment_id"] == 7
+    assert frame.metrics["deployments"][0]["in_flight"] == 1
+    assert frame.metrics["deployments"][0]["model_id"] == "llama3-8b"
+
+    # Survives the wire format.
+    decoded = decode_frame(encode_frame(frame))
+    assert isinstance(decoded, Heartbeat)
+    assert decoded.metrics["deployments"][0]["deployment_id"] == 7
