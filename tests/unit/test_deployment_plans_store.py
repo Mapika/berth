@@ -77,12 +77,14 @@ def test_most_recent_ready_returns_latest_when_multiple(tmp_path):
     """When the operator runs `serve run X` repeatedly, each successful
     load adds a row. The newest ready plan wins so config tweaks
     propagate to the next pre-warm."""
-    import time
     conn = _conn(tmp_path)
     base = model_store.add(conn, name="qwen3-7b", hf_repo="o/qwen3-7b")
     pid1 = plan_store.record(conn, model_id=base.id, plan=_plan(max_loras=2))
     plan_store.mark_ready(conn, pid1)
-    time.sleep(1.05)  # sqlite TIMESTAMP defaults to second resolution
+    conn.execute(
+        "UPDATE deployment_plans SET reached_ready_at=? WHERE id=?",
+        ("2000-01-01 00:00:00", pid1),
+    )
     pid2 = plan_store.record(conn, model_id=base.id, plan=_plan(max_loras=8))
     plan_store.mark_ready(conn, pid2)
 

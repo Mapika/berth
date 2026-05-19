@@ -61,3 +61,7 @@ jobs:
 
       - name: Build UI
         run: npm run build
+
+      - name: Check packaged UI is current
+        working-directory: .
+        run: git diff --exit-code -- src/serve_engine/ui

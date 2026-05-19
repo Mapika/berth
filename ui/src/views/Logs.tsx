@@ -1,16 +1,17 @@
 import { useEffect, useRef, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { api, eventSourceUrl } from '../api'
+import { api, queryKeys } from '../api'
+import { openAdminEventSource } from '../eventSource'
 
-type LifecycleEvent = { kind: string; payload: any; ts: string }
+type LifecycleEvent = { kind: string; payload: unknown; ts: string }
 
 export default function Logs() {
   const deps = useQuery({
-    queryKey: ['deps'],
+    queryKey: queryKeys.deployments,
     queryFn: api.listDeployments,
     refetchInterval: 5000,
   })
-  const models = useQuery({ queryKey: ['models'], queryFn: api.listModels })
+  const models = useQuery({ queryKey: queryKeys.models, queryFn: api.listModels })
   const [selected, setSelected] = useState<number | null>(null)
   const [lines, setLines] = useState<string[]>([])
   const [streaming, setStreaming] = useState(false)
@@ -24,12 +25,12 @@ export default function Logs() {
     const list = deps.data ?? []
     // Prefer the most recently active deployment; fall back to the newest row
     // (highest id) so we don't open onto a long-dead container by default.
-    const active = list.find((d: any) => d.status === 'ready' || d.status === 'loading')
+    const active = list.find(d => d.status === 'ready' || d.status === 'loading')
     if (active) {
       setSelected(active.id)
       return
     }
-    const sorted = [...list].sort((a: any, b: any) => b.id - a.id)
+    const sorted = [...list].sort((a, b) => b.id - a.id)
     if (sorted.length > 0) setSelected(sorted[0].id)
   }, [deps.data, selected])
 
@@ -38,55 +39,43 @@ export default function Logs() {
     setLines([])
     setStreamError('')
     setStreaming(true)
-    let closed = false
-    let es: EventSource | null = null
-    eventSourceUrl(`/admin/deployments/${selected}/logs/stream`)
-      .then(url => {
-        if (closed) return
-        es = new EventSource(url)
-        es.onmessage = (e: MessageEvent) => {
+    const close = openAdminEventSource(
+      `/admin/deployments/${selected}/logs/stream`,
+      {
+        onMessage: e => {
           setLines(prev => {
             const next = [...prev, e.data]
             return next.length > 2000 ? next.slice(-2000) : next
           })
-        }
-        es.onerror = () => {
+        },
+        onError: (_event, source) => {
           setStreaming(false)
           setStreamError('stream closed (container stopped or auth failed)')
-          es?.close()
-        }
-      })
-      .catch((e: Error) => {
-        setStreaming(false)
-        setStreamError(e.message)
-      })
+          source.close()
+        },
+        onOpenError: e => {
+          setStreaming(false)
+          setStreamError(e.message)
+        },
+      },
+    )
     return () => {
-      closed = true
       setStreaming(false)
-      es?.close()
+      close()
     }
   }, [selected])
 
   useEffect(() => {
-    let closed = false
-    let es: EventSource | null = null
-    eventSourceUrl('/admin/events').then(url => {
-      if (closed) return
-      es = new EventSource(url)
-      es.onmessage = (e: MessageEvent) => {
+    const close = openAdminEventSource('/admin/events', {
+      onMessage: e => {
         try {
           const obj = JSON.parse(e.data) as LifecycleEvent
           setEvents(prev => [obj, ...prev].slice(0, 50))
         } catch { /* ignore */ }
-      }
-      es.onerror = () => es?.close()
-    }).catch(() => {
-      // Polling views still work; event feed is best-effort.
+      },
+      onError: (_event, source) => source.close(),
     })
-    return () => {
-      closed = true
-      es?.close()
-    }
+    return close
   }, [])
 
   useEffect(() => {
@@ -104,15 +93,15 @@ export default function Logs() {
   // then everything else by descending id (newest first). Rows without a
   // container_id are excluded because their SSE attach always 404s.
   const visibleDeps = (deps.data ?? [])
-    .filter((d: any) => d.container_id !== null && d.container_id !== undefined)
-    .sort((a: any, b: any) => {
+    .filter(d => d.container_id !== null && d.container_id !== undefined)
+    .sort((a, b) => {
       const aLive = a.status === 'ready' || a.status === 'loading' ? 0 : 1
       const bLive = b.status === 'ready' || b.status === 'loading' ? 0 : 1
       if (aLive !== bLive) return aLive - bLive
       return b.id - a.id
     })
 
-  const selectedDep = visibleDeps.find((d: any) => d.id === selected)
+  const selectedDep = visibleDeps.find(d => d.id === selected)
 
   return (
     <div className="space-y-10">
@@ -140,8 +129,8 @@ export default function Logs() {
           }}
         >
           <option value="">select deployment</option>
-          {visibleDeps.map((d: any) => {
-            const m = (models.data ?? []).find((m: any) => m.id === d.model_id)
+          {visibleDeps.map(d => {
+            const m = (models.data ?? []).find(m => m.id === d.model_id)
             const live = d.status === 'ready' || d.status === 'loading'
             const marker = live ? '●' : '·'
             return (

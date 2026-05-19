@@ -1,6 +1,6 @@
 import { useMemo, useRef, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { api, getToken } from '../api'
+import { api, getToken, queryKeys, type Model, type ServiceRoute } from '../api'
 
 type Stats = {
   ttftMs: number | null
@@ -68,7 +68,13 @@ async function streamOne(
         const payload = line.slice(5).trim()
         if (payload === '[DONE]') continue
         try {
-          const obj = JSON.parse(payload)
+          const obj = JSON.parse(payload) as {
+            choices?: { delta?: {
+              reasoning?: string
+              reasoning_content?: string
+              content?: string
+            } }[]
+          }
           const delta = obj.choices?.[0]?.delta ?? {}
           const rd: string = delta.reasoning ?? delta.reasoning_content ?? ''
           const cd: string = delta.content ?? ''
@@ -88,9 +94,10 @@ async function streamOne(
         } catch { /* skip malformed lines */ }
       }
     }
-  } catch (e: any) {
-    if (e?.name !== 'AbortError') {
-      setPane(p => ({ ...p, error: `error: ${e?.message ?? e}` }))
+  } catch (e: unknown) {
+    if (!(e instanceof DOMException && e.name === 'AbortError')) {
+      const message = e instanceof Error ? e.message : String(e)
+      setPane(p => ({ ...p, error: `error: ${message}` }))
     }
   } finally {
     const t1 = performance.now()
@@ -111,8 +118,8 @@ function ModelSelect({
 }: {
   value: string
   onChange: (v: string) => void
-  models: any[]
-  routes: any[]
+  models: Model[]
+  routes: ServiceRoute[]
 }) {
   return (
     <select
@@ -123,7 +130,7 @@ function ModelSelect({
       <option value="">choose model or route</option>
       {routes.length > 0 && (
         <optgroup label="routes">
-          {routes.map((r: any) => (
+          {routes.map(r => (
             <option key={`r-${r.id}`} value={r.match_model}>
               {r.match_model} → {r.profile_name}
             </option>
@@ -132,7 +139,7 @@ function ModelSelect({
       )}
       {models.length > 0 && (
         <optgroup label="models">
-          {models.map((m: any) => (
+          {models.map(m => (
             <option key={`m-${m.id}`} value={m.name}>{m.name}</option>
           ))}
         </optgroup>
@@ -206,8 +213,8 @@ function PaneOutput({
 }
 
 export default function Playground() {
-  const models = useQuery({ queryKey: ['models'], queryFn: api.listModels })
-  const routes = useQuery({ queryKey: ['routes'], queryFn: api.listRoutes })
+  const models = useQuery({ queryKey: queryKeys.models, queryFn: api.listModels })
+  const routes = useQuery({ queryKey: queryKeys.routes, queryFn: api.listRoutes })
 
   const [compareMode, setCompareMode] = useState(false)
   const [paneA, setPaneA] = useState<PaneState>({ model: '', ...FRESH_PANE })
@@ -220,7 +227,7 @@ export default function Playground() {
 
   const modelList = useMemo(() => models.data ?? [], [models.data])
   const routeList = useMemo(
-    () => (routes.data ?? []).filter((r: any) => r.enabled),
+    () => (routes.data ?? []).filter(r => r.enabled),
     [routes.data],
   )
 

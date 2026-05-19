@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from serve_engine.store import db
 from serve_engine.store import models as model_store
 from serve_engine.store.models import Model
+from serve_engine.store.rows import row_get
 
 
 class AlreadyExists(Exception):
@@ -48,10 +49,7 @@ def _row_to_adapter(conn: sqlite3.Connection, row: sqlite3.Row) -> Adapter:
         raise RuntimeError(
             f"adapter {row['name']!r} references missing base model id={row['base_model_id']}"
         )
-    try:
-        lora_rank_value = row["lora_rank"]
-    except (KeyError, IndexError):
-        lora_rank_value = None
+    lora_rank_value = row_get(row, "lora_rank")
     return Adapter(
         id=row["id"],
         name=row["name"],

@@ -1,16 +1,7 @@
-"""Daemon-lifespan task that runs the predictor on a fixed tick and
-pre-warms adapters (and, when a recorded plan exists, base deployments)
-the rules picked.
+"""Predictor tick loop for adapter and base pre-warming.
 
-Adapter pre-warming fires whenever the rules surface an adapter candidate
-and a ready base deployment with LoRA slots exists. Base pre-warming is
-opt-in via `max_base_prewarm_per_tick` and only fires when the
-deployment_plans history table has a successfully-loaded plan for the
-base - the predictor never invents a config it hasn't seen succeed.
-
-Guardrails per design section5: never preempt an in-flight request, never
-evict pinned, cap at max_prewarm_per_tick. Predictions are advisory  -
-a real request always wins.
+Predictions are advisory: the task only uses ready deployments or recorded
+successful plans, and a real request always wins.
 """
 from __future__ import annotations
 
@@ -38,8 +29,7 @@ log = logging.getLogger(__name__)
 
 
 class PredictorTask:
-    """Long-running tick loop. Owns a Predictor + manager reference and
-    a per-tick budget; otherwise stateless across ticks."""
+    """Long-running predictor loop with per-tick budgets."""
 
     def __init__(
         self,
@@ -58,8 +48,6 @@ class PredictorTask:
         self._predictor = Predictor(conn, config=self._config)
         self._task: asyncio.Task | None = None
         self._stop_event = asyncio.Event()
-        # Stats surfaced via the daemon (`serve predict --history` will read
-        # these once C-CLI lands; for now they're internal accounting).
         self.preloads_attempted = 0
         self.preloads_succeeded = 0
         self.preloads_skipped_already_warm = 0
@@ -71,6 +59,32 @@ class PredictorTask:
         # the event loop may GC the task mid-load; we drop completed ones
         # opportunistically so the list doesn't grow unbounded.
         self._inflight_base_loads: set[asyncio.Task] = set()
+
+    def candidates_snapshot(self) -> list[dict[str, object]]:
+        return [
+            {
+                "base_name": c.base_name,
+                "adapter_name": c.adapter_name,
+                "score": round(c.score, 4),
+                "reason": c.reason,
+            }
+            for c in self._predictor.candidates()
+        ]
+
+    def stats_snapshot(self) -> dict[str, object]:
+        return {
+            "enabled": self._config.enabled,
+            "tick_interval_s": self._config.tick_interval_s,
+            "max_prewarm_per_tick": self._config.max_prewarm_per_tick,
+            "max_base_prewarm_per_tick": self._config.max_base_prewarm_per_tick,
+            "preloads_attempted": self.preloads_attempted,
+            "preloads_succeeded": self.preloads_succeeded,
+            "preloads_skipped_already_warm": self.preloads_skipped_already_warm,
+            "preloads_skipped_no_deployment": self.preloads_skipped_no_deployment,
+            "base_prewarms_attempted": self.base_prewarms_attempted,
+            "base_prewarms_succeeded": self.base_prewarms_succeeded,
+            "base_prewarms_skipped_no_plan": self.base_prewarms_skipped_no_plan,
+        }
 
     async def tick_once(self) -> int:
         """Run one prediction pass; return the number of preloads
@@ -86,8 +100,6 @@ class PredictorTask:
             if triggered >= budget and base_triggered >= base_budget:
                 break
             if c.adapter_name is None:
-                # Bare-base candidate: try to pre-warm the base itself
-                # using a recorded successful plan from history.
                 if base_triggered >= base_budget:
                     continue
                 if await self._try_prewarm_base(c.base_name, c.reason):
@@ -95,12 +107,6 @@ class PredictorTask:
                 continue
             dep = find_deployment_for(self._conn, c.base_name, c.adapter_name)
             if dep is None or dep.container_address is None:
-                # No ready base deployment of this adapter's base, OR
-                # the base has --max-loras=0. Try to pre-warm the base
-                # from its recorded plan so the adapter can land on the
-                # next tick - this is what "base-deployment pre-warming"
-                # closes: previously the predictor saw the adapter
-                # candidate, found no base, and just bumped the counter.
                 self.preloads_skipped_no_deployment += 1
                 if base_triggered < base_budget:
                     if await self._try_prewarm_base(
@@ -110,10 +116,6 @@ class PredictorTask:
                         base_triggered += 1
                 continue
             if triggered >= budget:
-                # Adapter budget exhausted; this candidate would have fired
-                # but the top-level break only catches when BOTH budgets
-                # are spent. Keep iterating to give later bare-base
-                # candidates a chance at the base-prewarm budget.
                 continue
             a = ad_store.get_by_name(self._conn, c.adapter_name)
             if a is None:
@@ -144,20 +146,7 @@ class PredictorTask:
         return triggered
 
     async def _try_prewarm_base(self, base_name: str, reason: str) -> bool:
-        """Spin up a base deployment using its most-recent successful plan.
-
-        Returns True if a load was actually launched. Reasons we bail
-        (each bumps a counter, all silent):
-        - no LifecycleManager wired in (test contexts often skip this)
-        - base_prewarm budget is 0 (operator disabled it in predictor.yaml)
-        - the base model is unknown
-        - already have a ready/loading deployment of this base
-        - no history row with reached_ready_at - never invent a config
-
-        We deliberately don't block the tick on the load: it's launched as
-        a background task so the predictor stays responsive. Failures are
-        logged but don't crash the tick.
-        """
+        """Launch a base deployment from its most recent successful plan."""
         if self._manager is None or self._config.max_base_prewarm_per_tick <= 0:
             return False
         manager = self._manager
@@ -166,9 +155,6 @@ class PredictorTask:
         if model is None:
             return False
 
-        # Skip if a deployment of this base is already ready or loading.
-        # `list_ready` is the cheap pre-check; loading rows aren't in it
-        # but we can sweep deployments by model_id to catch in-flight loads.
         for d in dep_store.list_ready(self._conn):
             if d.model_id == model.id:
                 return False
@@ -195,10 +181,6 @@ class PredictorTask:
             return False
 
         self.base_prewarms_attempted += 1
-        # Detach: manager.load can take 30-60s for a fresh engine warmup;
-        # the tick itself stays snappy. The task is fire-and-forget - any
-        # failure is logged and shows up to the operator as a normal
-        # failed deployment row in `serve ps`.
         async def _run() -> None:
             try:
                 await manager.load(plan)

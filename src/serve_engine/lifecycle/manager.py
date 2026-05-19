@@ -133,17 +133,10 @@ class LifecycleManager:
         self._docker = docker_client
         self._backends = backends
         self._models_dir = models_dir
-        # Public accessor lives at LifecycleManager.models_dir — defined
-        # as a @property below. Callers must not reach _models_dir.
-        # Per-deployment engine YAML configs, mounted into containers at
-        # /serve/configs:ro. Backends opt-in via engine_config(plan).
         self._configs_dir = configs_dir or (models_dir.parent / "configs")
         self._topology = topology
         self._load_timeout_s = load_timeout_s
         self._events = event_bus
-        # Cluster registry — when present, start/stop routes through the
-        # AgentLink for the chosen node. Single-node deployments work
-        # without it (the docker_client path stays).
         self._registry = agent_registry
         self._lock = asyncio.Lock()
         self._adapter_locks: dict[int, asyncio.Lock] = {}
@@ -157,10 +150,7 @@ class LifecycleManager:
 
     @property
     def models_dir(self) -> Path:
-        """Public accessor for the models cache root. External callers
-        (proxy, admin endpoints) must use this rather than reaching the
-        private attribute — keeps the field swappable without grepping
-        seven call sites."""
+        """Models cache root."""
         return self._models_dir
 
     async def _remote_probe_until_healthy(
@@ -222,7 +212,6 @@ class LifecycleManager:
             target_node_id = self._resolve_target_node_id(plan)
             is_remote = (plan.node_label or "local") not in ("", "local")
 
-            # 1. Ensure model row
             model = model_store.get_by_name(self._conn, plan.model_name)
             if model is None:
                 model = model_store.add(
@@ -232,11 +221,6 @@ class LifecycleManager:
                     revision=plan.revision,
                 )
 
-            # 2. Ensure weights are local on the LEADER, but only to read
-            # config.json for KV/concurrency estimation. The agent will
-            # download its own copy when StartDeployment fires. For local
-            # deploys, this download IS the on-disk copy the engine
-            # container mounts; for remote deploys it's just metadata.
             local_path = model.local_path
             if local_path is None:
                 local_path = await download_model_async(
@@ -246,8 +230,6 @@ class LifecycleManager:
                 )
                 model_store.set_local_path(self._conn, model.id, local_path)
 
-            # 3. Resolve target_concurrency (None -> model-size-aware default)
-            #    and estimate VRAM.
             if plan.target_concurrency is None:
                 target_concurrency = default_target_concurrency(
                     Path(local_path),
@@ -267,14 +249,6 @@ class LifecycleManager:
                 dtype=plan.dtype,
             ))
 
-            # 4. Replace any prior ready deployment of this same model name.
-            # CLI contract ("Stops the current model first"): `serve run X`
-            # supersedes the existing X. Pinned deployments are excluded
-            # from the replace - pin is the operator's commitment that the
-            # deployment is special; replacing requires an explicit
-            # `serve unpin` first. Doing the cutover after weight prep but
-            # before placement keeps the old container live during any HF
-            # download and frees its VRAM so placement can reuse the GPU.
             priors = [
                 d for d in dep_store.list_ready(self._conn) if d.model_id == model.id
             ]
@@ -287,11 +261,6 @@ class LifecycleManager:
             for prior in priors:
                 await self._stop_locked(prior.id)
 
-            # 5. Placement (local target only — remote nodes manage their
-            # own GPU layout; the operator picks gpu_ids explicitly in
-            # plan.gpu_ids for now and we trust it. A future iteration
-            # could ask the agent for live GPU stats and run placement
-            # against the remote topology.)
             if is_remote:
                 gpu_ids = list(plan.gpu_ids)
                 if not gpu_ids:
@@ -306,7 +275,6 @@ class LifecycleManager:
                         "pass topology=read_topology() to LifecycleManager"
                     )
                 ready = dep_store.list_ready(self._conn)
-                # Map id -> LRU rank (lower rank = more evictable). Pinned absent.
                 lru_rank = {
                     d.id: idx
                     for idx, d in enumerate(dep_store.list_evictable(self._conn))
@@ -322,7 +290,6 @@ class LifecycleManager:
                         for d in ready
                         if d.node_id == 0 or d.node_id == target_node_id
                     ],
-                    # Pinned last (never evicted); within auto, LRU rank ascending
                     key=lambda a: (a.pinned, lru_rank.get(a.id, 0)),
                 )
                 request = PlacementRequest(
@@ -343,7 +310,6 @@ class LifecycleManager:
                 else:  # Fit
                     gpu_ids = decision.gpu_ids
 
-            # 5. Create row + spawn container
             dep = dep_store.create(
                 self._conn,
                 model_id=model.id,
@@ -379,10 +345,6 @@ class LifecycleManager:
             tp = len(gpu_ids)
 
             if is_remote:
-                # Remote: skip the leader-side gpu_memory_utilization tuning
-                # (we don't know the agent's per-GPU MB without asking it).
-                # The backend's default util factor + the agent's docker run
-                # is enough for the demo. Future: query agent gpu stats.
                 mem_util = plan.gpu_memory_utilization
             else:
                 # Rebuild plan with the placement-chosen GPU set AND a
@@ -405,10 +367,6 @@ class LifecycleManager:
                 target_concurrency=target_concurrency,
             )
 
-            # 6. Per-deployment engine YAML. For LOCAL deploys we write
-            # it to the leader's configs dir; for REMOTE deploys we
-            # ship the YAML body inline in the plan dict so the agent
-            # can materialise it on its own host before mounting.
             container_config_path: str | None = None
             engine_config_body: str | None = None
             cfg = backend.engine_config(effective_plan)
@@ -423,13 +381,6 @@ class LifecycleManager:
             container_env = backend.container_env(effective_plan)
 
             if is_remote:
-                # ------------------------------------------------------------
-                # Remote dispatch: build a self-contained plan dict the
-                # agent can execute with no leader-side filesystem
-                # dependencies. The agent downloads the model itself,
-                # writes the per-deployment config locally, and runs
-                # docker on its own host.
-                # ------------------------------------------------------------
                 assert self._registry is not None
                 link = self._registry.get(target_node_id)
                 if link is None:
@@ -437,9 +388,6 @@ class LifecycleManager:
                         f"node {plan.node_label!r} link disappeared before dispatch"
                     )
 
-                # Container model path will be agent-local. We tell the
-                # agent the HF coordinates; it resolves the on-disk path
-                # before substituting into argv via a known sentinel.
                 MODEL_SENTINEL = "__SERVE_MODEL_PATH__"
                 argv = backend.build_argv(
                     effective_plan,
@@ -447,10 +395,6 @@ class LifecycleManager:
                     config_path=container_config_path,
                 )
 
-                # backend.container_kwargs(...) contains docker.types.Ulimit
-                # instances that aren't JSON-serialisable; the WS frame
-                # encoder needs plain dicts. The agent rehydrates them
-                # via _rehydrate_docker_kwargs before calling docker.run.
                 agent_plan = {
                     "image": plan.image_tag,
                     "name": f"serve-{plan.backend}-{plan.model_name}-{dep.id}",
@@ -460,7 +404,6 @@ class LifecycleManager:
                         backend.container_kwargs(effective_plan),
                     ),
                     "internal_port": backend.internal_port,
-                    # Agent-side staging instructions.
                     "model_hf_repo": plan.hf_repo,
                     "model_revision": plan.revision,
                     "model_sentinel": MODEL_SENTINEL,
@@ -524,9 +467,6 @@ class LifecycleManager:
                 await self._emit("deployment.ready", dep_id=dep.id)
                 return dep_store.get_by_id(self._conn, dep.id)
 
-            # ----------------------------------------------------------------
-            # Local dispatch: original docker.run path.
-            # ----------------------------------------------------------------
             container_model_path = "/cache/" + str(
                 Path(local_path).resolve().relative_to(self._models_dir.resolve())
             )

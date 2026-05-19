@@ -4,7 +4,6 @@ Drives the full HTTP stack (admin endpoints + OpenAI proxy + adapter
 router + lifecycle) against a fake engine that records every adapter
 load/unload + chat-completion call. No real GPU; no real container.
 """
-import asyncio
 from unittest.mock import AsyncMock, MagicMock
 
 import httpx
@@ -171,6 +170,18 @@ def _register_downloaded_adapter(app, name: str, tmp_path):
     return a
 
 
+def _set_adapter_last_used(app, dep_id: int, name: str, ts: str) -> None:
+    app.state.conn.execute(
+        """
+        UPDATE deployment_adapters
+        SET last_used_at=?
+        WHERE deployment_id=?
+          AND adapter_id=(SELECT id FROM adapters WHERE name=?)
+        """,
+        (ts, dep_id, name),
+    )
+
+
 @pytest.mark.asyncio
 async def test_full_adapter_lifecycle_8_step_flow(app, tmp_path):
     """Walks the entire adapter lifecycle through the public HTTP API.
@@ -212,18 +223,19 @@ async def test_full_adapter_lifecycle_8_step_flow(app, tmp_path):
         assert len([c for c in fe.calls if c["op"] == "load"]) == 1
 
         # --- Step 3: load 3 more so all 4 slots are used ---
-        # Use slight asyncio.sleep so last_used_at differs between adapters.
         for n in ("casual", "snarky", "clinical"):
             r = await c.post(
                 "/v1/chat/completions",
                 json={"model": n, "messages": [{"role": "user", "content": "hi"}]},
             )
             assert r.status_code == 200, r.text
-            await asyncio.sleep(1.1)  # 1s sqlite timestamp resolution
+        _set_adapter_last_used(app, dep.id, "formal", "2000-01-01 00:00:00")
+        _set_adapter_last_used(app, dep.id, "casual", "2000-01-01 00:00:01")
+        _set_adapter_last_used(app, dep.id, "snarky", "2000-01-01 00:00:02")
+        _set_adapter_last_used(app, dep.id, "clinical", "2000-01-01 00:00:03")
         assert fe.loaded == {"formal", "casual", "snarky", "clinical"}
 
         # --- Step 4: bump 'formal' to MRU before triggering eviction ---
-        await asyncio.sleep(1.1)
         r = await c.post(
             "/v1/chat/completions",
             json={"model": "formal", "messages": [{"role": "user", "content": "mru"}]},
@@ -231,7 +243,6 @@ async def test_full_adapter_lifecycle_8_step_flow(app, tmp_path):
         assert r.status_code == 200
 
         # --- Step 5: load 5th adapter; LRU ('casual' now) must evict ---
-        await asyncio.sleep(1.1)
         r = await c.post(
             "/v1/chat/completions",
             json={"model": "pirate", "messages": [{"role": "user", "content": "yarr"}]},

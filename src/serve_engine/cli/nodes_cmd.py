@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import asyncio
-import os
 from urllib.parse import urlencode
 
 import typer
@@ -13,15 +12,6 @@ nodes_app = typer.Typer(help="Manage cluster nodes from the leader.")
 app.add_typer(nodes_app, name="nodes")
 
 ENROLLMENT_URI_SCHEME = "serve://enroll"
-
-
-def _auth_headers() -> dict[str, str]:
-    tok = os.environ.get("SERVE_TOKEN")
-    return {"Authorization": f"Bearer {tok}"} if tok else {}
-
-
-def _base() -> str:
-    return os.environ.get("SERVE_URL", "http://127.0.0.1:11500").rstrip("/")
 
 
 def _uds_post(path: str, json_body: dict) -> dict:
@@ -105,5 +95,4 @@ def remove(node_id: int):
     """Decommission a node — revokes its cert fingerprint and deletes the row."""
     _uds_delete(f"/admin/nodes/{node_id}")
     typer.echo(f"removed node {node_id}")
-
 

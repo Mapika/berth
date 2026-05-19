@@ -1,13 +1,13 @@
 import { useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { api } from '../api'
+import { api, queryKeys, type Model } from '../api'
 
 type Mode = 'hf' | 'local'
 
 export default function Adapters() {
   const qc = useQueryClient()
-  const adapters = useQuery({ queryKey: ['adapters'], queryFn: api.listAdapters, refetchInterval: 5000 })
-  const models = useQuery({ queryKey: ['models'], queryFn: api.listModels })
+  const adapters = useQuery({ queryKey: queryKeys.adapters, queryFn: api.listAdapters, refetchInterval: 5000 })
+  const models = useQuery({ queryKey: queryKeys.models, queryFn: api.listModels })
 
   const [mode, setMode] = useState<Mode>('hf')
   const [hfRepo, setHfRepo] = useState('')
@@ -15,7 +15,7 @@ export default function Adapters() {
   const [base, setBase] = useState('')
   const [name, setName] = useState('')
 
-  const baseOptions: any[] = models.data ?? []
+  const baseOptions: Model[] = models.data ?? []
 
   const pull = useMutation({
     mutationFn: async () => {
@@ -25,7 +25,7 @@ export default function Adapters() {
     },
     onSuccess: () => {
       setHfRepo(''); setName('')
-      qc.invalidateQueries({ queryKey: ['adapters'] })
+      qc.invalidateQueries({ queryKey: queryKeys.adapters })
     },
   })
   const addLocal = useMutation({
@@ -35,12 +35,12 @@ export default function Adapters() {
     },
     onSuccess: () => {
       setLocalPath(''); setName('')
-      qc.invalidateQueries({ queryKey: ['adapters'] })
+      qc.invalidateQueries({ queryKey: queryKeys.adapters })
     },
   })
   const del = useMutation({
     mutationFn: (n: string) => api.deleteAdapter(n, true),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['adapters'] }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: queryKeys.adapters }),
   })
 
   const rows = adapters.data ?? []
@@ -93,7 +93,7 @@ export default function Adapters() {
             onChange={e => setBase(e.target.value)}
           >
             <option value="">base model</option>
-            {baseOptions.map((m: any) => (
+            {baseOptions.map(m => (
               <option key={m.id} value={m.name}>{m.name}</option>
             ))}
           </select>
@@ -151,7 +151,7 @@ export default function Adapters() {
                 </td>
               </tr>
             )}
-            {rows.map((a: any) => (
+            {rows.map(a => (
               <tr key={a.id}>
                 <td>{a.name}</td>
                 <td className="text-dim">{a.base}</td>

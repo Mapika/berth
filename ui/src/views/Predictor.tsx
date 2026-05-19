@@ -1,7 +1,19 @@
+import type { ReactNode } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { api } from '../api'
+import { api, queryKeys, type PredictorStats } from '../api'
 
-function Stat({ label, value, dim = false }: { label: string; value: any; dim?: boolean }) {
+const EMPTY_STATS: PredictorStats = {
+  enabled: false,
+  preloads_attempted: 0,
+  preloads_succeeded: 0,
+  preloads_skipped_already_warm: 0,
+  preloads_skipped_no_deployment: 0,
+  base_prewarms_attempted: 0,
+  base_prewarms_succeeded: 0,
+  base_prewarms_skipped_no_plan: 0,
+}
+
+function Stat({ label, value, dim = false }: { label: string; value: ReactNode; dim?: boolean }) {
   return (
     <div className="space-y-1">
       <div className="text-mute text-[11px]">{label}</div>
@@ -14,17 +26,17 @@ function Stat({ label, value, dim = false }: { label: string; value: any; dim?: 
 
 export default function Predictor() {
   const candidates = useQuery({
-    queryKey: ['predictor-candidates'],
+    queryKey: queryKeys.predictorCandidates,
     queryFn: api.predictorCandidates,
     refetchInterval: 5000,
   })
   const stats = useQuery({
-    queryKey: ['predictor-stats'],
+    queryKey: queryKeys.predictorStats,
     queryFn: api.predictorStats,
     refetchInterval: 5000,
   })
 
-  const s = stats.data ?? {}
+  const s = stats.data ?? EMPTY_STATS
   const cands = candidates.data ?? []
   const enabled = s.enabled !== false
 
@@ -86,7 +98,7 @@ export default function Predictor() {
                 </td>
               </tr>
             )}
-            {cands.map((c: any, i: number) => (
+            {cands.map((c, i) => (
               <tr key={`${c.base_name}:${c.adapter_name}:${i}`}>
                 <td className="font-mono">
                   {c.adapter_name ? `${c.base_name}:${c.adapter_name}` : c.base_name}

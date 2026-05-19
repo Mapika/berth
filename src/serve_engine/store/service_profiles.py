@@ -4,6 +4,8 @@ import json
 import sqlite3
 from dataclasses import dataclass, field
 
+from serve_engine.store.rows import row_get
+
 
 class AlreadyExists(Exception):
     pass
@@ -43,10 +45,7 @@ def _row_to_profile(row: sqlite3.Row) -> ServiceProfile:
         extra = {}
     if not isinstance(extra, dict):
         extra = {}
-    try:
-        node_label = row["node_label"]
-    except (IndexError, KeyError):
-        node_label = None
+    node_label = row_get(row, "node_label")
     return ServiceProfile(
         id=row["id"],
         name=row["name"],

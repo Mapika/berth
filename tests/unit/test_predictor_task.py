@@ -94,6 +94,23 @@ def _only_seq() -> PredictorConfig:
     )
 
 
+def test_task_exposes_public_snapshots(tmp_path):
+    conn = _fresh(tmp_path)
+    task = PredictorTask(
+        conn=conn,
+        backends={},
+        models_dir=tmp_path,
+        config=_only_seq(),
+    )
+
+    assert task.candidates_snapshot() == []
+    stats = task.stats_snapshot()
+    assert stats["enabled"] is True
+    assert stats["preloads_attempted"] == 0
+    assert stats["preloads_succeeded"] == 0
+    assert "tick_interval_s" in stats
+
+
 @pytest.mark.asyncio
 async def test_tick_preloads_adapter_into_existing_deployment(tmp_path, monkeypatch):
     """When the predictor returns an adapter candidate AND a ready base

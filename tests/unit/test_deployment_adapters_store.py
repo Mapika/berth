@@ -1,5 +1,3 @@
-import time
-
 from serve_engine.store import adapters as ad_store
 from serve_engine.store import db
 from serve_engine.store import deployment_adapters as da_store
@@ -24,6 +22,17 @@ def _make_adapter(conn, name: str) -> int:
     ).id
 
 
+def _set_attachment_time(conn, dep_id: int, adapter_id: int, ts: str) -> None:
+    conn.execute(
+        """
+        UPDATE deployment_adapters
+        SET loaded_at=?, last_used_at=?
+        WHERE deployment_id=? AND adapter_id=?
+        """,
+        (ts, ts, dep_id, adapter_id),
+    )
+
+
 def test_attach_and_list(tmp_path):
     conn, _, dep = _setup(tmp_path)
     a1 = _make_adapter(conn, "tone-formal")
@@ -42,7 +51,8 @@ def test_attach_idempotent_touches_loaded_at(tmp_path):
         "SELECT loaded_at FROM deployment_adapters WHERE deployment_id=? AND adapter_id=?",
         (dep.id, a),
     ).fetchone()["loaded_at"]
-    time.sleep(1.1)  # SQLite CURRENT_TIMESTAMP has 1-second resolution
+    _set_attachment_time(conn, dep.id, a, "2000-01-01 00:00:00")
+    first = "2000-01-01 00:00:00"
     da_store.attach(conn, dep.id, a)
     second = conn.execute(
         "SELECT loaded_at FROM deployment_adapters WHERE deployment_id=? AND adapter_id=?",
@@ -65,12 +75,11 @@ def test_lru_for_deployment_orders_by_last_used(tmp_path):
     a2 = _make_adapter(conn, "second-loaded")
     a3 = _make_adapter(conn, "third-loaded")
     da_store.attach(conn, dep.id, a1)
-    time.sleep(1.1)
     da_store.attach(conn, dep.id, a2)
-    time.sleep(1.1)
     da_store.attach(conn, dep.id, a3)
-    # Touch the first to push it to MRU
-    time.sleep(1.1)
+    _set_attachment_time(conn, dep.id, a1, "2000-01-01 00:00:00")
+    _set_attachment_time(conn, dep.id, a2, "2000-01-01 00:00:01")
+    _set_attachment_time(conn, dep.id, a3, "2000-01-01 00:00:02")
     da_store.touch(conn, dep.id, a1)
     lru = da_store.lru_for_deployment(conn, dep.id)
     assert lru is not None

@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { api, eventSourceUrl, type RequestTrace } from '../api'
+import { api, queryKeys, type RequestTrace } from '../api'
+import { openAdminEventSource } from '../eventSource'
 
 function fmtMs(seconds: number): string {
   const ms = seconds * 1000
@@ -204,12 +205,11 @@ function TraceRow({ t, isOpen, onToggle }: {
 export default function Requests() {
   // Seed from REST so the table renders something on initial load even if
   // the SSE stream hasn't fired yet.
-  const seed = useQuery({ queryKey: ['requests-seed'], queryFn: api.listRequests })
+  const seed = useQuery({ queryKey: queryKeys.requestsSeed, queryFn: api.listRequests })
   const [traces, setTraces] = useState<Map<string, RequestTrace>>(new Map())
   const [openId, setOpenId] = useState<string | null>(null)
   const [paused, setPaused] = useState(false)
   const seedApplied = useRef(false)
-  const esRef = useRef<EventSource | null>(null)
 
   useEffect(() => {
     if (!seed.data || seedApplied.current) return
@@ -222,56 +222,39 @@ export default function Requests() {
   }, [seed.data])
 
   useEffect(() => {
-    if (paused) {
-      esRef.current?.close()
-      esRef.current = null
-      return
-    }
-    let active = true
-    let es: EventSource | null = null
-    ;(async () => {
+    if (paused) return
+    const handler = (e: MessageEvent) => {
       try {
-        const url = await eventSourceUrl('/admin/requests/stream')
-        if (!active) return
-        es = new EventSource(url)
-        esRef.current = es
-        const handler = (e: MessageEvent) => {
-          try {
-            const data = JSON.parse(e.data)
-            if (Array.isArray(data)) {
-              setTraces(() => {
-                const m = new Map<string, RequestTrace>()
-                for (const t of data as RequestTrace[]) m.set(t.request_id, t)
-                return m
-              })
-            } else if (data && typeof data === 'object' && data.request_id) {
-              setTraces(prev => {
-                const m = new Map(prev)
-                m.set(data.request_id, data as RequestTrace)
-                // Cap to last 256 to mirror the daemon's deque size.
-                if (m.size > 256) {
-                  const oldest = Array.from(m.keys()).slice(0, m.size - 256)
-                  for (const k of oldest) m.delete(k)
-                }
-                return m
-              })
+        const data = JSON.parse(e.data)
+        if (Array.isArray(data)) {
+          setTraces(() => {
+            const m = new Map<string, RequestTrace>()
+            for (const t of data as RequestTrace[]) m.set(t.request_id, t)
+            return m
+          })
+        } else if (data && typeof data === 'object' && 'request_id' in data) {
+          setTraces(prev => {
+            const trace = data as RequestTrace
+            const m = new Map(prev)
+            m.set(trace.request_id, trace)
+            if (m.size > 256) {
+              const oldest = Array.from(m.keys()).slice(0, m.size - 256)
+              for (const k of oldest) m.delete(k)
             }
-          } catch { /* ignore malformed events */ }
+            return m
+          })
         }
-        es.addEventListener('snapshot', handler)
-        es.addEventListener('started', handler)
-        es.addEventListener('updated', handler)
-        es.addEventListener('completed', handler)
-      } catch (e) {
-        /* eventSourceUrl can throw if stream-token mint fails */
-        console.error('requests stream open failed', e)
-      }
-    })()
-    return () => {
-      active = false
-      es?.close()
-      esRef.current = null
+      } catch { /* ignore malformed events */ }
     }
+    return openAdminEventSource('/admin/requests/stream', {
+      listeners: {
+        snapshot: handler,
+        started: handler,
+        updated: handler,
+        completed: handler,
+      },
+      onOpenError: e => console.error('requests stream open failed', e),
+    })
   }, [paused])
 
   const rows = Array.from(traces.values()).sort(

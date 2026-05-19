@@ -1,6 +1,3 @@
-
-import time
-
 import pytest
 
 from serve_engine.store import db
@@ -181,11 +178,14 @@ def test_list_evictable_sorts_lru(tmp_path):
     db = _make(m2.id)
     dc = _make(m3.id)
 
-    # Touch dc first (older), then db (newer). Pinned da excluded.
-    # SQLite CURRENT_TIMESTAMP has 1-second resolution; sleep >1s to guarantee ordering.
-    dep_store.touch_last_request(conn, dc)
-    time.sleep(1.1)
-    dep_store.touch_last_request(conn, db)
+    conn.execute(
+        "UPDATE deployments SET last_request_at=? WHERE id=?",
+        ("2000-01-01 00:00:00", dc),
+    )
+    conn.execute(
+        "UPDATE deployments SET last_request_at=? WHERE id=?",
+        ("2000-01-01 00:00:01", db),
+    )
 
     rows = dep_store.list_evictable(conn)
     assert [r.id for r in rows] == [dc, db]

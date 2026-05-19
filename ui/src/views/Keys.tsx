@@ -1,6 +1,6 @@
 import { Fragment, useState } from 'react'
 import { useMutation, useQueries, useQuery, useQueryClient } from '@tanstack/react-query'
-import { api, type KeyUsage } from '../api'
+import { api, queryKeys, type ApiKey, type KeyUsage } from '../api'
 
 function fmtTokens(n: number): string {
   if (n < 1000) return String(n)
@@ -79,7 +79,7 @@ function UsageBars({
 
 function KeyDetail({ keyId }: { keyId: number }) {
   const q = useQuery({
-    queryKey: ['key-usage', keyId, 'detail'],
+    queryKey: queryKeys.keyUsage(keyId, 'detail'),
     queryFn: () => api.keyUsage(keyId, 86400, 3600),
     staleTime: 30_000,
   })
@@ -124,7 +124,7 @@ function KeyDetail({ keyId }: { keyId: number }) {
 
 export default function Keys() {
   const qc = useQueryClient()
-  const keys = useQuery({ queryKey: ['keys'], queryFn: api.listKeys })
+  const keys = useQuery({ queryKey: queryKeys.keys, queryFn: api.listKeys })
   const [name, setName] = useState('')
   const [tier, setTier] = useState('standard')
   const [lastSecret, setLastSecret] = useState<string | null>(null)
@@ -134,16 +134,16 @@ export default function Keys() {
 
   const create = useMutation({
     mutationFn: () => api.createKey({ name, tier }),
-    onSuccess: (resp: any) => {
+    onSuccess: (resp) => {
       setLastSecret(resp.secret)
       setCopied(false)
       setName('')
-      qc.invalidateQueries({ queryKey: ['keys'] })
+      qc.invalidateQueries({ queryKey: queryKeys.keys })
     },
   })
   const revoke = useMutation({
     mutationFn: (id: number) => api.revokeKey(id),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['keys'] }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: queryKeys.keys }),
   })
 
   async function copySecret() {
@@ -157,18 +157,18 @@ export default function Keys() {
     }
   }
 
-  const all = keys.data ?? []
-  const active = all.filter((k: any) => !k.revoked).length
+  const all: ApiKey[] = keys.data ?? []
+  const active = all.filter(k => !k.revoked).length
   const revoked = all.length - active
-  const visible = showRevoked ? all : all.filter((k: any) => !k.revoked)
+  const visible = showRevoked ? all : all.filter(k => !k.revoked)
 
   // Eagerly fetch 24h sparkline data for every visible non-revoked key.
   // Revoked keys won't have new traffic, so skip them.
   const usageQueries = useQueries({
     queries: visible
-      .filter((k: any) => !k.revoked)
-      .map((k: any) => ({
-        queryKey: ['key-usage', k.id, 'spark'],
+      .filter(k => !k.revoked)
+      .map(k => ({
+        queryKey: queryKeys.keyUsage(k.id, 'spark'),
         queryFn: () => api.keyUsage(k.id, 86400, 3600),
         staleTime: 60_000,
         refetchInterval: 60_000,
@@ -176,8 +176,8 @@ export default function Keys() {
   })
   const usageById = new Map<number, KeyUsage>()
   visible
-    .filter((k: any) => !k.revoked)
-    .forEach((k: any, i: number) => {
+    .filter(k => !k.revoked)
+    .forEach((k, i) => {
       const data = usageQueries[i]?.data
       if (data) usageById.set(k.id, data)
     })
@@ -275,7 +275,7 @@ export default function Keys() {
                 </td>
               </tr>
             )}
-            {visible.map((k: any) => {
+            {visible.map(k => {
               const usage = usageById.get(k.id)
               const reqs = usage?.buckets.map(b => b.requests) ?? []
               const totalReqs = reqs.reduce((a, b) => a + b, 0)

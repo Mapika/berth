@@ -1,14 +1,7 @@
 # Multi-Node serve-engine
 
 This page is the operator's guide to running a leader plus one or more
-agent hosts. The architectural rationale is split across two specs:
-
-- `docs/superpowers/specs/2026-05-18-multi-node-serving-design.md` —
-  the cluster fabric (mTLS WebSocket, enrollment, registry, routing).
-- `docs/superpowers/specs/2026-05-18-secure-by-default-cluster-transport-design.md` —
-  the two-listener TLS design covered on this page.
-
-Here we stick to setup, verification, and troubleshooting.
+agent hosts. It sticks to setup, verification, and troubleshooting.
 
 > **Preview status.** The cluster fabric (TLS, enrollment, mTLS
 > WebSocket, registry, heartbeat) is in place and tested. The

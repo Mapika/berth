@@ -12,11 +12,207 @@ export function clearToken() {
   localStorage.removeItem(TOKEN_KEY)
 }
 
+export const queryKeys = {
+  deployments: ['deps'] as const,
+  models: ['models'] as const,
+  keys: ['keys'] as const,
+  gpus: ['gpus'] as const,
+  backends: ['backends'] as const,
+  adapters: ['adapters'] as const,
+  profiles: ['profiles'] as const,
+  routes: ['routes'] as const,
+  nodes: ['nodes'] as const,
+  requests: ['requests'] as const,
+  predictorCandidates: ['predictor-candidates'] as const,
+  predictorStats: ['predictor-stats'] as const,
+  metricsSnapshot: ['metrics-snapshot'] as const,
+  clusterInfo: ['cluster-info'] as const,
+  config: ['config'] as const,
+  requestsSeed: ['requests-seed'] as const,
+  node: (nodeId: number) => ['node', nodeId] as const,
+  keyUsage: (keyId: number, scope: 'spark' | 'detail') =>
+    ['key-usage', keyId, scope] as const,
+}
+
 export async function eventSourceUrl(path: string): Promise<string> {
   if (!getToken()) return path
   const ticket = await api.createStreamToken()
   const sep = path.includes('?') ? '&' : '?'
   return `${path}${sep}stream_token=${encodeURIComponent(ticket.token)}`
+}
+
+export type Model = {
+  id: number
+  name: string
+  hf_repo: string
+  revision: string
+  local_path: string | null
+}
+
+export type CreateModelBody = {
+  name: string
+  hf_repo: string
+  revision?: string
+}
+
+export type DeploymentStatus =
+  | 'pending'
+  | 'loading'
+  | 'ready'
+  | 'stopping'
+  | 'stopped'
+  | 'failed'
+  | string
+
+export type Deployment = {
+  id: number
+  model_id: number
+  backend: string
+  image_tag: string
+  gpu_ids: number[]
+  tensor_parallel: number
+  max_model_len: number | null
+  dtype: string
+  container_id: string | null
+  container_name: string | null
+  container_port: number | null
+  container_address: string | null
+  status: DeploymentStatus
+  last_error: string | null
+  pinned: boolean
+  idle_timeout_s: number | null
+  vram_reserved_mb: number
+  last_request_at: string | null
+  max_loras: number
+  max_lora_rank: number
+  image_digest: string | null
+  node_id: number
+  vram_used_mb?: number | null
+}
+
+export type LoadDeploymentBody = {
+  model_name: string
+  hf_repo: string
+  revision?: string
+  backend?: string
+  image_tag?: string
+  gpu_ids: number[]
+  tensor_parallel?: number
+  max_model_len?: number
+  dtype?: string
+  pinned?: boolean
+  idle_timeout_s?: number | null
+  target_concurrency?: number | null
+  max_loras?: number
+  max_lora_rank?: number
+  extra_args?: Record<string, string>
+  node_label?: string | null
+}
+
+export type GpuSnapshot = {
+  index: number
+  memory_used_mb: number
+  memory_total_mb: number
+  gpu_util_pct: number
+  power_w: number
+}
+
+export type BackendInfo = {
+  name: string
+  image_default: string
+  supports_adapters: boolean
+}
+
+export type ApiKey = {
+  id: number
+  name: string
+  prefix: string
+  tier: string
+  revoked: boolean
+  allowed_models: string[] | null
+}
+
+export type CreateKeyBody = {
+  name: string
+  tier: string
+}
+
+export type CreateKeyResponse = ApiKey & {
+  secret: string
+}
+
+export type Adapter = {
+  id: number
+  name: string
+  base: string
+  hf_repo: string
+  revision: string
+  local_path: string | null
+  size_mb: number | null
+  lora_rank: number | null
+  loaded_into: number[]
+  downloaded: boolean
+  created_at: string
+  updated_at: string
+}
+
+export type CreatedAdapter = Pick<Adapter, 'id' | 'name' | 'base' | 'hf_repo' | 'revision'>
+
+export type CreateAdapterBody = {
+  name: string
+  base_model_name: string
+  hf_repo: string
+  revision?: string
+}
+
+export type AddLocalAdapterBody = {
+  name: string
+  base_model_name: string
+  local_path: string
+}
+
+export type AdapterDownload = {
+  name: string
+  local_path: string
+  size_mb: number | null
+  already_present?: boolean
+  lora_rank?: number | null
+}
+
+export type LocalAdapterResponse = AdapterDownload & {
+  base: string
+}
+
+export type HotLoadAdapterResponse = {
+  deployment_id: number
+  adapter: string
+  evicted: string | null
+}
+
+export type PredictorCandidate = {
+  base_name: string
+  adapter_name: string | null
+  score: number
+  reason: string
+}
+
+export type PredictorStats = {
+  enabled: boolean
+  tick_interval_s?: number
+  max_prewarm_per_tick?: number
+  max_base_prewarm_per_tick?: number
+  preloads_attempted: number
+  preloads_succeeded: number
+  preloads_skipped_already_warm: number
+  preloads_skipped_no_deployment: number
+  base_prewarms_attempted: number
+  base_prewarms_succeeded: number
+  base_prewarms_skipped_no_plan: number
+}
+
+export type StreamToken = {
+  token: string
+  expires_at: number
 }
 
 export type ServiceProfile = {
@@ -93,51 +289,45 @@ async function jfetch<T>(method: string, path: string, body?: unknown): Promise<
 }
 
 export const api = {
-  listDeployments: () => jfetch<any[]>('GET', '/admin/deployments'),
+  listDeployments: () => jfetch<Deployment[]>('GET', '/admin/deployments'),
   stopDeployment: (id: number) => jfetch<void>('DELETE', `/admin/deployments/${id}`),
   pinDeployment: (id: number) => jfetch<void>('POST', `/admin/deployments/${id}/pin`),
   unpinDeployment: (id: number) => jfetch<void>('POST', `/admin/deployments/${id}/unpin`),
-  listModels: () => jfetch<any[]>('GET', '/admin/models'),
-  createModel: (b: { name: string; hf_repo: string }) => jfetch<any>('POST', '/admin/models', b),
+  listModels: () => jfetch<Model[]>('GET', '/admin/models'),
+  createModel: (b: CreateModelBody) => jfetch<Model>('POST', '/admin/models', b),
   deleteModel: (name: string) => jfetch<void>('DELETE', `/admin/models/${name}`),
-  listKeys: () => jfetch<any[]>('GET', '/admin/keys'),
-  createKey: (b: { name: string; tier: string }) => jfetch<any>('POST', '/admin/keys', b),
+  listKeys: () => jfetch<ApiKey[]>('GET', '/admin/keys'),
+  createKey: (b: CreateKeyBody) => jfetch<CreateKeyResponse>('POST', '/admin/keys', b),
   revokeKey: (id: number) => jfetch<void>('DELETE', `/admin/keys/${id}`),
-  listGpus: () => jfetch<any[]>('GET', '/admin/gpus'),
-  listBackends: () => jfetch<{ name: string; image_default: string; supports_adapters: boolean }[]>(
-    'GET', '/admin/backends',
-  ),
-  loadModel: (b: any) => jfetch<any>('POST', '/admin/deployments', b),
-  createStreamToken: () => jfetch<{ token: string; expires_at: number }>('POST', '/admin/stream-token'),
+  listGpus: () => jfetch<GpuSnapshot[]>('GET', '/admin/gpus'),
+  listBackends: () => jfetch<BackendInfo[]>('GET', '/admin/backends'),
+  loadModel: (b: LoadDeploymentBody) => jfetch<Deployment>('POST', '/admin/deployments', b),
+  createStreamToken: () => jfetch<StreamToken>('POST', '/admin/stream-token'),
 
-  // Adapter endpoints.
-  listAdapters: () => jfetch<any[]>('GET', '/admin/adapters'),
-  createAdapter: (b: { name: string; base_model_name: string; hf_repo: string; revision?: string }) =>
-    jfetch<any>('POST', '/admin/adapters', b),
-  downloadAdapter: (name: string) => jfetch<any>('POST', `/admin/adapters/${name}/download`),
-  addLocalAdapter: (b: { name: string; base_model_name: string; local_path: string }) =>
-    jfetch<any>('POST', '/admin/adapters/local', b),
+  listAdapters: () => jfetch<Adapter[]>('GET', '/admin/adapters'),
+  createAdapter: (b: CreateAdapterBody) => jfetch<CreatedAdapter>('POST', '/admin/adapters', b),
+  downloadAdapter: (name: string) =>
+    jfetch<AdapterDownload>('POST', `/admin/adapters/${name}/download`),
+  addLocalAdapter: (b: AddLocalAdapterBody) =>
+    jfetch<LocalAdapterResponse>('POST', '/admin/adapters/local', b),
   deleteAdapter: (name: string, force = false) =>
     jfetch<void>('DELETE', `/admin/adapters/${name}${force ? '?force=true' : ''}`),
   hotLoadAdapter: (depId: number, name: string) =>
-    jfetch<any>('POST', `/admin/deployments/${depId}/adapters/${name}`),
+    jfetch<HotLoadAdapterResponse>('POST', `/admin/deployments/${depId}/adapters/${name}`),
   hotUnloadAdapter: (depId: number, name: string) =>
     jfetch<void>('DELETE', `/admin/deployments/${depId}/adapters/${name}`),
 
-  // Predictor endpoints.
-  predictorCandidates: () => jfetch<any[]>('GET', '/admin/predictor/candidates'),
-  predictorStats: () => jfetch<any>('GET', '/admin/predictor/stats'),
+  predictorCandidates: () => jfetch<PredictorCandidate[]>('GET', '/admin/predictor/candidates'),
+  predictorStats: () => jfetch<PredictorStats>('GET', '/admin/predictor/stats'),
 
-  // Service profiles.
   listProfiles: () => jfetch<ServiceProfile[]>('GET', '/admin/service-profiles'),
   createProfile: (b: CreateProfileBody) =>
     jfetch<ServiceProfile>('POST', '/admin/service-profiles', b),
   deployProfile: (name: string) =>
-    jfetch<any>('POST', `/admin/service-profiles/${encodeURIComponent(name)}/deploy`),
+    jfetch<Deployment>('POST', `/admin/service-profiles/${encodeURIComponent(name)}/deploy`),
   deleteProfile: (name: string) =>
     jfetch<void>('DELETE', `/admin/service-profiles/${encodeURIComponent(name)}`),
 
-  // Service routes.
   listRoutes: () => jfetch<ServiceRoute[]>('GET', '/admin/routes'),
   createRoute: (b: CreateRouteBody) => jfetch<ServiceRoute>('POST', '/admin/routes', b),
   deleteRoute: (name: string) =>
@@ -148,17 +338,14 @@ export const api = {
       `/admin/routes/match/dry-run?model=${encodeURIComponent(model)}`,
     ),
 
-  // Per-key usage (timeseries).
   keyUsage: (keyId: number, windowS = 86400, bucketS = 3600) =>
     jfetch<KeyUsage>(
       'GET',
       `/admin/keys/${keyId}/usage?window_s=${windowS}&bucket_s=${bucketS}`,
     ),
 
-  // Request inspector.
   listRequests: () => jfetch<RequestTrace[]>('GET', '/admin/requests'),
 
-  // Cluster / nodes.
   listNodes: () => jfetch<{ nodes: Node[] }>('GET', '/admin/nodes'),
   getNode: (id: number) =>
     jfetch<{ node: Node; gpus: NodeGpu[] }>('GET', `/admin/nodes/${id}`),

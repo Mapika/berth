@@ -1,0 +1,3 @@
+-- Reserved migration number.
+-- 006 shipped before this slot was filled; keep the filename so the
+-- migration sequence is easier to scan.

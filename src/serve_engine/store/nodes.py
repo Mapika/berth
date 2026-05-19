@@ -29,10 +29,18 @@ _COLUMNS = (
 
 def _row_to_node(row: sqlite3.Row) -> Node:
     return Node(
-        id=row[0], label=row[1], fingerprint=row[2], reachable_as=row[3],
-        status=row[4], first_seen=row[5], last_seen=row[6],
-        agent_version=row[7], cpu_count=row[8], total_ram_mb=row[9],
-        gpu_count=row[10], total_vram_mb=row[11],
+        id=row["id"],
+        label=row["label"],
+        fingerprint=row["fingerprint"],
+        reachable_as=row["reachable_as"],
+        status=row["status"],
+        first_seen=row["first_seen"],
+        last_seen=row["last_seen"],
+        agent_version=row["agent_version"],
+        cpu_count=row["cpu_count"],
+        total_ram_mb=row["total_ram_mb"],
+        gpu_count=row["gpu_count"],
+        total_vram_mb=row["total_vram_mb"],
     )
 
 

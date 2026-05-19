@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { api } from '../api'
+import { api, queryKeys, type Deployment, type GpuSnapshot, type Model } from '../api'
 
 function fmtMb(mb: number | null | undefined): string {
   if (!mb) return '-'
@@ -40,7 +40,7 @@ function gpuGridCols(count: number): string {
   return 'grid-cols-1 md:grid-cols-2 lg:grid-cols-4'
 }
 
-function idleCountdown(d: any): string | null {
+function idleCountdown(d: Deployment): string | null {
   if (d.pinned) return null
   if (!d.idle_timeout_s || !d.last_request_at) return null
   // sqlite CURRENT_TIMESTAMP is naive UTC ("YYYY-MM-DD HH:MM:SS"); coerce to ISO
@@ -54,7 +54,7 @@ function idleCountdown(d: any): string | null {
   return `${Math.round(remaining / 60)}m`
 }
 
-function DeploymentChip({ d, modelName }: { d: any; modelName: string }) {
+function DeploymentChip({ d, modelName }: { d: Deployment; modelName: string }) {
   const idle = idleCountdown(d)
   const vram = d.vram_used_mb && d.vram_used_mb > 0 ? d.vram_used_mb : d.vram_reserved_mb
   return (
@@ -82,12 +82,12 @@ function DeploymentChip({ d, modelName }: { d: any; modelName: string }) {
 function GpuCard({
   g, deployments, models,
 }: {
-  g: any
-  deployments: any[]
-  models: any[]
+  g: GpuSnapshot
+  deployments: Deployment[]
+  models: Model[]
 }) {
   const pct = (g.memory_used_mb / g.memory_total_mb) * 100
-  const onCard = deployments.filter((d: any) =>
+  const onCard = deployments.filter(d =>
     (d.gpu_ids ?? []).includes(g.index) &&
     (d.status === 'ready' || d.status === 'loading'),
   )
@@ -120,8 +120,8 @@ function GpuCard({
       </div>
       {onCard.length > 0 && (
         <div className="pt-2 border-t border-rule-soft space-y-0.5">
-          {onCard.map((d: any) => {
-            const m = (models ?? []).find((m: any) => m.id === d.model_id)
+          {onCard.map(d => {
+            const m = models.find(m => m.id === d.model_id)
             return (
               <DeploymentChip key={d.id} d={d} modelName={m?.name ?? `#${d.id}`} />
             )
@@ -134,10 +134,10 @@ function GpuCard({
 
 export default function Dashboard() {
   const qc = useQueryClient()
-  const deps = useQuery({ queryKey: ['deps'], queryFn: api.listDeployments, refetchInterval: 2000 })
-  const gpus = useQuery({ queryKey: ['gpus'], queryFn: api.listGpus, refetchInterval: 2000 })
-  const models = useQuery({ queryKey: ['models'], queryFn: api.listModels, refetchInterval: 5000 })
-  const nodes = useQuery({ queryKey: ['nodes'], queryFn: api.listNodes, refetchInterval: 5000 })
+  const deps = useQuery({ queryKey: queryKeys.deployments, queryFn: api.listDeployments, refetchInterval: 2000 })
+  const gpus = useQuery({ queryKey: queryKeys.gpus, queryFn: api.listGpus, refetchInterval: 2000 })
+  const models = useQuery({ queryKey: queryKeys.models, queryFn: api.listModels, refetchInterval: 5000 })
+  const nodes = useQuery({ queryKey: queryKeys.nodes, queryFn: api.listNodes, refetchInterval: 5000 })
   const [showAll, setShowAll] = useState(false)
   const [pendingId, setPendingId] = useState<number | null>(null)
   const [actionError, setActionError] = useState('')
@@ -146,18 +146,18 @@ export default function Dashboard() {
     mutationFn: (id: number) => api.stopDeployment(id),
     onMutate: id => { setPendingId(id); setActionError('') },
     onError: (e: Error) => setActionError(e.message),
-    onSettled: () => { setPendingId(null); qc.invalidateQueries({ queryKey: ['deps'] }) },
+    onSettled: () => { setPendingId(null); qc.invalidateQueries({ queryKey: queryKeys.deployments }) },
   })
   const pinMut = useMutation({
     mutationFn: ({ id, pinned }: { id: number; pinned: boolean }) =>
       pinned ? api.unpinDeployment(id) : api.pinDeployment(id),
     onMutate: ({ id }) => { setPendingId(id); setActionError('') },
     onError: (e: Error) => setActionError(e.message),
-    onSettled: () => { setPendingId(null); qc.invalidateQueries({ queryKey: ['deps'] }) },
+    onSettled: () => { setPendingId(null); qc.invalidateQueries({ queryKey: queryKeys.deployments }) },
   })
 
   const all = deps.data ?? []
-  const active = all.filter((d: any) => d.status === 'ready' || d.status === 'loading')
+  const active = all.filter(d => d.status === 'ready' || d.status === 'loading')
   const visible = showAll ? all : active
   const hiddenCount = all.length - visible.length
 
@@ -168,8 +168,8 @@ export default function Dashboard() {
         <div className="flex items-baseline gap-6">
           {(() => {
             const ns = nodes.data?.nodes ?? []
-            const ready = ns.filter((n: any) => n.status === 'ready').length
-            const remote = ns.filter((n: any) => n.label !== 'local').length
+            const ready = ns.filter(n => n.status === 'ready').length
+            const remote = ns.filter(n => n.label !== 'local').length
             if (ns.length === 0) return null
             return (
               <div className="label" title="cluster nodes">
@@ -190,7 +190,7 @@ export default function Dashboard() {
       <section className="space-y-6">
         <div className="label">gpus</div>
         <div className={'grid gap-12 ' + gpuGridCols((gpus.data ?? []).length)}>
-          {(gpus.data ?? []).map((g: any) => (
+          {(gpus.data ?? []).map(g => (
             <GpuCard
               key={g.index}
               g={g}
@@ -240,9 +240,9 @@ export default function Dashboard() {
                 </td>
               </tr>
             )}
-            {visible.map((d: any) => {
-              const m = (models.data ?? []).find((m: any) => m.id === d.model_id)
-              const node = (nodes.data?.nodes ?? []).find((n: any) => n.id === d.node_id)
+            {visible.map(d => {
+              const m = (models.data ?? []).find(m => m.id === d.model_id)
+              const node = (nodes.data?.nodes ?? []).find(n => n.id === d.node_id)
               const nodeLabel = node?.label ?? (d.node_id ? `#${d.node_id}` : 'local')
               const live = d.status === 'ready' || d.status === 'loading'
               const busy = pendingId === d.id

@@ -376,7 +376,6 @@ async def test_hot_load_evicts_lru_when_slots_full(
 ):
     """Deployment with max_loras=2 already has 2 adapters; loading a third
     causes the LRU one to be hot-unloaded first."""
-    import time
     _, dep = _seed_base_and_deployment(app, max_loras=2)
     conn = app.state.conn
 
@@ -393,9 +392,23 @@ async def test_hot_load_evicts_lru_when_slots_full(
     a2 = _make_loaded_adapter("second")
     _make_loaded_adapter("third")  # not pre-attached; loaded by the test
     da_store.attach(conn, dep.id, a1.id)
-    time.sleep(1.1)
     da_store.attach(conn, dep.id, a2.id)
-    # `first` is now LRU. Loading `third` must evict `first`.
+    conn.execute(
+        """
+        UPDATE deployment_adapters
+        SET last_used_at=CASE adapter_id
+            WHEN ? THEN ?
+            WHEN ? THEN ?
+            ELSE last_used_at
+        END
+        WHERE deployment_id=?
+        """,
+        (
+            a1.id, "2000-01-01 00:00:00",
+            a2.id, "2000-01-01 00:00:01",
+            dep.id,
+        ),
+    )
 
     posted_urls: list[str] = []
     original_post = httpx.AsyncClient.post

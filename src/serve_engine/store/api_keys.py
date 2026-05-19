@@ -9,6 +9,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from serve_engine.store import db
+from serve_engine.store.rows import row_get
 
 
 @dataclass(frozen=True)
@@ -92,14 +93,7 @@ def _decode_allowed_models(raw: object) -> list[str] | None:
 
 
 def _row_to_key(row: sqlite3.Row) -> ApiKey:
-    # `allowed_models` was added in migration 013; older rows in databases
-    # that haven't run migrations would lack the column. We read defensively
-    # via row.keys() so unit tests against fresh schemas and any legacy
-    # rows both work.
-    try:
-        raw_allow = row["allowed_models"]
-    except (IndexError, KeyError):
-        raw_allow = None
+    raw_allow = row_get(row, "allowed_models")
     return ApiKey(
         id=row["id"],
         name=row["name"],

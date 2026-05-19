@@ -1,6 +1,7 @@
 import { Fragment, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { api } from '../api'
+import { api, queryKeys, type LoadDeploymentBody, type Model } from '../api'
+import { parseGpuIds, parseMaxModelLen, remoteNodeLabel } from '../launchForm'
 
 type LauncherForm = {
   backend: string  // '' = let the server pick
@@ -20,10 +21,10 @@ const DEFAULT_FORM: LauncherForm = {
 
 export default function Models() {
   const qc = useQueryClient()
-  const models = useQuery({ queryKey: ['models'], queryFn: api.listModels })
-  const backends = useQuery({ queryKey: ['backends'], queryFn: api.listBackends })
-  const gpus = useQuery({ queryKey: ['gpus'], queryFn: api.listGpus })
-  const nodes = useQuery({ queryKey: ['nodes'], queryFn: api.listNodes })
+  const models = useQuery({ queryKey: queryKeys.models, queryFn: api.listModels })
+  const backends = useQuery({ queryKey: queryKeys.backends, queryFn: api.listBackends })
+  const gpus = useQuery({ queryKey: queryKeys.gpus, queryFn: api.listGpus })
+  const nodes = useQuery({ queryKey: queryKeys.nodes, queryFn: api.listNodes })
   const [repo, setRepo] = useState('')
   const [name, setName] = useState('')
   const [openLauncher, setOpenLauncher] = useState<string | null>(null)
@@ -35,26 +36,17 @@ export default function Models() {
       name: name || repo.split('/').pop()!.toLowerCase(),
       hf_repo: repo,
     }),
-    onSuccess: () => { setRepo(''); setName(''); qc.invalidateQueries({ queryKey: ['models'] }) },
+    onSuccess: () => { setRepo(''); setName(''); qc.invalidateQueries({ queryKey: queryKeys.models }) },
   })
   const delModel = useMutation({
     mutationFn: (modelName: string) => api.deleteModel(modelName),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['models'] }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: queryKeys.models }),
   })
   const launchModel = useMutation({
-    mutationFn: (m: any) => {
-      const gpuIds = form.gpuIds
-        .split(',')
-        .map(s => s.trim())
-        .filter(s => s.length > 0)
-        .map(s => Number(s))
-        .filter(n => Number.isInteger(n) && n >= 0)
-      if (gpuIds.length === 0) throw new Error('gpu_ids: provide at least one valid GPU index')
-      const maxLen = Number(form.maxModelLen)
-      if (!Number.isInteger(maxLen) || maxLen < 128) {
-        throw new Error('max_model_len: must be an integer >= 128')
-      }
-      const payload: Record<string, unknown> = {
+    mutationFn: (m: Model) => {
+      const gpuIds = parseGpuIds(form.gpuIds)
+      const maxLen = parseMaxModelLen(form.maxModelLen)
+      const payload: LoadDeploymentBody = {
         model_name: m.name,
         hf_repo: m.hf_repo,
         gpu_ids: gpuIds,
@@ -62,16 +54,14 @@ export default function Models() {
         pinned: form.pinned,
       }
       if (form.backend) payload.backend = form.backend
-      if (form.nodeLabel && form.nodeLabel !== 'local') {
-        payload.node_label = form.nodeLabel
-      }
+      payload.node_label = remoteNodeLabel(form.nodeLabel)
       return api.loadModel(payload)
     },
     onMutate: () => setLaunchError(''),
     onSuccess: () => {
       setOpenLauncher(null)
       setForm(DEFAULT_FORM)
-      qc.invalidateQueries({ queryKey: ['deps'] })
+      qc.invalidateQueries({ queryKey: queryKeys.deployments })
     },
     onError: (e: Error) => setLaunchError(e.message),
   })
@@ -130,7 +120,7 @@ export default function Models() {
                 </td>
               </tr>
             )}
-            {(models.data ?? []).map((m: any) => {
+            {(models.data ?? []).map(m => {
               const isOpen = openLauncher === m.name
               const pending = launchModel.isPending && openLauncher === m.name
               return (
@@ -226,7 +216,7 @@ export default function Models() {
                               ) : (
                                 (gpus.data ?? []).length > 0 && (
                                   <div className="text-mute text-[10px] tracking-wider">
-                                    available: {(gpus.data ?? []).map((g: any) => g.index).join(', ')}
+                                    available: {(gpus.data ?? []).map(g => g.index).join(', ')}
                                   </div>
                                 )
                               )}

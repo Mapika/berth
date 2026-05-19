@@ -4,6 +4,8 @@ import sqlite3
 from dataclasses import dataclass
 from typing import Literal
 
+from serve_engine.store.rows import row_get
+
 Status = Literal["pending", "loading", "ready", "stopping", "stopped", "failed"]
 ACTIVE_STATUSES: tuple[Status, ...] = ("pending", "loading", "ready")
 
@@ -37,26 +39,10 @@ class Deployment:
 def _row_to_dep(row: sqlite3.Row) -> Deployment:
     gpu_csv = row["gpu_ids"] or ""
     gpu_ids = [int(x) for x in gpu_csv.split(",") if x]
-    # max_loras is on schema migration 004; older DBs may not have it.
-    # sqlite3.Row doesn't support .get; check via keys() once.
-    try:
-        max_loras_value = row["max_loras"]
-    except (KeyError, IndexError):
-        max_loras_value = 0
-    try:
-        max_lora_rank_value = row["max_lora_rank"]
-    except (KeyError, IndexError):
-        max_lora_rank_value = 0
-    # image_digest is on schema migration 012; older DBs may not have it.
-    try:
-        image_digest_value = row["image_digest"]
-    except (KeyError, IndexError):
-        image_digest_value = None
-    # node_id is on schema migration 014; older DBs may not have it.
-    try:
-        node_id_value = row["node_id"]
-    except (KeyError, IndexError):
-        node_id_value = 0
+    max_loras_value = row_get(row, "max_loras", 0)
+    max_lora_rank_value = row_get(row, "max_lora_rank", 0)
+    image_digest_value = row_get(row, "image_digest")
+    node_id_value = row_get(row, "node_id", 0)
     return Deployment(
         id=row["id"],
         model_id=row["model_id"],

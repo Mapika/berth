@@ -1,5 +1,5 @@
 import { useQuery } from '@tanstack/react-query'
-import { api, type ConfigSource, type DaemonConfig } from '../api'
+import { api, queryKeys, type ConfigSource, type DaemonConfig } from '../api'
 
 function sourceColor(src: ConfigSource): string {
   if (src === 'flag') return 'text-accent'
@@ -109,8 +109,8 @@ function tomlPreview(values: DaemonConfig['values'], sources: DaemonConfig['sour
 }
 
 export default function Settings() {
-  const cfg = useQuery({ queryKey: ['config'], queryFn: api.getConfig })
-  const cluster = useQuery({ queryKey: ['cluster-info'], queryFn: api.getClusterInfo })
+  const cfg = useQuery({ queryKey: queryKeys.config, queryFn: api.getConfig })
+  const cluster = useQuery({ queryKey: queryKeys.clusterInfo, queryFn: api.getClusterInfo })
 
   if (cfg.isLoading) {
     return <div className="text-mute text-[11px] tracking-wider">loading…</div>

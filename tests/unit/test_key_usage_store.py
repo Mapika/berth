@@ -1,5 +1,3 @@
-import time
-
 from serve_engine.store import api_keys, db, key_usage
 
 
@@ -23,10 +21,9 @@ def test_purge_older_than(tmp_path):
     conn = _fresh(tmp_path)
     _, k = api_keys.create(conn, name="a", tier="standard")
     key_usage.record(conn, key_id=k.id, tokens_in=1, tokens_out=1)
-    # Sleep 2 s so the first record is >=2 whole SQLite seconds older.
-    # CURRENT_TIMESTAMP has 1-second granularity, so we need the gap to span
-    # at least two distinct second values to reliably exclude the first row.
-    time.sleep(2)
+    conn.execute(
+        "UPDATE key_usage_events SET ts=datetime('now', '-2 seconds')"
+    )
     key_usage.record(conn, key_id=k.id, tokens_in=2, tokens_out=2)
     purged = key_usage.purge_older_than_s(conn, max_age_s=1)
     assert purged == 1
