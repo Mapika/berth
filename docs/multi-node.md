@@ -3,12 +3,10 @@
 This page is the operator's guide to running a leader plus one or more
 agent hosts. It sticks to setup, verification, and troubleshooting.
 
-> **Preview status.** The cluster fabric (TLS, enrollment, mTLS
-> WebSocket, registry, heartbeat) is in place and tested. The
-> lifecycle manager does **not yet** dispatch deployment starts
-> through the AgentLink, so `serve run <model>` still spawns the
-> engine container on the leader host even when agents are connected.
-> See **Status** below before planning a production rollout.
+> **Current status.** The cluster fabric, enrollment, remote start/stop,
+> tunneled proxying, health probes, and remote log streaming are wired and
+> tested. Direct-LAN data-plane mode, replicas, automatic public ACME, and
+> fine-grained per-agent request metrics are still follow-up work.
 
 ## Concepts
 
@@ -47,11 +45,10 @@ uv tool install --editable .
 serve doctor
 ```
 
-Linux + NVIDIA + Docker 24+ requirements apply to every agent host.
-The leader host can have no GPU at all if you intend to use it purely
-as a control plane (today's lifecycle manager assumes a local GPU so
-this is most useful once the manager refactor lands; flagged in
-**Status**).
+Linux + NVIDIA + Docker 24+ requirements apply to every agent host. The leader
+still needs Docker because it owns lifecycle orchestration and can run local
+deployments, but it can act mostly as a control plane when workloads target
+remote node labels.
 
 ## Quick start (LAN, single afternoon)
 
@@ -132,6 +129,18 @@ After that, `serve agent start` runs the agent loop and connects to
 serve nodes ls            # new node should appear `ready`
 serve nodes show <id>     # GPU inventory, agent_version, last heartbeat
 ```
+
+### Run on an agent
+
+Target the node label when launching directly:
+
+```bash
+serve run qwen-0_5b --node gpu-rig-2 --gpu 0 --engine vllm
+```
+
+Or set `node_label` on a service profile. The leader sends the start request
+through the agent tunnel, the agent downloads/mounts the model on its own host,
+and `/v1/*` traffic is proxied back through the same mTLS WebSocket.
 
 ## Configuring the leader
 
@@ -344,30 +353,27 @@ What you can rely on:
 - `serve config show / set-public / set-cluster / set-public-tls`.
 - Heartbeat-based health watcher (`ready` → `unreachable` after 15 s
   of silence; auto-recovers on reconnect).
+- Remote `start_deployment`, `stop_deployment`, health probe, and log
+  streaming through `AgentLink`.
 - Tunneled `/v1/*` data plane through `RemoteAgentLink.proxy_request`
   (exercised in `tests/integration/test_remote_agent_roundtrip.py`).
+- `serve run --node <label>` and service-profile `node_label` targeting.
+- Cluster UI surface for nodes, transport summary, GPU inventory, and
+  sparkline metrics.
 
-What is **not yet wired** in this release:
+Current gaps:
 
-- `serve run <model>` always spawns the engine container on the
-  leader host. The manager has the `agent_registry` and dispatch
-  helpers but its start path still calls `self._docker.run(...)`
-  directly.
-- The `/v1/*` route handler still uses today's direct httpx call,
-  not `_proxy_via_link`.
 - Direct-LAN data-plane mode (advertised `reachable_as` + leader
   probing).
 - ACME / Let's Encrypt auto-issuance for the public-listener cert
   (bring your own cert today).
-- UI surface for nodes (no Nodes page yet; chips on deployments not
-  added).
-- `node_label` affinity on service profiles.
 - Replicas of the same service profile across nodes.
+- Per-agent request attribution is still coarse; see Metrics below.
+- Reconnect reconciliation still favors keeping remote rows live rather
+  than aggressively killing orphaned remote containers.
 
-In other words: the fabric and the transport are real, but workloads
-still land on the leader. The next iteration plan (separate doc)
-addresses the manager and proxy routing changes that make remote-agent
-deployments actually serve traffic.
+In other words: the tunneled path is real, but this is still a small control
+plane, not a full scheduler.
 
 ## Troubleshooting
 
@@ -463,10 +469,12 @@ them:
 
 ## Observability
 
-Each agent samples GPU + per-deployment in-flight + recent latency on
-every heartbeat tick (5 s by default) and ships the snapshot on the
-existing WebSocket. The leader's `MetricsAggregator` keeps a 60 s
-rolling window per node and exposes the data three ways:
+Each agent sends GPU stats on every heartbeat tick (5 s by default) over the
+existing WebSocket. The leader's own node also publishes local request counters
+into the same `MetricsAggregator`. The schema has per-deployment request and
+latency fields; remote-agent request attribution is still coarse, noted below.
+The aggregator keeps a 60 s rolling window per node and exposes the data three
+ways:
 
 ### Prometheus
 
@@ -609,25 +617,17 @@ proper auth + backups), see [deploy.md](deploy.md) and
 
 ## Roadmap
 
-Tracked in the design docs, in priority order:
+Likely next work, in priority order:
 
-1. **Manager-via-AgentLink.** Route `start_deployment` through the
-   chosen node's link; move `wait_healthy` and image digest collection
-   behind `AgentLink`. After this, remote-agent deployments serve
-   traffic end-to-end.
-2. **Proxy via `_proxy_via_link`.** Thread the helper into the `/v1/*`
-   route handler so the data plane goes through `AgentLink` instead
-   of direct httpx.
-3. **Direct-LAN ingress.** Agent opens a guarded mTLS ingress on its
+1. **Direct-LAN ingress.** Agent opens a guarded mTLS ingress on its
    `reachable_as` address; leader probes and switches the data plane
    to direct routing when reachable. Falls back to tunnel
    automatically.
-4. **ACME for the public listener.** Auto-issue and auto-renew via
+2. **ACME for the public listener.** Auto-issue and auto-renew via
    Let's Encrypt so a single-command public deploy works without
    external certbot orchestration.
-5. **UI.** Nodes page, node chip on deployment cards, profile
-   `node_label` editor.
-6. **Service-profile `node_label` affinity.**
-7. **Replica fan-out across nodes.**
-8. **Reconnect reconciliation polish** (orphan-container kill, drift
+3. **Replica fan-out across nodes.**
+4. **Per-agent request metrics.** Attribute in-flight and latency samples
+   on the agent side instead of over-counting on the leader.
+5. **Reconnect reconciliation polish** (orphan-container kill, drift
    correction).

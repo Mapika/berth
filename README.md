@@ -52,12 +52,16 @@ Do not use it if:
 - OpenAI-compatible `/v1/chat/completions`, `/v1/completions`,
   `/v1/embeddings`, and `/v1/models`
 - Model registry, deployments, service profiles, and explicit route rules
+- LoRA adapter registry, download, hot-load, and unload paths
 - API keys, admin keys, and request/token rate limits
-- Prometheus metrics, GPU stats, lifecycle events, logs, and `serve top`
-- Web UI bundled into the Python package
+- Prometheus metrics, GPU stats, request tracing, lifecycle events, logs, and
+  `serve top`
+- Web UI bundled into the Python package, including cluster, services, keys,
+  logs, requests, and playground views
 
 There is also a secure-by-default multi-node path: a leader serves the public
-API, and GPU agents dial back over mTLS WebSocket. I still think the best
+API, and GPU agents dial back over mTLS WebSocket. Remote deployments start,
+stop, proxy, and stream logs through that tunnel. I still think the best
 starting point is one box; the multi-node path is there when the second box is
 actually useful.
 
@@ -89,6 +93,7 @@ This is the test surface I actively care about right now:
 | Python | 3.11+ |
 | Engines | vLLM and SGLang tested end to end; TensorRT-LLM adapter present |
 | State | SQLite under `~/.serve` |
+| Multi-node | Leader plus mTLS WebSocket agents; tunneled data plane |
 | UI | Bundled Vite/React build served by the daemon |
 
 ## Install
@@ -299,37 +304,43 @@ on SGLang.
 
 ## Concepts
 
-**Service**
+**Model**
 
-A runnable inference process. Today that is usually a vLLM, SGLang, or
-TensorRT-LLM container. Later it can be a local process or remote HTTP service.
+A named Hugging Face repository entry. The model name is what local commands
+and direct `/v1/*` calls usually target.
 
 **Service profile**
 
 A saved launch definition: backend, image, model, args, GPU placement,
-concurrency, context length, and timeout policy.
+concurrency, context length, timeout policy, and optional `node_label`.
 
 **Deployment**
 
-A running instance of a service profile. Deployments move through `pending`,
-`loading`, `ready`, `stopping`, `stopped`, and `failed`.
+A running engine container for one model/profile. Deployments move through
+`loading`, `ready`, `stopped`, and `failed`, and can live on the leader or on
+an enrolled agent node.
 
 **Route**
 
-A rule that maps an incoming request to a service profile. The first route type
-matches the OpenAI `model` field and rewrites it to the served model name.
+A rule that maps an incoming OpenAI `model` value to a primary service profile
+and optional fallback. The proxy rewrites the upstream model name to the served
+base model or adapter slot.
+
+**Adapter**
+
+A LoRA adapter tied to a base model. It can be downloaded or registered from
+disk, then hot-loaded into a ready backend that supports adapters.
+
+**Node**
+
+The leader host or an enrolled agent host. Nodes report GPU inventory,
+heartbeat, and metrics. Service profiles can target a node by label.
 
 **Backend**
 
 The adapter that knows how to launch a specific engine. Engine-specific argv,
 ports, health paths, metrics paths, and memory headroom live behind this
 interface.
-
-**Driver**
-
-The mechanism that starts and stops services. Docker is the current driver.
-Process, remote HTTP, SSH, Slurm, or Kubernetes drivers can be added behind the
-same lifecycle contract.
 
 ## CLI
 
@@ -351,6 +362,12 @@ serve logs                tail engine container logs
 serve key create          create an API key
 serve key list            list key prefixes
 serve key revoke <id>     revoke a key
+serve adapter ...         manage LoRA adapters
+serve nodes ...           enroll, list, inspect, and remove agent nodes
+serve agent ...           register and run an agent host
+serve config ...          inspect and edit listener/TLS config
+serve backup create       snapshot db, CA, key pepper, and config
+serve predict             inspect predictor candidates and usage history
 serve update-engines      check for newer pinned engine tags
 ```
 
@@ -360,6 +377,7 @@ Useful `serve run` options:
 --engine vllm|sglang|trtllm
 --gpu 0
 --gpu 0,1
+--node gpu-rig-2
 --ctx 8192
 --max-seqs 32
 --idle-timeout 300
@@ -374,38 +392,51 @@ A non-pinned deployment is evicted once `now - last_request_at` exceeds
 ## Architecture
 
 ```text
-client or SDK
-    |
-    | HTTP /v1/*
-    v
-+------------------------------+
-| serve daemon                 |
-|                              |
-| OpenAI-compatible API        |
-| admin API                    |
-| auth and limits              |
-| router                       |
-| lifecycle manager            |
-| metrics and events           |
-+------------------------------+
-    |
-    | Docker API
-    v
-+------------------------------+
-| engine containers            |
-|                              |
-| vllm/vllm-openai             |
-| lmsysorg/sglang              |
-| tensorrt-llm                 |
-+------------------------------+
+SDK / browser / Prometheus
+        |
+        | HTTPS :11500
+        v
+  public_app
+  /v1/*, /admin/*, /metrics, UI
+        |
+        | shared state
+        v
+  LifecycleManager + router + metrics + predictor
+        |
+        +-- local node: Docker API -> engine container
+        |
+        `-- remote node: AgentLink over mTLS WebSocket
+                         -> agent Docker API -> engine container
+
+local CLI
+        |
+        | Unix socket ~/.serve/sock
+        v
+  uds_app, same manager and state
+
+agent hosts
+        |
+        | HTTPS/mTLS :11501
+        v
+  cluster_app
+  /cluster/agent, /admin/nodes/register, /admin/ca.pem
 ```
 
 Runtime choices:
 
-- The daemon runs on the host as one async Python process.
-- Engine services run in separate containers.
-- Containers bind to random localhost ports.
-- The router only sends traffic to ready deployments.
+- One daemon process builds three FastAPI apps: public, cluster, and local UDS.
+- All three apps share one SQLite connection, lifecycle manager, event bus,
+  request tracer, metrics aggregator, and node registry.
+- The public app serves `/v1/*`, authenticated `/admin/*`, `/metrics`, and the
+  bundled UI. It also owns startup/shutdown background tasks.
+- The cluster app only serves the agent WebSocket, enrollment registration, and
+  CA endpoint, so it can be firewalled separately from the public API.
+- Engine services run as Docker containers on the leader or on an enrolled
+  agent. Remote start, stop, health probe, proxy, and logs go through
+  `AgentLink`.
+- The proxy resolves routes and adapters, ranks ready deployments with node
+  signals and affinity, retries pre-first-byte failures for bare-base requests,
+  and records usage/token counters.
 - State lives in SQLite under `~/.serve`.
 - Engine defaults come from `src/serve_engine/backends/backends.yaml`.
 - Per-host engine overrides live in `~/.serve/backends.override.yaml`.
@@ -418,6 +449,13 @@ By default, serve-engine owns `~/.serve`. Override it with `SERVE_HOME`.
 ~/.serve/
 |-- db.sqlite               models, deployments, profiles, routes, keys, usage
 |-- sock                    local CLI control socket
+|-- config.toml             listener, TLS, and proxy-header config
+|-- key_pepper              API-key HMAC pepper; back up with db.sqlite
+|-- ca/                     leader cluster CA and server cert material
+|-- ca.crt                  agent-side pinned CA after registration
+|-- agent.crt               agent-side mTLS client certificate
+|-- agent.key               agent-side mTLS client key
+|-- agent.yaml              agent connection config
 |-- logs/
 |   `-- daemon.log          daemon stdout and stderr
 |-- models/                 downloaded Hugging Face model files
@@ -433,10 +471,14 @@ By default, serve-engine owns `~/.serve`. Override it with `SERVE_HOME`.
 - Use `serve ps` for deployment state.
 - Use `serve logs` when an engine fails to become healthy.
 - Use `/admin/events` or `serve top` for lifecycle visibility.
+- Use the web UI's Requests view when proxy routing or token accounting looks
+  wrong.
 - Use `--pin` for services that should stay loaded.
 - Use `--idle-timeout` for services that should leave the GPU when quiet.
 - Use service profiles when launch arguments need to be repeatable.
 - Use routes when the public model name should not be tied to one backend.
+- Use `serve nodes enroll <label>` when a second GPU host is worth the added
+  moving parts.
 - If something weird happens, see [docs/troubleshooting.md](docs/troubleshooting.md).
 
 ## More Docs
@@ -481,9 +523,9 @@ uv venv
 source .venv/bin/activate
 uv pip install -e ".[dev]"
 uv lock --check
-ruff check src tests
-mypy src
-pytest tests/unit tests/integration
+uv run ruff check src tests
+uv run mypy src
+uv run pytest tests/unit tests/integration
 ```
 
 UI build:
