@@ -6,12 +6,14 @@ from fastapi import APIRouter, Request
 from fastapi.responses import PlainTextResponse
 
 from serve_engine.observability.metrics import (
+    format_cluster_metrics,
     format_daemon_metrics,
     gather_engine_metrics,
 )
 from serve_engine.store import api_keys as _ak_store
 from serve_engine.store import deployments as dep_store
 from serve_engine.store import models as model_store
+from serve_engine.store import nodes as nodes_store
 
 router = APIRouter()
 
@@ -39,4 +41,12 @@ async def metrics(request: Request) -> str:
         url = f"http://{d.container_address}:{d.container_port}{backend.metrics_path}"
         engine_urls.append((d.id, url))
     engine_text = await gather_engine_metrics(engine_urls)
-    return daemon_text + engine_text
+
+    # Cluster metrics (per-node + per-deployment) from the aggregator.
+    # Empty when no agents have reported yet — string is just appended.
+    cluster_text = ""
+    aggregator = getattr(request.app.state, "metrics_aggregator", None)
+    if aggregator is not None:
+        labels = {n.id: n.label for n in nodes_store.list_all(conn)}
+        cluster_text = format_cluster_metrics(aggregator, node_labels=labels)
+    return daemon_text + engine_text + cluster_text

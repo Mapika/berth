@@ -4,7 +4,79 @@ import asyncio
 
 import httpx
 
+from serve_engine.daemon.metrics_aggregator import MetricsAggregator
 from serve_engine.observability.trtllm_metrics import translate_many
+
+
+_CLUSTER_HELP_BLOCK = """\
+# HELP serve_node_gpu_util_pct Per-GPU utilization percent.
+# TYPE serve_node_gpu_util_pct gauge
+# HELP serve_node_gpu_mem_used_bytes Per-GPU memory used in bytes.
+# TYPE serve_node_gpu_mem_used_bytes gauge
+# HELP serve_deployment_in_flight Per-deployment in-flight request count.
+# TYPE serve_deployment_in_flight gauge
+# HELP serve_deployment_requests_total Per-deployment requests in the last window.
+# TYPE serve_deployment_requests_total counter
+# HELP serve_deployment_latency_p50_ms Per-deployment p50 latency (ms).
+# TYPE serve_deployment_latency_p50_ms gauge
+# HELP serve_deployment_latency_p95_ms Per-deployment p95 latency (ms).
+# TYPE serve_deployment_latency_p95_ms gauge
+# HELP serve_deployment_errors_total Per-deployment error count in the last window.
+# TYPE serve_deployment_errors_total counter
+"""
+
+
+def format_cluster_metrics(
+    aggregator: MetricsAggregator,
+    *,
+    node_labels: dict[int, str],
+) -> str:
+    """Render the aggregator's current snapshot as Prometheus exposition.
+
+    node_labels maps node_id → human label. Numeric fallback if missing.
+    Returns the empty string when the aggregator has no samples (keeps
+    the /metrics body free of empty headers).
+    """
+    snap = aggregator.snapshot()
+    if not snap:
+        return ""
+    lines: list[str] = [_CLUSTER_HELP_BLOCK.rstrip()]
+    for node_id, sample in sorted(snap.items()):
+        node = node_labels.get(node_id, str(node_id))
+        for g in sample.get("gpus", []):
+            gpu = str(g.get("index", -1))
+            lines.append(
+                f'serve_node_gpu_util_pct{{node="{node}",gpu="{gpu}"}} '
+                f'{int(g.get("util_pct", 0))}'
+            )
+            lines.append(
+                f'serve_node_gpu_mem_used_bytes{{node="{node}",gpu="{gpu}"}} '
+                f'{int(g.get("mem_used_mb", 0)) * 1024 * 1024}'
+            )
+        for d in sample.get("deployments", []):
+            dep = str(d.get("deployment_id", -1))
+            model = str(d.get("model_id", ""))
+            tail = f'{{node="{node}",deployment="{dep}",model="{model}"}}'
+            lines.append(
+                f'serve_deployment_in_flight{tail} {int(d.get("in_flight", 0))}'
+            )
+            lines.append(
+                f'serve_deployment_requests_total{tail} '
+                f'{int(d.get("requests_last_window", 0))}'
+            )
+            lines.append(
+                f'serve_deployment_latency_p50_ms{tail} '
+                f'{int(d.get("latency_p50_ms", 0))}'
+            )
+            lines.append(
+                f'serve_deployment_latency_p95_ms{tail} '
+                f'{int(d.get("latency_p95_ms", 0))}'
+            )
+            lines.append(
+                f'serve_deployment_errors_total{tail} '
+                f'{int(d.get("errors_last_window", 0))}'
+            )
+    return "\n".join(lines) + "\n"
 
 
 def format_daemon_metrics(
