@@ -2,9 +2,10 @@ from __future__ import annotations
 
 import sqlite3
 
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, Depends, Request
 from fastapi.responses import PlainTextResponse
 
+from serve_engine.auth.middleware import require_metrics_key
 from serve_engine.observability.metrics import (
     format_cluster_metrics,
     format_daemon_metrics,
@@ -18,7 +19,11 @@ from serve_engine.store import nodes as nodes_store
 router = APIRouter()
 
 
-@router.get("/metrics", response_class=PlainTextResponse)
+@router.get(
+    "/metrics",
+    response_class=PlainTextResponse,
+    dependencies=[Depends(require_metrics_key)],
+)
 async def metrics(request: Request) -> str:
     conn: sqlite3.Connection = request.app.state.conn
     by_status: dict[str, int] = {}

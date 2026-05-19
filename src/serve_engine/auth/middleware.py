@@ -64,3 +64,32 @@ def require_auth_dep(request: Request) -> api_keys.ApiKey | None:
                 conn, key_id=key.id, tokens_in=0, tokens_out=0,
             )
     return replace(key, usage_event_id=usage_event_id)
+
+
+def require_metrics_key(request: Request) -> api_keys.ApiKey | None:
+    """Light-weight bearer-auth for /metrics on the public listener.
+
+    Any non-revoked key (no tier requirement) is accepted — the only goal
+    is to keep the deployment inventory / engine URLs / key counts off
+    public scrapers. UDS callers bypass (so `serve metrics` over the
+    local socket still works).
+    """
+    if request.scope.get("client") is None:
+        return None  # UDS — operator surface
+    conn: sqlite3.Connection = request.app.state.conn
+    if api_keys.count_active(conn) == 0:
+        return None  # bootstrap window — operator hasn't minted a key yet
+    secret = _extract_bearer(request.headers.get("authorization"))
+    if not secret:
+        raise HTTPException(
+            status.HTTP_401_UNAUTHORIZED,
+            detail="missing or malformed Authorization header (expected: Bearer sk-...)",
+            headers={"WWW-Authenticate": 'Bearer realm="serve-engine"'},
+        )
+    key = api_keys.verify(conn, secret)
+    if key is None:
+        raise HTTPException(
+            status.HTTP_401_UNAUTHORIZED,
+            detail="invalid or revoked API key",
+        )
+    return key
