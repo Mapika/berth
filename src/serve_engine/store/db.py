@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import fcntl
 import sqlite3
 import threading
 from contextlib import contextmanager
@@ -138,24 +139,85 @@ def _ensure_migrations_table(conn: sqlite3.Connection) -> None:
     )
 
 
+class SchemaNewerThanBinary(RuntimeError):
+    """Raised by init_schema when the DB has migration rows the binary
+    doesn't know about — refusing to start prevents an older binary from
+    silently running against a newer schema."""
+
+
 def init_schema(conn: sqlite3.Connection) -> None:
+    """Apply pending migrations under a file-level advisory lock.
+
+    Two daemon processes racing on the same DB serialize on the lock
+    file next to db.sqlite — the second waits for the first to release
+    before inspecting state. SQLite's BEGIN EXCLUSIVE isn't sufficient
+    here because executescript implicitly COMMITs the active
+    transaction before running its body, releasing the lock mid-flight.
+
+    If the DB records migration filenames the running binary does not
+    ship, it's older than the DB. We refuse to start rather than
+    operate against an unknown future schema.
+    """
     _ensure_migrations_table(conn)
     mig_dir = files("serve_engine.store.migrations")
-    for entry in sorted(mig_dir.iterdir(), key=lambda p: p.name):
-        if not entry.name.endswith(".sql"):
-            continue
-        already = conn.execute(
-            "SELECT 1 FROM _migrations WHERE filename=?", (entry.name,)
-        ).fetchone()
-        if already:
-            continue
-        sql = entry.read_text()
-        # executescript implicitly COMMITs any open transaction at entry and
-        # auto-commits the script's statements; we then record the migration
-        # via a single autocommitted insert. The script itself is idempotent
-        # (CREATE TABLE IF NOT EXISTS) so re-application on a partial failure
-        # is safe.
-        conn.executescript(sql)
-        conn.execute(
-            "INSERT INTO _migrations (filename) VALUES (?)", (entry.name,)
-        )
+    on_disk = {
+        entry.name for entry in mig_dir.iterdir()
+        if entry.name.endswith(".sql")
+    }
+
+    db_path = _connection_db_path(conn)
+    lock_path = (
+        db_path.with_suffix(db_path.suffix + ".migration.lock")
+        if db_path
+        else None
+    )
+    lock_handle = None
+    if lock_path is not None:
+        lock_path.parent.mkdir(parents=True, exist_ok=True)
+        lock_handle = lock_path.open("w")
+        fcntl.flock(lock_handle, fcntl.LOCK_EX)
+    try:
+        # Forward-version safety: applied filenames the binary doesn't
+        # ship. Check this inside the lock so a racing upgrade doesn't
+        # invalidate our view between read and apply.
+        rows = conn.execute("SELECT filename FROM _migrations").fetchall()
+        applied = {r["filename"] for r in rows}
+        unknown = applied - on_disk
+        if unknown:
+            raise SchemaNewerThanBinary(
+                f"DB has migrations this binary doesn't ship: "
+                f"{sorted(unknown)}. Likely a downgrade; refusing to "
+                "start. Run the newer binary or restore from a backup."
+            )
+        for entry in sorted(mig_dir.iterdir(), key=lambda p: p.name):
+            if not entry.name.endswith(".sql") or entry.name in applied:
+                continue
+            sql = entry.read_text()
+            conn.executescript(sql)
+            conn.execute(
+                "INSERT OR IGNORE INTO _migrations (filename) VALUES (?)",
+                (entry.name,),
+            )
+    finally:
+        if lock_handle is not None:
+            try:
+                fcntl.flock(lock_handle, fcntl.LOCK_UN)
+            except OSError:
+                pass
+            lock_handle.close()
+
+
+def _connection_db_path(conn: sqlite3.Connection) -> Path | None:
+    """Try to recover the on-disk path from a sqlite3 connection (or a
+    LockedConnection wrapping one). Returns None for :memory: or when
+    we can't introspect — in that case migrations run without the
+    advisory lock (single-process tests)."""
+    try:
+        rows = conn.execute(
+            "SELECT file FROM pragma_database_list() WHERE name='main'"
+        ).fetchall()
+    except sqlite3.OperationalError:
+        return None
+    if not rows or not rows[0]["file"]:
+        return None
+    return Path(rows[0]["file"])
