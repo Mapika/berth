@@ -123,9 +123,13 @@ def connect(path: Path) -> sqlite3.Connection:
     serializes access across the FastAPI worker-thread pool.
     """
     path.parent.mkdir(parents=True, exist_ok=True)
-    raw = sqlite3.connect(path, isolation_level=None, check_same_thread=False)
+    raw = sqlite3.connect(
+        path, isolation_level=None, check_same_thread=False, timeout=30.0,
+    )
     raw.row_factory = sqlite3.Row
-    raw.execute("PRAGMA journal_mode=WAL")
+    raw.execute("PRAGMA busy_timeout=30000")
+    with _db_file_lock(path):
+        raw.execute("PRAGMA journal_mode=WAL")
     raw.execute("PRAGMA foreign_keys=ON")
     return cast(sqlite3.Connection, LockedConnection(raw))
 
@@ -156,6 +160,25 @@ def _ensure_migrations_table(conn: sqlite3.Connection) -> None:
     )
 
 
+@contextmanager
+def _db_file_lock(db_path: Path | None) -> Iterator[None]:
+    if db_path is None:
+        yield
+        return
+    lock_path = db_path.with_suffix(db_path.suffix + ".migration.lock")
+    lock_path.parent.mkdir(parents=True, exist_ok=True)
+    lock_handle = lock_path.open("w")
+    fcntl.flock(lock_handle, fcntl.LOCK_EX)
+    try:
+        yield
+    finally:
+        try:
+            fcntl.flock(lock_handle, fcntl.LOCK_UN)
+        except OSError:
+            pass
+        lock_handle.close()
+
+
 class SchemaNewerThanBinary(RuntimeError):
     """Raised by init_schema when the DB has migration rows the binary
     doesn't know about — refusing to start prevents an older binary from
@@ -182,17 +205,7 @@ def init_schema(conn: sqlite3.Connection) -> None:
     }
 
     db_path = _connection_db_path(conn)
-    lock_path = (
-        db_path.with_suffix(db_path.suffix + ".migration.lock")
-        if db_path
-        else None
-    )
-    lock_handle = None
-    if lock_path is not None:
-        lock_path.parent.mkdir(parents=True, exist_ok=True)
-        lock_handle = lock_path.open("w")
-        fcntl.flock(lock_handle, fcntl.LOCK_EX)
-    try:
+    with _db_file_lock(db_path):
         _ensure_migrations_table(conn)
         # Forward-version safety: applied filenames the binary doesn't
         # ship. Check this inside the lock so a racing upgrade doesn't
@@ -215,13 +228,6 @@ def init_schema(conn: sqlite3.Connection) -> None:
                 "INSERT OR IGNORE INTO _migrations (filename) VALUES (?)",
                 (entry.name,),
             )
-    finally:
-        if lock_handle is not None:
-            try:
-                fcntl.flock(lock_handle, fcntl.LOCK_UN)
-            except OSError:
-                pass
-            lock_handle.close()
 
 
 def _connection_db_path(conn: sqlite3.Connection) -> Path | None:

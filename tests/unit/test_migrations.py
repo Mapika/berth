@@ -1,7 +1,9 @@
 """Migration locking + forward-version safety."""
 from __future__ import annotations
 
+import sqlite3
 import threading
+import time
 
 import pytest
 
@@ -56,3 +58,45 @@ def test_concurrent_init_schema_does_not_double_apply(tmp_path):
         "GROUP BY filename HAVING n > 1"
     ).fetchall()
     assert rows == [], f"duplicate migration entries: {[dict(r) for r in rows]}"
+
+
+def test_connect_serializes_wal_setup(tmp_path, monkeypatch):
+    db_path = tmp_path / "t.db"
+    active_wal_pragmas = 0
+    lock = threading.Lock()
+
+    class FakeRawConnection:
+        row_factory = None
+
+        def execute(self, sql):
+            nonlocal active_wal_pragmas
+            if sql == "PRAGMA journal_mode=WAL":
+                with lock:
+                    active_wal_pragmas += 1
+                try:
+                    time.sleep(0.02)
+                    with lock:
+                        if active_wal_pragmas > 1:
+                            raise sqlite3.OperationalError("database is locked")
+                finally:
+                    with lock:
+                        active_wal_pragmas -= 1
+            return self
+
+    monkeypatch.setattr(sqlite3, "connect", lambda *args, **kwargs: FakeRawConnection())
+
+    errors: list[BaseException] = []
+
+    def worker():
+        try:
+            db.connect(db_path)
+        except BaseException as e:
+            errors.append(e)
+
+    threads = [threading.Thread(target=worker) for _ in range(4)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+
+    assert not errors
