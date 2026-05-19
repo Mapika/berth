@@ -40,6 +40,8 @@ def _attach_state(
     event_bus: EventBus,
     stream_tokens: StreamTokenStore,
     request_tracer: Any,
+    in_flight: Any = None,
+    latency: Any = None,
 ) -> None:
     from serve_engine.cluster.metrics_collector import (
         InFlightCounter,
@@ -54,8 +56,12 @@ def _attach_state(
     app.state.tier_cfg = load_tiers()
     app.state.request_count = 0
     app.state.request_tracer = request_tracer
-    app.state.in_flight = InFlightCounter()
-    app.state.latency = LatencyRecorder()
+    # Collectors default to fresh instances for callers that build a
+    # single app (build_app / legacy tests). The multi-app build_apps
+    # path passes one shared pair so any of the three listeners feeds
+    # the same metrics aggregator.
+    app.state.in_flight = in_flight if in_flight is not None else InFlightCounter()
+    app.state.latency = latency if latency is not None else LatencyRecorder()
 
     @app.get("/healthz")
     def healthz():
@@ -93,10 +99,18 @@ def build_apps(
     # Wire up the AgentLink registry. Local node first; remote agents join
     # via LeaderHub WS handshake.
     agent_registry = AgentRegistry()
+    from serve_engine.cluster.metrics_collector import (
+        InFlightCounter,
+        LatencyRecorder,
+    )
     from serve_engine.daemon.metrics_aggregator import MetricsAggregator
     from serve_engine.routing.affinity import RoutingAffinity
     metrics_aggregator = MetricsAggregator()
     routing_affinity = RoutingAffinity(capacity=10_000)
+    # Single pair of collectors shared by all three apps so a request
+    # over any listener feeds the same metrics aggregator.
+    shared_in_flight = InFlightCounter()
+    shared_latency = LatencyRecorder()
     local_node = nodes_store.find_by_label(conn, "local")
     if local_node is None:
         raise RuntimeError("local node row missing after ensure_local_node")
@@ -187,8 +201,10 @@ def build_apps(
             local_node = nodes_store.find_by_label(conn, "local")
             if local_node is None:
                 return
-            in_flight = public_app.state.in_flight
-            latency = public_app.state.latency
+            # Bound to the shared collector instances from build_apps's
+            # local scope — same objects every listener increments.
+            in_flight = shared_in_flight
+            latency = shared_latency
             while True:
                 try:
                     deployment_models = {
@@ -273,6 +289,7 @@ def build_apps(
         conn=conn, backends=backends, manager=manager,
         event_bus=event_bus, stream_tokens=stream_tokens,
         request_tracer=request_tracer,
+        in_flight=shared_in_flight, latency=shared_latency,
     )
     _wire_common_state(public_app)
     # Public listener gets a body-size cap. Without one a single multi-GB
@@ -296,6 +313,7 @@ def build_apps(
         conn=conn, backends=backends, manager=manager,
         event_bus=event_bus, stream_tokens=stream_tokens,
         request_tracer=request_tracer,
+        in_flight=shared_in_flight, latency=shared_latency,
     )
     _wire_common_state(cluster_app)
     cluster_app.include_router(admin_unauthed_router)
@@ -314,6 +332,7 @@ def build_apps(
         conn=conn, backends=backends, manager=manager,
         event_bus=event_bus, stream_tokens=stream_tokens,
         request_tracer=request_tracer,
+        in_flight=shared_in_flight, latency=shared_latency,
     )
     _wire_common_state(uds_app)
     uds_app.include_router(openai_router)
