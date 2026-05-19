@@ -119,3 +119,38 @@ def test_http_cancel_roundtrip():
     back = decode_frame(encode_frame(f))
     assert isinstance(back, HttpCancel)
     assert back.stream_id == "s1"
+
+
+def test_heartbeat_round_trips_without_metrics():
+    hb = Heartbeat(ts=1234.5)
+    decoded = decode_frame(encode_frame(hb))
+    assert isinstance(decoded, Heartbeat)
+    assert decoded.ts == 1234.5
+    assert decoded.metrics is None
+
+
+def test_heartbeat_round_trips_with_metrics():
+    hb = Heartbeat(
+        ts=1234.5,
+        metrics={
+            "gpus": [{"index": 0, "mem_used_mb": 1024, "mem_total_mb": 81920,
+                      "util_pct": 42, "temp_c": 55}],
+            "deployments": [{"deployment_id": 7, "model_id": "llama3-8b",
+                             "in_flight": 3, "requests_last_window": 12,
+                             "latency_p50_ms": 120, "latency_p95_ms": 450,
+                             "errors_last_window": 0}],
+            "node": {"uptime_s": 99.0, "host_load_avg_1m": 0.8},
+        },
+    )
+    decoded = decode_frame(encode_frame(hb))
+    assert isinstance(decoded, Heartbeat)
+    assert decoded.metrics is not None
+    assert decoded.metrics["gpus"][0]["util_pct"] == 42
+    assert decoded.metrics["deployments"][0]["in_flight"] == 3
+
+
+def test_legacy_heartbeat_wire_format_still_decodes():
+    raw = '{"type": "heartbeat", "ts": 1234.5}'
+    decoded = decode_frame(raw)
+    assert isinstance(decoded, Heartbeat)
+    assert decoded.metrics is None

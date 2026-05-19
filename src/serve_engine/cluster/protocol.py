@@ -22,6 +22,7 @@ class Welcome:
 @dataclass
 class Heartbeat:
     ts: float
+    metrics: dict[str, Any] | None = None
     type: str = "heartbeat"
 
 
