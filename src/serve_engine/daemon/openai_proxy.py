@@ -36,6 +36,22 @@ from serve_engine.store import usage_events as _usage_events_store
 router = APIRouter()
 
 
+# Allowlist of upstream response headers to forward to the external
+# client. Anything else (Set-Cookie, CORS, Link, X-Frame-Options, etc.)
+# is dropped. content-type is forwarded separately via the
+# StreamingResponse media_type — keep it out of this set.
+_FORWARDABLE_RESPONSE_HEADERS = {
+    "cache-control",
+    "content-encoding",
+    "content-language",
+    "etag",
+    "last-modified",
+    "x-request-id",
+    "x-trace-id",
+    "x-served-by",
+}
+
+
 # Default bounded queue depth between the upstream reader and the client
 # writer. Overridable per-app via `app.state.sse_queue_depth`. Sized at
 # 64 chunks — large enough that fast clients never block, small enough
@@ -433,9 +449,14 @@ async def _proxy(
         "content-type", "application/octet-stream",
     )
     usage_tracker = _UsageTracker(is_sse="event-stream" in upstream_ct)
+    # Forward only an explicit allowlist of upstream response headers.
+    # Blocklist semantics let a compromised/misconfigured engine inject
+    # Set-Cookie / CORS / Link / X-Frame-Options into our public response.
+    # content-type is forwarded separately as the StreamingResponse
+    # media_type, so we drop it here.
     forward_headers = {
         k: v for k, v in upstream.headers.items()
-        if k.lower() not in _HOP_BY_HOP | {"content-type"}
+        if k.lower() in _FORWARDABLE_RESPONSE_HEADERS
     }
 
     queue_depth = getattr(
