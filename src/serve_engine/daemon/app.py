@@ -93,6 +93,8 @@ def build_apps(
     # Wire up the AgentLink registry. Local node first; remote agents join
     # via LeaderHub WS handshake.
     agent_registry = AgentRegistry()
+    from serve_engine.daemon.metrics_aggregator import MetricsAggregator
+    metrics_aggregator = MetricsAggregator()
     local_node = nodes_store.find_by_label(conn, "local")
     if local_node is None:
         raise RuntimeError("local node row missing after ensure_local_node")
@@ -203,6 +205,7 @@ def build_apps(
     def _wire_common_state(app: FastAPI) -> None:
         app.state.predictor_task = predictor_task
         app.state.agent_registry = agent_registry
+        app.state.metrics_aggregator = metrics_aggregator
         app.state.ca = ca
         app.state.ca_cert_pem = ca.cert_pem.decode("ascii")
         app.state.ca_fingerprint = ca_fingerprint
@@ -243,7 +246,10 @@ def build_apps(
     cluster_app.include_router(admin_unauthed_router)
     cluster_app.include_router(admin_cluster_router)
     cluster_app.include_router(
-        LeaderHub(conn=conn, registry=agent_registry).router
+        LeaderHub(
+            conn=conn, registry=agent_registry,
+            aggregator=metrics_aggregator,
+        ).router
     )
 
     # uds_app: full local surface for the CLI.

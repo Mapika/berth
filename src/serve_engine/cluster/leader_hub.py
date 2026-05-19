@@ -17,6 +17,7 @@ from serve_engine.cluster.protocol import (
     encode_frame,
 )
 from serve_engine.cluster.remote_agent import RemoteAgentLink
+from serve_engine.daemon.metrics_aggregator import MetricsAggregator
 from serve_engine.store import nodes as nodes_store
 
 log = logging.getLogger(__name__)
@@ -97,12 +98,23 @@ class LeaderHub:
         conn: sqlite3.Connection,
         registry: AgentRegistry,
         fingerprint_resolver: FingerprintResolver = _default_fingerprint_resolver,
+        aggregator: MetricsAggregator | None = None,
     ) -> None:
         self._conn = conn
         self._registry = registry
         self._resolve_fp = fingerprint_resolver
+        self._aggregator = aggregator
         self.router = APIRouter()
         self.router.add_api_websocket_route("/cluster/agent", self._handle_agent)
+
+    def _handle_heartbeat(self, *, node_id: int, frame: Heartbeat) -> None:
+        nodes_store.set_status(
+            self._conn, node_id, status="ready", last_seen=time.time(),
+        )
+        if frame.metrics is not None and self._aggregator is not None:
+            self._aggregator.ingest(
+                node_id=node_id, sample=frame.metrics, ts=frame.ts,
+            )
 
     async def _handle_agent(self, ws: WebSocket) -> None:
         fp = self._resolve_fp(ws)
@@ -164,15 +176,14 @@ class LeaderHub:
                     log.warning("dropping malformed frame from node %s", node.id)
                     continue
                 if isinstance(frame, Heartbeat):
-                    nodes_store.set_status(
-                        self._conn, node.id,
-                        status="ready", last_seen=time.time(),
-                    )
+                    self._handle_heartbeat(node_id=node.id, frame=frame)
                     continue
                 await link.inbound(frame)
         finally:
             link.shutdown()
             self._registry.unregister(node.id)
+            if self._aggregator is not None:
+                self._aggregator.drop_node(node.id)
             nodes_store.set_status(
                 self._conn, node.id,
                 status="unreachable", last_seen=time.time(),
