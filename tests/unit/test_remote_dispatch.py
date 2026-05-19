@@ -10,7 +10,7 @@ import asyncio
 import json
 import sqlite3
 from pathlib import Path
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
@@ -54,6 +54,10 @@ class _FakeLink:
 
     async def stop_deployment(self, container_id: str) -> None:
         self.stopped.append(container_id)
+
+    async def probe_container(self, *, container_id: str, path: str) -> int:
+        # Pretend the engine is healthy on first probe.
+        return 200
 
 
 def _bootstrap_conn(tmp_path: Path) -> sqlite3.Connection:
@@ -234,6 +238,65 @@ def test_remote_resolve_unknown_label_raises(tmp_path):
     )
     with pytest.raises(RuntimeError, match="not found"):
         mgr._resolve_target_node_id(plan)
+
+
+class _DyingLink(_FakeLink):
+    """Like _FakeLink but the remote engine never answers the probe."""
+
+    async def probe_container(self, *, container_id: str, path: str) -> int:
+        return 0  # connection refused / no response
+
+
+@pytest.mark.asyncio
+async def test_remote_dispatch_marks_failed_when_probe_never_succeeds(
+    tmp_path, monkeypatch,
+):
+    """If the engine never returns 200 to the health probe inside the
+    timeout, the deployment row is marked 'failed' and load() raises."""
+    monkeypatch.setattr(
+        "serve_engine.lifecycle.manager.download_model_async",
+        AsyncMock(return_value=str(tmp_path / "w")),
+    )
+    monkeypatch.setattr(
+        "serve_engine.lifecycle.manager.estimate_vram_mb", lambda _: 8000,
+    )
+    (tmp_path / "w").mkdir(exist_ok=True)
+    conn = _bootstrap_conn(tmp_path)
+    remote = nodes_store.find_by_label(conn, "gpu-rig-2")
+    assert remote is not None
+    link = _DyingLink(node_id=remote.id)
+    registry = AgentRegistry()
+    registry.register(link)
+    mgr = LifecycleManager(
+        conn=conn,
+        docker_client=MagicMock(),
+        backends={"vllm": VLLMBackend()},
+        models_dir=tmp_path,
+        topology=None,
+        agent_registry=registry,
+    )
+    plan = DeploymentPlan(
+        model_name="llama-1b", hf_repo="org/x", revision="main",
+        backend="vllm", image_tag="img:v1", gpu_ids=[0],
+        tensor_parallel=1, max_model_len=4096,
+        node_label="gpu-rig-2",
+    )
+    # Trim the probe timeout so the test stays fast — patch the bound
+    # method to use 0.5 s instead of the 30 s default.
+    real_probe = mgr._remote_probe_until_healthy
+    async def quick_probe(link_, cid, path):
+        return await real_probe(
+            link_, cid, path, timeout_s=0.5, interval_s=0.1,
+        )
+    monkeypatch.setattr(mgr, "_remote_probe_until_healthy", quick_probe)
+
+    with pytest.raises(RuntimeError, match="never answered"):
+        await mgr.load(plan)
+
+    # Row exists and is marked failed.
+    from serve_engine.store import deployments as dep_store
+    failed = [d for d in dep_store.list_all(conn) if d.status == "failed"]
+    assert failed, "expected a failed deployment row after probe timeout"
 
 
 def test_local_resolve_returns_local_node_id(tmp_path):

@@ -163,6 +163,32 @@ class LifecycleManager:
         seven call sites."""
         return self._models_dir
 
+    async def _remote_probe_until_healthy(
+        self,
+        link,
+        container_id: str,
+        health_path: str,
+        *,
+        timeout_s: float = 30.0,
+        interval_s: float = 2.0,
+    ) -> bool:
+        """Poll the remote agent's engine via probe_container until it
+        returns 200 or we exhaust the timeout. Returns True on success."""
+        import asyncio as _asyncio
+        import time as _time
+        deadline = _time.monotonic() + timeout_s
+        while _time.monotonic() < deadline:
+            try:
+                status = await link.probe_container(
+                    container_id=container_id, path=health_path,
+                )
+            except Exception:
+                status = 0
+            if status == 200:
+                return True
+            await _asyncio.sleep(interval_s)
+        return False
+
     async def _emit(self, kind: str, **payload) -> None:
         if self._events is not None:
             await self._events.publish(Event(kind=kind, payload=payload))
@@ -469,13 +495,30 @@ class LifecycleManager:
                     container_address=started.address,
                     node_id=target_node_id,
                 )
-                # No leader-side wait_healthy for v1: the agent's OpResult
-                # is the success signal (its docker.run completed).
-                # /v1/* traffic flows through the WS tunnel via _proxy_via_link.
                 await self._emit(
                     "deployment.spawned",
                     dep_id=dep.id, container_id=started.container_id,
                 )
+                # Health-probe through the tunnel before marking ready.
+                # Without this we accept a "container started" signal as
+                # equivalent to "engine answering", and a misconfigured
+                # image / instant crash silently routes traffic until
+                # HealthMonitor catches it (~90 s window).
+                healthy = await self._remote_probe_until_healthy(
+                    link, started.container_id, backend.health_path,
+                )
+                if not healthy:
+                    msg = (
+                        "remote container started but engine never "
+                        f"answered {backend.health_path!r}"
+                    )
+                    dep_store.update_status(
+                        self._conn, dep.id, "failed", last_error=msg,
+                    )
+                    await self._emit(
+                        "deployment.failed", dep_id=dep.id, error=msg,
+                    )
+                    raise RuntimeError(msg)
                 dep_store.update_status(self._conn, dep.id, "ready")
                 plan_store.mark_ready(self._conn, plan_record_id)
                 await self._emit("deployment.ready", dep_id=dep.id)
