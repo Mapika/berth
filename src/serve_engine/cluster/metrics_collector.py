@@ -80,7 +80,7 @@ def _percentile(sorted_values: list[int], pct: int) -> int:
     if len(sorted_values) == 1:
         return sorted_values[0]
     rank = max(0, min(len(sorted_values) - 1,
-                      int(round((pct / 100.0) * (len(sorted_values) - 1)))))
+                      round((pct / 100.0) * (len(sorted_values) - 1))))
     return sorted_values[rank]
 
 

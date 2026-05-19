@@ -276,6 +276,37 @@ def test_reconcile_keeps_running_container(conn, monkeypatch, tmp_path, topo_one
     assert refreshed.status == "ready"  # unchanged
 
 
+def test_reconcile_removes_exited_container_and_marks_failed(
+    conn, monkeypatch, tmp_path, topo_one_gpu,
+):
+    docker_client = MagicMock()
+    docker_client.container_status.return_value = "exited"
+
+    mgr = LifecycleManager(
+        conn=conn, docker_client=docker_client,
+        backends={"vllm": VLLMBackend()}, models_dir=tmp_path,
+        topology=topo_one_gpu,
+    )
+    m = model_store.add(conn, name="llama-1b", hf_repo="org/x")
+    d = dep_store.create(
+        conn, model_id=m.id, backend="vllm", image_tag="img:v1",
+        gpu_ids=[0], tensor_parallel=1, max_model_len=4096, dtype="auto",
+    )
+    dep_store.set_container(
+        conn, d.id,
+        container_id="exited_cid", container_name="x",
+        container_port=49152, container_address="127.0.0.1",
+    )
+    dep_store.update_status(conn, d.id, "ready")
+
+    asyncio.run(mgr.reconcile())
+
+    refreshed = dep_store.get_by_id(conn, d.id)
+    assert refreshed.status == "failed"
+    assert "status=exited" in (refreshed.last_error or "")
+    docker_client.remove.assert_called_once_with("exited_cid", force=True)
+
+
 def test_stop_all_stops_every_non_stopped_deployment(conn, monkeypatch, tmp_path, topo_one_gpu):
     docker_client = MagicMock()
     mgr = LifecycleManager(

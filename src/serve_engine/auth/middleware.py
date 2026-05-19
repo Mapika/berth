@@ -7,7 +7,7 @@ from fastapi import HTTPException, Request, status
 
 from serve_engine.auth import limiter
 from serve_engine.auth.tiers import Limits
-from serve_engine.store import api_keys, key_usage
+from serve_engine.store import api_keys, db, key_usage
 
 
 def _extract_bearer(authorization: str | None) -> str | None:
@@ -53,7 +53,7 @@ def require_auth_dep(request: Request) -> api_keys.ApiKey | None:
 
     tier_cfg: dict[str, Limits] = request.app.state.tier_cfg
     usage_event_id: int | None = None
-    with conn.locked():
+    with db.locked(conn):
         decision = limiter.check(conn, key=key, tier_cfg=tier_cfg)
         if isinstance(decision, limiter.Denied):
             raise HTTPException(

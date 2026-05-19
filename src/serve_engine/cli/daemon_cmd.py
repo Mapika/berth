@@ -155,6 +155,8 @@ def daemon_start(
         # tracks us already.
         from serve_engine.daemon.__main__ import (
             configure_logging,
+        )
+        from serve_engine.daemon.__main__ import (
             serve as _serve_inline,
         )
         configure_logging()

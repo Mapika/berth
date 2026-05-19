@@ -11,6 +11,7 @@ import structlog
 import uvicorn
 
 from serve_engine import config
+from serve_engine.backends.base import Backend
 from serve_engine.backends.sglang import SGLangBackend
 from serve_engine.backends.trtllm import TRTLLMBackend
 from serve_engine.backends.vllm import VLLMBackend
@@ -91,7 +92,7 @@ async def serve(cfg: config.ResolvedConfig, sock_path: Path) -> None:
 
     from serve_engine.backends.manifest import load_manifest
     manifest = load_manifest()
-    backends = {
+    backends: dict[str, Backend] = {
         "vllm": VLLMBackend(manifest["vllm"]),
         "sglang": SGLangBackend(manifest["sglang"]),
         "trtllm": TRTLLMBackend(manifest["trtllm"]),

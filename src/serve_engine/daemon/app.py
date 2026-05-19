@@ -235,6 +235,7 @@ def build_apps(
             never reach /metrics, /admin/metrics/snapshot, or the
             scorer's signals_by_node."""
             import time as _time
+
             from serve_engine.cluster.metrics_collector import build_snapshot
             started = _time.time()
             local_node = nodes_store.find_by_label(conn, "local")
@@ -246,10 +247,13 @@ def build_apps(
             latency = shared_latency
             while True:
                 try:
-                    deployment_models = {
-                        d.id: d.model_name
-                        for d in _dep_store.list_all(conn)
-                    }
+                    deployment_models = {}
+                    from serve_engine.store import models as _model_store
+                    for d in _dep_store.list_all(conn):
+                        model = _model_store.get_by_id(conn, d.model_id)
+                        deployment_models[d.id] = (
+                            model.name if model is not None else f"model#{d.model_id}"
+                        )
                     sample = build_snapshot(
                         in_flight=in_flight,
                         latency=latency,
@@ -331,7 +335,7 @@ def build_apps(
 
     # public_app: external client surface. Owns the lifespan.
     public_app = FastAPI(
-        title="serve-engine (public)", version="0.0.1", lifespan=lifespan,
+        title="serve-engine (public)", version=_serve_version, lifespan=lifespan,
     )
     _attach_state(
         public_app,
@@ -356,7 +360,7 @@ def build_apps(
 
     # cluster_app: agent transport. Hosts the WS hub, registration, and
     # CA endpoint. Does NOT host /v1/* or general admin routes.
-    cluster_app = FastAPI(title="serve-engine (cluster)", version="0.0.1")
+    cluster_app = FastAPI(title="serve-engine (cluster)", version=_serve_version)
     _attach_state(
         cluster_app,
         conn=conn, backends=backends, manager=manager,
@@ -375,7 +379,7 @@ def build_apps(
     )
 
     # uds_app: full local surface for the CLI.
-    uds_app = FastAPI(title="serve-engine (control)", version="0.0.1")
+    uds_app = FastAPI(title="serve-engine (control)", version=_serve_version)
     _attach_state(
         uds_app,
         conn=conn, backends=backends, manager=manager,

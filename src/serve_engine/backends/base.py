@@ -9,20 +9,34 @@ from serve_engine.lifecycle.plan import DeploymentPlan
 
 
 class Backend(Protocol):
-    name: str
-    image_default: str
-    health_path: str
-    openai_base: str
-    metrics_path: str
-    internal_port: int
-    headroom: Headroom
+    @property
+    def name(self) -> str: ...
+    @property
+    def supports_adapters(self) -> bool: ...
+    @property
+    def adapter_load_path(self) -> str: ...
+    @property
+    def adapter_unload_path(self) -> str: ...
+
+    @property
+    def image_default(self) -> str: ...
+    @property
+    def health_path(self) -> str: ...
+    @property
+    def openai_base(self) -> str: ...
+    @property
+    def metrics_path(self) -> str: ...
+    @property
+    def internal_port(self) -> int: ...
+    @property
+    def headroom(self) -> Headroom: ...
 
     def build_argv(
         self, plan: DeploymentPlan, *, local_model_path: str, config_path: str | None = None,
     ) -> list[str]: ...
     def container_env(self, plan: DeploymentPlan) -> dict[str, str]: ...
     def container_kwargs(self, plan: DeploymentPlan) -> dict[str, object]: ...
-    def engine_config(self, plan: DeploymentPlan) -> dict | None: ...
+    def engine_config(self, plan: DeploymentPlan) -> dict[str, object] | None: ...
 
 
 class ContainerBackend:
@@ -77,7 +91,7 @@ class ContainerBackend:
     ) -> list[str]:
         raise NotImplementedError
 
-    def engine_config(self, plan: DeploymentPlan) -> dict | None:
+    def engine_config(self, plan: DeploymentPlan) -> dict[str, object] | None:
         """Optional per-deployment YAML config for the engine.
 
         Backends that support a `--config <file>` flag (or equivalent) can

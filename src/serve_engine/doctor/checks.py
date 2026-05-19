@@ -4,6 +4,7 @@ import os
 import socket
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any, cast
 
 from serve_engine.config import DEFAULT_PUBLIC_PORT, SERVE_DIR
 
@@ -33,10 +34,10 @@ class CheckResult:
     fix: str | None = None
 
 
-def _docker_from_env():
+def _docker_from_env() -> Any:
     if docker is None:
         raise RuntimeError("docker SDK not installed")
-    return docker.from_env()
+    return cast(Any, docker).from_env()
 
 
 def check_paths() -> CheckResult:
@@ -172,7 +173,7 @@ def check_engine_images() -> CheckResult:
     from serve_engine.backends.manifest import load_manifest
     try:
         client = _docker_from_env()
-        tags = set()
+        tags: set[str] = set()
         for img in client.images.list():
             tags.update(img.tags or [])
     except Exception:

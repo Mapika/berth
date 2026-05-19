@@ -96,7 +96,7 @@ def _bootstrap(
     if config.CONFIG_FILE.exists() and not force:
         out["config_status"] = "exists; not overwritten (pass --force to replace)"
     else:
-        public_section: dict[str, str | int] = {
+        public_section: dict[str, str | int | bool | None] = {
             "host": domain,
             "port": public_port,
             "bind": "127.0.0.1" if behind_proxy else "0.0.0.0",
@@ -105,7 +105,7 @@ def _bootstrap(
             public_section["scheme"] = "http"
             public_section["trust_proxy_headers"] = True
             public_section["forwarded_allow_ips"] = "127.0.0.1"
-        cluster_section: dict[str, str | int] = {
+        cluster_section: dict[str, str | int | bool | None] = {
             "host": domain,
             "port": cluster_port,
             "bind": "0.0.0.0",
@@ -243,4 +243,4 @@ def bootstrap(
     typer.echo("     serve agent start")
     typer.echo("")
     typer.echo("Back up the DR set (db + ca + key_pepper + config) regularly:")
-    typer.echo(f"     serve backup create /var/backups/serve-$(date +%F).tar.gz")
+    typer.echo("     serve backup create /var/backups/serve-$(date +%F).tar.gz")

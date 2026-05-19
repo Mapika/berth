@@ -8,6 +8,7 @@ import time as _rl_time
 from collections import OrderedDict, deque
 from dataclasses import asdict
 from pathlib import Path
+from typing import cast
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.responses import StreamingResponse
@@ -17,7 +18,7 @@ from serve_engine import config as _cfg
 from serve_engine.auth.middleware import require_auth_dep
 from serve_engine.backends.base import Backend
 from serve_engine.lifecycle.manager import LifecycleManager
-from serve_engine.lifecycle.plan import DeploymentPlan
+from serve_engine.lifecycle.plan import BackendName, DeploymentPlan
 from serve_engine.observability.gpu_stats import read_gpu_stats as _read_gpu_stats
 from serve_engine.store import adapters as ad_store
 from serve_engine.store import api_keys as _ak_store
@@ -208,7 +209,7 @@ def _profile_to_plan(profile: profile_store.ServiceProfile) -> DeploymentPlan:
         model_name=profile.model_name,
         hf_repo=profile.hf_repo,
         revision=profile.revision,
-        backend=profile.backend,
+        backend=cast(BackendName, profile.backend),
         image_tag=profile.image_tag,
         gpu_ids=profile.gpu_ids,
         tensor_parallel=profile.tensor_parallel,
@@ -238,7 +239,7 @@ def _request_to_plan(
         model_name=body.model_name,
         hf_repo=body.hf_repo,
         revision=body.revision,
-        backend=backend_name,
+        backend=cast(BackendName, backend_name),
         image_tag=image_tag,
         gpu_ids=body.gpu_ids,
         tensor_parallel=tensor_parallel,

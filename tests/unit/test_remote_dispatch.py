@@ -6,7 +6,6 @@ container handle. No docker, no WS, no HF download.
 """
 from __future__ import annotations
 
-import asyncio
 import json
 import sqlite3
 from pathlib import Path
@@ -17,13 +16,13 @@ import pytest
 from serve_engine.backends.vllm import VLLMBackend
 from serve_engine.cluster.agent_link import StartedContainer
 from serve_engine.cluster.agent_registry import AgentRegistry
+from serve_engine.cluster.local_bootstrap import ensure_local_node
 from serve_engine.lifecycle.manager import (
     LifecycleManager,
     _json_safe_docker_kwargs,
 )
 from serve_engine.lifecycle.plan import DeploymentPlan
 from serve_engine.lifecycle.topology import GPUInfo, Topology
-from serve_engine.cluster.local_bootstrap import ensure_local_node
 from serve_engine.store import db
 from serve_engine.store import deployments as dep_store
 from serve_engine.store import nodes as nodes_store

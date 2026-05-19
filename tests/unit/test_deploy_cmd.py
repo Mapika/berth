@@ -5,7 +5,6 @@ from __future__ import annotations
 
 import tomllib
 
-import pytest
 from typer.testing import CliRunner
 
 from serve_engine import cli, config

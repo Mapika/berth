@@ -3,6 +3,8 @@ from __future__ import annotations
 import sqlite3
 from dataclasses import dataclass
 
+from serve_engine.store import db
+
 
 class AlreadyExists(Exception):
     pass
@@ -37,7 +39,7 @@ def add(
     """Register a base model. Refuses if `name` collides with a registered
     adapter - adapters and bases share the routing namespace, so a duplicate
     would make `model='x'` ambiguous in OpenAI requests."""
-    with conn.locked():
+    with db.locked(conn):
         # adapters table only exists at migration 004+; absence is fine.
         try:
             collision = conn.execute(
@@ -56,6 +58,7 @@ def add(
             )
         except sqlite3.IntegrityError as e:
             raise AlreadyExists(f"model {name!r} already exists") from e
+    assert cur.lastrowid is not None
     return Model(id=cur.lastrowid, name=name, hf_repo=hf_repo, revision=revision, local_path=None)
 
 

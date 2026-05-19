@@ -5,7 +5,7 @@ from collections import deque
 from dataclasses import dataclass
 from typing import Any
 
-# 12 samples × 5 s heartbeat = 60 s rolling window. The aggregator does
+# 12 samples x 5 s heartbeat = 60 s rolling window. The aggregator does
 # not enforce the 5 s interval — agents set it. The window length here
 # is just "how many of the most recent we keep."
 DEFAULT_WINDOW = 12

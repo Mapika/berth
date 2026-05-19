@@ -523,13 +523,13 @@ async def run_agent(serve_home: Path) -> None:
                 import time as _t
                 agent_started_at = _t.time()
 
-                async def heartbeat():
+                async def heartbeat(started_at: float = agent_started_at):
                     while True:
                         frame = build_heartbeat_frame(
                             in_flight=agent_in_flight,
                             latency=agent_latency,
                             deployment_models=agent_deployment_models,
-                            uptime_s=_t.time() - agent_started_at,
+                            uptime_s=_t.time() - started_at,
                         )
                         await ws.send(encode_frame(frame))
                         await asyncio.sleep(5.0)

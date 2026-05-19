@@ -40,7 +40,7 @@ def test_concurrent_init_schema_does_not_double_apply(tmp_path):
         try:
             conn = db.connect(db_path)
             db.init_schema(conn)
-        except BaseException as e:  # noqa: BLE001
+        except BaseException as e:
             errors.append(e)
 
     threads = [threading.Thread(target=worker) for _ in range(4)]

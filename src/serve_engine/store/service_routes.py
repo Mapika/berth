@@ -3,6 +3,8 @@ from __future__ import annotations
 import sqlite3
 from dataclasses import dataclass
 
+from serve_engine.store import db
+
 
 class AlreadyExists(Exception):
     pass
@@ -76,7 +78,7 @@ def create(
     enabled: bool = True,
     priority: int = 100,
 ) -> ServiceRoute:
-    with conn.locked():
+    with db.locked(conn):
         profile_id = _profile_id(conn, profile_name)
         fallback_profile_id = (
             _profile_id(conn, fallback_profile_name)

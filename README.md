@@ -1,19 +1,25 @@
 # serve-engine
 
-serve-engine is a local inference router and lifecycle manager.
+serve-engine is a small inference control plane for GPU boxes.
 
-It gives one OpenAI-compatible endpoint to a GPU host, then manages the
-services behind it: start, stop, health check, route, observe, and clean up.
-The engines still do the inference. serve-engine owns the operational layer
-around them.
+It gives a host one OpenAI-compatible endpoint and manages the boring parts
+behind it: start containers, stop them, check health, route requests, expose
+metrics, keep state, and clean up after failures. vLLM, SGLang, and TensorRT-LLM
+still do the inference. serve-engine is the layer around them.
 
-The opinionated part is simple: engines should be replaceable, routes should
-be explicit, and a single-node GPU box should not need a full platform just to
-run a few reliable model services.
+The taste of the project is deliberately narrow:
 
-## Status
+- Engines should be swappable.
+- Public model names should be routes, not accidents of whatever is currently
+  running.
+- One GPU box should not need Kubernetes just to serve a few models reliably.
+- If something cannot fit on the GPU, fail before turning the host into an OOM
+  experiment.
 
-Works today:
+This is not trying to be a full ML platform. It is the thing I wanted between
+"run this container by hand" and "stand up a cluster stack".
+
+## What Works
 
 - Single-node NVIDIA hosts
 - Docker-backed lifecycle for engine containers
@@ -26,13 +32,18 @@ Works today:
 - Prometheus metrics, GPU stats, lifecycle events, logs, and `serve top`
 - Web UI bundled into the Python package
 
-Not the focus:
+There is also a secure-by-default multi-node path: a leader serves the public
+API, and GPU agents dial back over mTLS WebSocket. I still think the best
+starting point is one box; the multi-node path is there when the second box is
+actually useful.
+
+## Non-Goals
 
 - Training
 - Multi-host tensor parallelism
 - Being a new inference engine
-- Leading with adapters or LoRA
-- Replacing Kubernetes for large fleets
+- Making adapters or LoRA the center of the project
+- Replacing Kubernetes for people who already need Kubernetes
 
 ## Requirements
 
@@ -93,8 +104,10 @@ serve daemon start
 serve daemon status
 ```
 
-The daemon binds to `127.0.0.1:11500` by default. Front it with a reverse
-proxy if you need to expose it off-host.
+By default the public listener binds to `0.0.0.0:11500` and serves HTTPS with a
+generated serve-engine CA. For local-only testing, set
+`SERVE_PUBLIC_BIND=127.0.0.1`. For internet-facing use, I prefer putting
+Caddy/Nginx in front with `serve deploy bootstrap --behind-proxy`.
 
 Create an admin key:
 
@@ -106,16 +119,18 @@ Save the printed `secret:` value:
 
 ```bash
 export SERVE_TOKEN=sk-...
-export SERVE_URL=http://127.0.0.1:11500
+export SERVE_URL=https://127.0.0.1:11500
 ```
 
 Open the web UI at:
 
 ```text
-http://127.0.0.1:11500/
+https://127.0.0.1:11500/
 ```
 
-Paste the admin key when prompted.
+Paste the admin key when prompted. Browsers and SDKs will warn on the generated
+CA unless you trust it locally or configure `[public_tls]`. The curl examples
+below use `-k` for first-run testing against that generated certificate.
 
 Local CLI commands use the daemon Unix socket and do not need the HTTP bearer
 token. TCP admin and `/v1/*` requests need a bearer token once any key exists.
@@ -138,7 +153,7 @@ serve ps
 Call the OpenAI-compatible API:
 
 ```bash
-curl "$SERVE_URL/v1/chat/completions" \
+curl -k "$SERVE_URL/v1/chat/completions" \
   -H "Authorization: Bearer $SERVE_TOKEN" \
   -H 'Content-Type: application/json' \
   -d '{
@@ -157,13 +172,13 @@ serve stop
 
 ## Service Routes
 
-The model commands are the fastest path for one model. Use service profiles
-when you want a reusable launch definition and a stable public route.
+The direct model commands are enough for one-off runs. Use service profiles
+when you want repeatable launch settings and a stable public model name.
 
 Create a vLLM service profile:
 
 ```bash
-curl -X POST "$SERVE_URL/admin/service-profiles" \
+curl -k -X POST "$SERVE_URL/admin/service-profiles" \
   -H "Authorization: Bearer $SERVE_TOKEN" \
   -H 'Content-Type: application/json' \
   -d '{
@@ -180,14 +195,14 @@ curl -X POST "$SERVE_URL/admin/service-profiles" \
 Deploy it:
 
 ```bash
-curl -X POST "$SERVE_URL/admin/service-profiles/qwen-vllm/deploy" \
+curl -k -X POST "$SERVE_URL/admin/service-profiles/qwen-vllm/deploy" \
   -H "Authorization: Bearer $SERVE_TOKEN"
 ```
 
 Expose it as a public model name:
 
 ```bash
-curl -X POST "$SERVE_URL/admin/routes" \
+curl -k -X POST "$SERVE_URL/admin/routes" \
   -H "Authorization: Bearer $SERVE_TOKEN" \
   -H 'Content-Type: application/json' \
   -d '{
@@ -201,7 +216,7 @@ curl -X POST "$SERVE_URL/admin/routes" \
 Call the route:
 
 ```bash
-curl "$SERVE_URL/v1/chat/completions" \
+curl -k "$SERVE_URL/v1/chat/completions" \
   -H "Authorization: Bearer $SERVE_TOKEN" \
   -H 'Content-Type: application/json' \
   -d '{
@@ -344,9 +359,9 @@ By default, serve-engine owns `~/.serve`. Override it with `SERVE_HOME`.
 `-- backends.override.yaml  optional engine image and headroom overrides
 ```
 
-## Operations Notes
+## Operator Notes
 
-- Run `serve doctor` before debugging anything else.
+- Run `serve doctor` before chasing ghosts.
 - Use `serve ps` for deployment state.
 - Use `serve logs` when an engine fails to become healthy.
 - Use `/admin/events` or `serve top` for lifecycle visibility.
@@ -367,18 +382,18 @@ Single H100 80 GB, Qwen2.5 0.5B and 1.5B, 512-token outputs, Poisson arrivals.
 | 16 | 1.5B SGLang | 7904 | 38 | 1608 |
 | 32 | 1.5B vLLM | 13377 | 128 | 2814 |
 
-Treat these as a sanity check, not a universal benchmark. Engine version, model
-family, context length, quantization, and GPU all matter.
+Treat these as a smoke test with numbers, not a benchmark paper. Engine version,
+model family, context length, quantization, and GPU all matter.
 
 ## GPU Sharing
 
 Two deployments can share a GPU. Before starting one, the daemon estimates its
-VRAM cost from the model config (weights at the chosen dtype, KV cache for the
-requested `--ctx` and `--max-seqs`, plus engine headroom) and only places it on
-GPUs where that fits alongside the already-running deployments. If nothing
-fits, the manager will evict non-pinned, idle deployments in LRU order to make
-room; if it still cannot fit, the start fails with a placement error rather
-than racing the existing services into an OOM.
+VRAM cost from the model config: weights at the chosen dtype, KV cache for
+`--ctx` and `--max-seqs`, plus engine headroom. It only places the deployment on
+GPUs where that fits alongside what is already running. If nothing fits, it
+evicts non-pinned idle deployments in LRU order. If it still cannot fit, it
+fails with a placement error instead of racing the existing services into an
+OOM.
 
 ## Development
 
@@ -386,15 +401,17 @@ than racing the existing services into an OOM.
 uv venv
 source .venv/bin/activate
 uv pip install -e ".[dev]"
-pytest tests/unit
-ruff check src/ tests/
+uv lock --check
+ruff check src tests
+mypy src
+pytest tests/unit tests/integration
 ```
 
 UI build:
 
 ```bash
 cd ui
-npm install
+npm ci
 npm run build
 ```
 
@@ -403,18 +420,19 @@ npm run build
 - Multi-host tensor parallel inference
 - Training or fine-tuning
 - Full autotuning of tensor parallelism, dtype, and context length
-- Built-in TLS termination
+- Built-in ACME/certificate management
 - A Kubernetes replacement
 
-Bind to `127.0.0.1` by default. Put a reverse proxy in front when exposing it
-outside the host.
+For internet-facing use, prefer `serve deploy bootstrap --behind-proxy` with a
+TLS-terminating reverse proxy, or configure `[public_tls]` with an
+operator-managed certificate.
 
 ## Multi-Node (Secure-by-Default)
 
-A leader serves the OpenAI API and admin API. Additional GPU hosts run a
-thin agent that dials home over mTLS WebSocket. The leader terminates
-TLS itself — no reverse proxy required — and ships with a two-listener
-trust model that is safe to expose on the public internet.
+A leader serves the OpenAI API and admin API. Additional GPU hosts run a thin
+agent that dials home over mTLS WebSocket. The leader terminates TLS itself, so
+a reverse proxy is optional, and the public and cluster listeners have separate
+trust boundaries.
 
 See **[docs/multi-node.md](docs/multi-node.md)** for the full operator
 guide (same-network and cross-network setup, public-cert configuration,

@@ -3,9 +3,11 @@ from __future__ import annotations
 import fcntl
 import sqlite3
 import threading
+from collections.abc import Iterator
 from contextlib import contextmanager
 from importlib.resources import files
 from pathlib import Path
+from typing import Any, cast
 
 
 class _PrefetchedCursor:
@@ -70,41 +72,41 @@ class LockedConnection:
         self._conn = conn
         self._lock = threading.RLock()
 
-    def execute(self, *args, **kwargs) -> _PrefetchedCursor:
+    def execute(self, *args: Any, **kwargs: Any) -> _PrefetchedCursor:
         with self._lock:
             cur = self._conn.execute(*args, **kwargs)
             rows = cur.fetchall()
             return _PrefetchedCursor(rows, cur.lastrowid, cur.rowcount)
 
-    def executemany(self, *args, **kwargs) -> _PrefetchedCursor:
+    def executemany(self, *args: Any, **kwargs: Any) -> _PrefetchedCursor:
         with self._lock:
             cur = self._conn.executemany(*args, **kwargs)
             rows = cur.fetchall()
             return _PrefetchedCursor(rows, cur.lastrowid, cur.rowcount)
 
-    def executescript(self, *args, **kwargs):
+    def executescript(self, *args: Any, **kwargs: Any) -> sqlite3.Cursor:
         with self._lock:
             return self._conn.executescript(*args, **kwargs)
 
-    def commit(self):
+    def commit(self) -> None:
         with self._lock:
             return self._conn.commit()
 
-    def rollback(self):
+    def rollback(self) -> None:
         with self._lock:
             return self._conn.rollback()
 
-    def close(self):
+    def close(self) -> None:
         with self._lock:
             return self._conn.close()
 
     @contextmanager
-    def locked(self):
+    def locked(self) -> Iterator[LockedConnection]:
         """Hold the connection lock for a multi-statement atomic section."""
         with self._lock:
             yield self
 
-    def __getattr__(self, name):
+    def __getattr__(self, name: str) -> Any:
         # Fallback for less-common methods (interrupt, set_trace_callback, etc.)
         return getattr(self._conn, name)
 
@@ -125,7 +127,22 @@ def connect(path: Path) -> sqlite3.Connection:
     raw.row_factory = sqlite3.Row
     raw.execute("PRAGMA journal_mode=WAL")
     raw.execute("PRAGMA foreign_keys=ON")
-    return LockedConnection(raw)  # type: ignore[return-value]
+    return cast(sqlite3.Connection, LockedConnection(raw))
+
+
+@contextmanager
+def locked(conn: sqlite3.Connection) -> Iterator[sqlite3.Connection]:
+    """Hold a LockedConnection lock when present.
+
+    Tests and one-off tools may pass a plain sqlite3.Connection; in that
+    case the context still works and simply yields the original connection.
+    """
+    lock = getattr(conn, "locked", None)
+    if lock is None:
+        yield conn
+        return
+    with lock() as locked_conn:
+        yield locked_conn
 
 
 def _ensure_migrations_table(conn: sqlite3.Connection) -> None:

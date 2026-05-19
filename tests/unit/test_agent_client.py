@@ -178,8 +178,8 @@ def test_build_heartbeat_frame_without_collectors_is_bare():
 
 
 def test_build_heartbeat_frame_with_collectors_carries_metrics(monkeypatch):
-    from serve_engine.cluster.agent_client import build_heartbeat_frame
     from serve_engine.cluster import metrics_collector as mc
+    from serve_engine.cluster.agent_client import build_heartbeat_frame
     from serve_engine.cluster.protocol import Heartbeat, decode_frame, encode_frame
 
     # Stub out NVML so the test doesn't depend on a GPU host.

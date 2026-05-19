@@ -30,12 +30,13 @@ def setup():
 
     typer.echo()
     typer.echo("Step 2: starting daemon")
+    cfg = config.resolve_config()
     try:
         asyncio.run(ipc.get(config.SOCK_PATH, "/healthz"))
         typer.echo("  daemon already running")
     except Exception:
         try:
-            pid = spawn_daemon(timeout_s=15.0, poll_s=0.3)
+            pid = spawn_daemon(cfg, timeout_s=15.0, poll_s=0.3)
         except TimeoutError as e:
             typer.secho(f"  {e}; check logs", fg=typer.colors.RED, err=True)
             raise typer.Exit(2) from e
@@ -52,6 +53,6 @@ def setup():
     typer.echo("Save this secret. It won't be shown again.")
     typer.echo()
     typer.secho(
-        f"Done. Open http://127.0.0.1:{config.DEFAULT_PUBLIC_PORT}/ and paste the secret.",
+        f"Done. Open {cfg.public_url}/ and paste the secret.",
         fg=typer.colors.GREEN,
     )

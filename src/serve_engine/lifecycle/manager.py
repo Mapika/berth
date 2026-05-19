@@ -490,7 +490,7 @@ class LifecycleManager:
                 dep_store.set_container(
                     self._conn, dep.id,
                     container_id=started.container_id,
-                    container_name=agent_plan["name"],
+                    container_name=str(agent_plan["name"]),
                     container_port=started.port,
                     container_address=started.address,
                     node_id=target_node_id,
@@ -653,10 +653,7 @@ class LifecycleManager:
                         "reconcile: deployment %s container %s status=%s; cleaning",
                         d.id, d.container_id, status,
                     )
-                    try:
-                        container.remove(force=True)
-                    except Exception:
-                        pass
+                    self._docker.remove(d.container_id, force=True)
                     dep_store.update_status(
                         self._conn, d.id, "failed",
                         last_error=f"container exited (status={status}) while daemon was down",

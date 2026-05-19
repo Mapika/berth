@@ -3,8 +3,10 @@ from __future__ import annotations
 import os
 import socket
 import tomllib
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Any
 
 SERVE_DIR = Path(os.environ.get("SERVE_HOME", Path.home() / ".serve"))
 MODELS_DIR = SERVE_DIR / "models"
@@ -63,7 +65,7 @@ class ResolvedConfig:
         )
 
 
-def load_config_file() -> dict:
+def load_config_file() -> dict[str, Any]:
     """Read ~/.serve/config.toml. Returns {} if absent or malformed."""
     if not CONFIG_FILE.exists():
         return {}
@@ -74,7 +76,7 @@ def load_config_file() -> dict:
         return {}
 
 
-def save_config_file(updates: dict[str, dict[str, str | int]]) -> None:
+def save_config_file(updates: dict[str, dict[str, str | int | bool | None]]) -> None:
     """Deep-merge `updates` into ~/.serve/config.toml and write it back.
 
     `updates` is a section-table mapping like `{"public": {"host": "..."}}`.
@@ -96,7 +98,7 @@ def save_config_file(updates: dict[str, dict[str, str | int]]) -> None:
     CONFIG_FILE.write_text(_dump_toml(current))
 
 
-def _dump_toml(data: dict) -> str:
+def _dump_toml(data: dict[str, Any]) -> str:
     """Tiny TOML writer covering only the subset we use (sections of
     flat str/int values). Avoids adding tomli-w as a dependency."""
     lines: list[str] = []
@@ -152,13 +154,13 @@ def resolve_config(
     cli_cluster_bind: str | None = None,
     cli_public_cert: str | None = None,
     cli_public_key: str | None = None,
-    env: dict[str, str] | None = None,
+    env: Mapping[str, str] | None = None,
 ) -> ResolvedConfig:
     """Resolve effective config from flags → env → file → autodetect/default.
 
     Pass `env` to override `os.environ` (used by tests). `cli_*` are
     already-parsed CLI overrides (None = not set)."""
-    env = env if env is not None else os.environ  # type: ignore[assignment]
+    env_map: Mapping[str, str] = os.environ if env is None else env
     file_cfg = load_config_file()
     public_file = file_cfg.get("public", {})
     cluster_file = file_cfg.get("cluster", {})
@@ -169,17 +171,17 @@ def resolve_config(
         field_name: str,
         cli_val: str | int | None,
         env_key: str | None,
-        file_section: dict,
+        file_section: Mapping[str, Any],
         file_key: str,
-        default,
-        autodetect=None,
-    ):
+        default: object,
+        autodetect: Any = None,
+    ) -> object:
         if cli_val is not None:
             source[field_name] = "flag"
             return cli_val
-        if env_key and env.get(env_key):
+        if env_key is not None and env_map.get(env_key):
             source[field_name] = "env"
-            v = env[env_key]
+            v = env_map[env_key]
             # bool first — bool is a subclass of int in Python; int() of
             # "true" would otherwise raise.
             if isinstance(default, bool):
@@ -254,19 +256,27 @@ def resolve_config(
         "forwarded_allow_ips", None, "SERVE_FORWARDED_ALLOW_IPS",
         public_file, "forwarded_allow_ips", "127.0.0.1",
     )
-    leader_override = env.get("SERVE_LEADER_URL")
+    leader_override = env_map.get("SERVE_LEADER_URL")
     if leader_override:
         source["leader_url"] = "env:SERVE_LEADER_URL"
 
+    def _as_int(value: object) -> int:
+        if isinstance(value, int):
+            return value
+        return int(str(value))
+
+    def _as_path(value: object) -> Path:
+        return Path(str(value))
+
     return ResolvedConfig(
         public_host=str(public_host),
-        public_port=int(public_port),
+        public_port=_as_int(public_port),
         public_bind=str(public_bind),
         cluster_host=str(cluster_host),
-        cluster_port=int(cluster_port),
+        cluster_port=_as_int(cluster_port),
         cluster_bind=str(cluster_bind),
-        public_cert_path=Path(public_cert) if public_cert else None,
-        public_key_path=Path(public_key) if public_key else None,
+        public_cert_path=_as_path(public_cert) if public_cert else None,
+        public_key_path=_as_path(public_key) if public_key else None,
         public_scheme=str(public_scheme),
         trust_proxy_headers=bool(trust_proxy_headers),
         forwarded_allow_ips=str(forwarded_allow_ips),

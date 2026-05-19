@@ -160,6 +160,7 @@ class PredictorTask:
         """
         if self._manager is None or self._config.max_base_prewarm_per_tick <= 0:
             return False
+        manager = self._manager
 
         model = model_store.get_by_name(self._conn, base_name)
         if model is None:
@@ -200,7 +201,7 @@ class PredictorTask:
         # failed deployment row in `serve ps`.
         async def _run() -> None:
             try:
-                await self._manager.load(plan)
+                await manager.load(plan)
                 self.base_prewarms_succeeded += 1
                 log.info(
                     "predictor pre-warmed base %r from plan #%d (%s)",

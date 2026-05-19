@@ -115,6 +115,7 @@ def create(
             max_loras, max_lora_rank,
         ),
     )
+    assert cur.lastrowid is not None
     result = get_by_id(conn, cur.lastrowid)
     assert result is not None
     return result

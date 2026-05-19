@@ -5,6 +5,7 @@ from typing import Literal
 
 SUPPORTED_BACKENDS = ("vllm", "sglang", "trtllm")
 SUPPORTED_DTYPES = ("auto", "bf16", "fp16", "fp8")
+BackendName = Literal["vllm", "sglang", "trtllm"]
 
 
 def _is_power_of_two(n: int) -> bool:
@@ -16,7 +17,7 @@ class DeploymentPlan:
     model_name: str
     hf_repo: str
     revision: str
-    backend: Literal["vllm", "sglang", "trtllm"]
+    backend: BackendName
     image_tag: str
     gpu_ids: list[int]
     max_model_len: int

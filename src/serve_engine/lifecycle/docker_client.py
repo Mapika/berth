@@ -3,6 +3,7 @@ from __future__ import annotations
 import logging
 from collections.abc import Iterator
 from dataclasses import dataclass
+from typing import Any, cast
 
 from docker.errors import NotFound  # type: ignore[import-untyped]
 
@@ -20,8 +21,8 @@ class ContainerHandle:
 
 
 class DockerClient:
-    def __init__(self, *, client: object | None = None, network_name: str):
-        self._client = client or docker.from_env()
+    def __init__(self, *, client: Any | None = None, network_name: str):
+        self._client: Any = client if client is not None else cast(Any, docker).from_env()
         self._network_name = network_name
 
     def ensure_network(self) -> None:
@@ -91,6 +92,14 @@ class DockerClient:
         c.stop(timeout=timeout)
         if remove:
             c.remove()
+
+    def remove(self, container_id: str, *, force: bool = False) -> None:
+        """Remove a container if it exists."""
+        try:
+            c = self._client.containers.get(container_id)
+        except NotFound:
+            return
+        c.remove(force=force)
 
     def container_status(self, container_id: str) -> str | None:
         """Return the container's status string ("running", "exited",

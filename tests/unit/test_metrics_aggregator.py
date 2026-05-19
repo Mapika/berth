@@ -71,5 +71,8 @@ def test_aggregator_thread_safety_under_concurrent_ingest():
             _ = a.snapshot()
 
     t1, t2 = threading.Thread(target=writer), threading.Thread(target=reader)
-    t1.start(); t2.start(); t1.join(); t2.join()
+    t1.start()
+    t2.start()
+    t1.join()
+    t2.join()
     assert len(a.series(node_id=1, key="gpu_util_pct", gpu=0)) == 12

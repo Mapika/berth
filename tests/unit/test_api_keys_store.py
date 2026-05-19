@@ -109,7 +109,7 @@ def test_allowed_models_roundtrip(tmp_path):
     assert k2.allowed_models == ["only-this"]
 
     # verify() returns the same shape.
-    secret, k3 = api_keys.create(
+    secret, _k3 = api_keys.create(
         conn, name="for-verify", tier="standard", allowed_models=["a", "b"],
     )
     verified = api_keys.verify(conn, secret)

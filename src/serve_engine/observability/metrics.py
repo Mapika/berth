@@ -7,7 +7,6 @@ import httpx
 from serve_engine.daemon.metrics_aggregator import MetricsAggregator
 from serve_engine.observability.trtllm_metrics import translate_many
 
-
 _CLUSTER_HELP_BLOCK = """\
 # HELP serve_node_gpu_util_pct Per-GPU utilization percent.
 # TYPE serve_node_gpu_util_pct gauge

@@ -3,6 +3,7 @@ from __future__ import annotations
 import sqlite3
 from dataclasses import dataclass
 
+from serve_engine.store import db
 from serve_engine.store import models as model_store
 from serve_engine.store.models import Model
 
@@ -84,7 +85,7 @@ def add(
         raise BaseNotFound(f"base model {base_model_name!r} not registered")
     # Disjoint-namespace check: adapter names and base-model names share
     # the routing namespace, so they must not collide.
-    with conn.locked():
+    with db.locked(conn):
         if conn.execute("SELECT 1 FROM models WHERE name=?", (name,)).fetchone():
             raise NameCollision(
                 f"name {name!r} is already used by a base model"
@@ -103,6 +104,7 @@ def add(
             )
         except sqlite3.IntegrityError as e:
             raise AlreadyExists(f"adapter {name!r} already exists") from e
+        assert cur.lastrowid is not None
         new_id = cur.lastrowid
     fetched = get_by_id(conn, new_id)
     assert fetched is not None

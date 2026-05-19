@@ -27,7 +27,7 @@ _COLUMNS = (
 )
 
 
-def _row_to_node(row) -> Node:
+def _row_to_node(row: sqlite3.Row) -> Node:
     return Node(
         id=row[0], label=row[1], fingerprint=row[2], reachable_as=row[3],
         status=row[4], first_seen=row[5], last_seen=row[6],
@@ -62,7 +62,8 @@ def insert(
          first_seen, last_seen, agent_version,
          cpu_count, total_ram_mb, gpu_count, total_vram_mb),
     )
-    return int(cur.lastrowid)
+    assert cur.lastrowid is not None
+    return cur.lastrowid
 
 
 def get(conn: sqlite3.Connection, node_id: int) -> Node | None:

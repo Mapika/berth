@@ -71,7 +71,9 @@ class TRTLLMBackend(ContainerBackend):
         self._append_extra(argv, plan.extra_args)
         return argv
 
-    def engine_config(self, plan: DeploymentPlan) -> dict | None:
+    def engine_config(self, plan: DeploymentPlan) -> dict[str, object] | None:
+        if plan.target_concurrency is None:
+            raise ValueError("target_concurrency must be resolved before TRT-LLM config")
         return {
             # Populates /metrics on the PyTorch backend (TRT-LLM emits as JSON,
             # not Prometheus exposition - our aggregator passes it through but

@@ -8,6 +8,8 @@ import sqlite3
 from dataclasses import dataclass
 from pathlib import Path
 
+from serve_engine.store import db
+
 
 @dataclass(frozen=True)
 class ApiKey:
@@ -81,7 +83,7 @@ def _decode_allowed_models(raw: object) -> list[str] | None:
     if raw is None or raw == "":
         return None
     try:
-        decoded = json.loads(raw)
+        decoded = json.loads(str(raw))
     except (TypeError, json.JSONDecodeError):
         return None
     if not isinstance(decoded, list):
@@ -155,6 +157,7 @@ def create(
             allowed_json,
         ),
     )
+    assert cur.lastrowid is not None
     fetched = get_by_id(conn, cur.lastrowid)
     assert fetched is not None
     return secret, fetched
@@ -196,7 +199,7 @@ def verify(conn: sqlite3.Connection, secret: str) -> ApiKey | None:
     decision must be revisited.
     """
     candidate_hash = _hash(secret)
-    with conn.locked():
+    with db.locked(conn):
         row = conn.execute(
             "SELECT * FROM api_keys WHERE key_hash=? AND revoked_at IS NULL",
             (candidate_hash,),
