@@ -106,7 +106,7 @@ From a GitHub release wheel:
 
 ```bash
 uv tool install \
-  https://github.com/Mapika/serve-engine/releases/download/v0.2.0/serve_engine-0.2.0-py3-none-any.whl
+  https://github.com/Mapika/serve-engine/releases/download/v0.2.1/serve_engine-0.2.1-py3-none-any.whl
 serve doctor
 ```
 
