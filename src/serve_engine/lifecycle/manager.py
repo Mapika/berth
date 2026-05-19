@@ -133,6 +133,8 @@ class LifecycleManager:
         self._docker = docker_client
         self._backends = backends
         self._models_dir = models_dir
+        # Public accessor lives at LifecycleManager.models_dir — defined
+        # as a @property below. Callers must not reach _models_dir.
         # Per-deployment engine YAML configs, mounted into containers at
         # /serve/configs:ro. Backends opt-in via engine_config(plan).
         self._configs_dir = configs_dir or (models_dir.parent / "configs")
@@ -152,6 +154,14 @@ class LifecycleManager:
             lock = asyncio.Lock()
             self._adapter_locks[dep_id] = lock
         return lock
+
+    @property
+    def models_dir(self) -> Path:
+        """Public accessor for the models cache root. External callers
+        (proxy, admin endpoints) must use this rather than reaching the
+        private attribute — keeps the field swappable without grepping
+        seven call sites."""
+        return self._models_dir
 
     async def _emit(self, kind: str, **payload) -> None:
         if self._events is not None:

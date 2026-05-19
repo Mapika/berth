@@ -602,7 +602,7 @@ async def download_model_endpoint(
             download_model,
             hf_repo=m.hf_repo,
             revision=m.revision,
-            cache_dir=manager._models_dir,
+            cache_dir=manager.models_dir,
         )
     except Exception as e:
         raise HTTPException(502, f"download failed: {e}") from e
@@ -755,7 +755,7 @@ async def download_adapter_endpoint(
             download_adapter,
             hf_repo=a.hf_repo,
             revision=a.revision,
-            cache_dir=manager._models_dir,
+            cache_dir=manager.models_dir,
         )
     except Exception as e:
         raise HTTPException(502, f"download failed: {e}") from e
@@ -810,7 +810,7 @@ def add_local_adapter(
     # Copy into the managed cache so the engine container's /cache bind-mount
     # picks it up via the existing host->container path translation in
     # hot_load_adapter.
-    dest_root = manager._models_dir.resolve() / "local-adapters"
+    dest_root = manager.models_dir.resolve() / "local-adapters"
     dest = dest_root / body.name
     if dest.exists():
         # The name collision check below would catch this anyway, but if a
@@ -926,7 +926,7 @@ async def hot_load_adapter(
 
         # Translate host adapter path into in-container path (mounted at /cache).
         container_path = "/cache/" + str(
-            Path(a.local_path).resolve().relative_to(manager._models_dir.resolve())
+            Path(a.local_path).resolve().relative_to(manager.models_dir.resolve())
         )
         body = {"lora_name": a.name, "lora_path": container_path}
         url = (

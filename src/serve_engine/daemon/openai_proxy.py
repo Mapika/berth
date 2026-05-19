@@ -328,7 +328,7 @@ async def _proxy(
             try:
                 cold_loaded = await ensure_adapter_loaded(
                     conn, backend, active, target.adapter_name,
-                    models_dir=manager._models_dir,
+                    models_dir=manager.models_dir,
                 )
             except UnknownModel as e:
                 tracer.finalize(trace, status_code=404, error=str(e))
