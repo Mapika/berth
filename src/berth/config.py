@@ -3,27 +3,92 @@ from __future__ import annotations
 import os
 import socket
 import tomllib
+import warnings
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-SERVE_DIR = Path(os.environ.get("SERVE_HOME", Path.home() / ".serve"))
-MODELS_DIR = SERVE_DIR / "models"
-LOGS_DIR = SERVE_DIR / "logs"
-CONFIGS_DIR = SERVE_DIR / "configs"  # per-deployment engine YAMLs (TRT-LLM --config)
-DB_PATH = SERVE_DIR / "db.sqlite"
-SOCK_PATH = SERVE_DIR / "sock"
+# One-shot deprecation tracking — emit each legacy env-var warning at most
+# once per process so a tight loop or many config readers don't spam.
+_DEPRECATED_ENV_WARNED: set[str] = set()
+
+
+def _env_get(env_map: Mapping[str, str], legacy_serve_key: str) -> str | None:
+    """Look up an env var, preferring `BERTH_X` over the legacy `SERVE_X`.
+
+    The CLI binary, package, and brand are all `berth`; `SERVE_*` env vars
+    are kept for one release with a deprecation warning. Call sites keep
+    using the legacy name — the helper rewrites it to the BERTH_ prefix
+    for the primary lookup.
+    """
+    assert legacy_serve_key.startswith("SERVE_"), legacy_serve_key
+    berth_key = "BERTH_" + legacy_serve_key[len("SERVE_"):]
+    v = env_map.get(berth_key)
+    if v:
+        return v
+    v = env_map.get(legacy_serve_key)
+    if v:
+        if legacy_serve_key not in _DEPRECATED_ENV_WARNED:
+            _DEPRECATED_ENV_WARNED.add(legacy_serve_key)
+            warnings.warn(
+                f"{legacy_serve_key} is deprecated; use {berth_key} "
+                "(will be removed in a future release)",
+                DeprecationWarning,
+                stacklevel=2,
+            )
+        return v
+    return None
+
+
+BERTH_DIR = Path(_env_get(os.environ, "SERVE_HOME") or Path.home() / ".berth")
+
+
+def _maybe_migrate_legacy_serve_dir() -> None:
+    """One-shot migration of `~/.serve` to `~/.berth` for pre-rename installs.
+
+    Runs at module load so any caller that reads BERTH_DIR after import
+    sees the moved tree. Only fires on the default path: an explicit
+    BERTH_HOME or legacy SERVE_HOME means the operator chose a custom
+    location and we must not move anything. Also skips when `~/.berth`
+    already exists — we refuse to merge two trees automatically.
+    """
+    default_path = Path.home() / ".berth"
+    if BERTH_DIR.resolve() != default_path.resolve():
+        return
+    if default_path.exists():
+        return
+    legacy = Path.home() / ".serve"
+    if not legacy.exists():
+        return
+    try:
+        legacy.rename(default_path)
+    except OSError as e:
+        # Pre-logging-setup, so write to stderr directly.
+        import sys
+        print(
+            f"[berth] WARNING: could not migrate {legacy} -> {default_path}: {e}. "
+            "Move the directory by hand and retry.",
+            file=sys.stderr,
+        )
+
+
+_maybe_migrate_legacy_serve_dir()
+MODELS_DIR = BERTH_DIR / "models"
+LOGS_DIR = BERTH_DIR / "logs"
+CONFIGS_DIR = BERTH_DIR / "configs"  # per-deployment engine YAMLs (TRT-LLM --config)
+DB_PATH = BERTH_DIR / "db.sqlite"
+SOCK_PATH = BERTH_DIR / "sock"
 
 DEFAULT_PUBLIC_HOST = "127.0.0.1"
 DEFAULT_PUBLIC_PORT = 11500
 DEFAULT_CLUSTER_PORT = 11501
 DEFAULT_BIND = "0.0.0.0"
 
-CONFIG_FILE = SERVE_DIR / "config.toml"
-LEADER_DIR = SERVE_DIR / "leader"
+CONFIG_FILE = BERTH_DIR / "config.toml"
+LEADER_DIR = BERTH_DIR / "leader"
 
-DOCKER_NETWORK_NAME = "serve-engines"
+DOCKER_NETWORK_NAME = "berth-engines"
 
 
 # ---------------------------------------------------------------------------
@@ -36,7 +101,7 @@ class ResolvedConfig:
     """Final resolved bind + advertise addresses, plus where each came from.
 
     `source` maps each field name to one of: "flag", "env", "file",
-    "autodetect", "default". Used by `serve config show` to explain
+    "autodetect", "default". Used by `berth config show` to explain
     decisions and by the startup banner to warn on autodetect."""
 
     public_host: str
@@ -50,7 +115,7 @@ class ResolvedConfig:
     public_scheme: str = "https"  # "http" when behind a TLS-terminating proxy
     trust_proxy_headers: bool = False
     forwarded_allow_ips: str = "127.0.0.1"
-    leader_url_override: str | None = None  # SERVE_LEADER_URL
+    leader_url_override: str | None = None  # BERTH_LEADER_URL (legacy: SERVE_LEADER_URL)
     source: dict[str, str] = field(default_factory=dict)
 
     @property
@@ -66,7 +131,7 @@ class ResolvedConfig:
 
 
 def load_config_file() -> dict[str, Any]:
-    """Read ~/.serve/config.toml. Returns {} if absent or malformed."""
+    """Read ~/.berth/config.toml. Returns {} if absent or malformed."""
     if not CONFIG_FILE.exists():
         return {}
     try:
@@ -77,7 +142,7 @@ def load_config_file() -> dict[str, Any]:
 
 
 def save_config_file(updates: dict[str, dict[str, str | int | bool | None]]) -> None:
-    """Deep-merge `updates` into ~/.serve/config.toml and write it back.
+    """Deep-merge `updates` into ~/.berth/config.toml and write it back.
 
     `updates` is a section-table mapping like `{"public": {"host": "..."}}`.
     Existing sections/keys are preserved; new keys overwrite. Setting a
@@ -179,14 +244,15 @@ def resolve_config(
         if cli_val is not None:
             source[field_name] = "flag"
             return cli_val
-        if env_key is not None and env_map.get(env_key):
-            source[field_name] = "env"
-            v = env_map[env_key]
-            # bool first — bool is a subclass of int in Python; int() of
-            # "true" would otherwise raise.
-            if isinstance(default, bool):
-                return v
-            return int(v) if isinstance(default, int) else v
+        if env_key is not None:
+            v = _env_get(env_map, env_key)
+            if v:
+                source[field_name] = "env"
+                # bool first — bool is a subclass of int in Python; int() of
+                # "true" would otherwise raise.
+                if isinstance(default, bool):
+                    return v
+                return int(v) if isinstance(default, int) else v
         if file_key in file_section:
             source[field_name] = "file"
             return file_section[file_key]
@@ -256,9 +322,14 @@ def resolve_config(
         "forwarded_allow_ips", None, "SERVE_FORWARDED_ALLOW_IPS",
         public_file, "forwarded_allow_ips", "127.0.0.1",
     )
-    leader_override = env_map.get("SERVE_LEADER_URL")
+    leader_override = _env_get(env_map, "SERVE_LEADER_URL")
     if leader_override:
-        source["leader_url"] = "env:SERVE_LEADER_URL"
+        # Tag with whichever name the operator actually set.
+        source["leader_url"] = (
+            "env:BERTH_LEADER_URL"
+            if env_map.get("BERTH_LEADER_URL")
+            else "env:SERVE_LEADER_URL"
+        )
 
     def _as_int(value: object) -> int:
         if isinstance(value, int):

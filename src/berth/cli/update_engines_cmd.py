@@ -11,7 +11,7 @@ from berth.cli import app
 def update_engines(
     apply: bool = typer.Option(
         False, "--apply",
-        help="Write the new tags to ~/.serve/backends.override.yaml",
+        help="Write the new tags to ~/.berth/backends.override.yaml",
     ),
 ):
     """Check Docker Hub for newer pinned-tag stable releases of each engine."""
@@ -34,9 +34,9 @@ def update_engines(
         return
 
     if not apply:
-        typer.echo("\nRun `serve update-engines --apply` to write the new tags.")
+        typer.echo("\nRun `berth update-engines --apply` to write the new tags.")
         return
 
     path = write_override(updates)
     typer.echo(f"\nWrote {path}")
-    typer.echo("Restart the daemon for changes to take effect: serve daemon restart")
+    typer.echo("Restart the daemon for changes to take effect: berth daemon restart")

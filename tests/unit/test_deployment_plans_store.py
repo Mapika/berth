@@ -74,7 +74,7 @@ def test_most_recent_ready_skips_unready_rows(tmp_path):
 
 
 def test_most_recent_ready_returns_latest_when_multiple(tmp_path):
-    """When the operator runs `serve run X` repeatedly, each successful
+    """When the operator runs `berth run X` repeatedly, each successful
     load adds a row. The newest ready plan wins so config tweaks
     propagate to the next pre-warm."""
     conn = _conn(tmp_path)

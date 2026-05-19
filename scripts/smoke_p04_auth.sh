@@ -7,14 +7,14 @@ set -euo pipefail
 # Prereqs same as Plan 02 smoke (Docker + nvidia-container-toolkit + GPU).
 
 cleanup() {
-    serve stop 2>/dev/null || true
-    serve daemon stop 2>/dev/null || true
+    berth stop 2>/dev/null || true
+    berth daemon stop 2>/dev/null || true
 }
 trap cleanup EXIT
 
-serve daemon start
-serve pull Qwen/Qwen2.5-0.5B-Instruct --name qwen-0_5b
-serve run qwen-0_5b --gpu 0 --ctx 4096
+berth daemon start
+berth pull Qwen/Qwen2.5-0.5B-Instruct --name qwen-0_5b
+berth run qwen-0_5b --gpu 0 --ctx 4096
 
 # Phase 1: no keys yet → auth bypassed
 echo "=== phase 1: no keys, expect 200 ==="
@@ -27,7 +27,7 @@ test "$code" = "200" || { echo "FAIL: expected 200 (auth bypass)"; exit 1; }
 
 # Phase 2: create a trial-tier key (RPM=10)
 echo "=== phase 2: create trial key ==="
-secret=$(serve key create alice --tier trial | awk '/^secret:/ {print $2}')
+secret=$(berth key create alice --tier trial | awk '/^secret:/ {print $2}')
 test -n "$secret" || { echo "no secret returned"; exit 1; }
 echo "Got secret: ${secret:0:12}..."
 

@@ -1,16 +1,16 @@
-# serve-engine
+# berth
 
-[![CI](https://github.com/Mapika/serve-engine/actions/workflows/ci.yml/badge.svg)](https://github.com/Mapika/serve-engine/actions/workflows/ci.yml)
-[![Release](https://github.com/Mapika/serve-engine/actions/workflows/release.yml/badge.svg)](https://github.com/Mapika/serve-engine/actions/workflows/release.yml)
+[![CI](https://github.com/Mapika/berth/actions/workflows/ci.yml/badge.svg)](https://github.com/Mapika/berth/actions/workflows/ci.yml)
+[![Release](https://github.com/Mapika/berth/actions/workflows/release.yml/badge.svg)](https://github.com/Mapika/berth/actions/workflows/release.yml)
 ![Python](https://img.shields.io/badge/python-3.11%2B-blue)
 ![License](https://img.shields.io/badge/license-Apache--2.0-blue)
 
-serve-engine is a small inference control plane for GPU boxes.
+berth is a small inference control plane for GPU boxes.
 
 It gives a host one OpenAI-compatible endpoint and manages the boring parts
 behind it: start containers, stop them, check health, route requests, expose
 metrics, keep state, and clean up after failures. vLLM, SGLang, and TensorRT-LLM
-still do the inference. serve-engine is the layer around them.
+still do the inference. berth is the layer around them.
 
 The taste of the project is deliberately narrow:
 
@@ -24,11 +24,11 @@ The taste of the project is deliberately narrow:
 This is not trying to be a full ML platform. It is the thing I wanted between
 "run this container by hand" and "stand up a cluster stack".
 
-![serve-engine dashboard](docs/assets/ui-dashboard.png)
+![berth dashboard](docs/assets/ui-dashboard.png)
 
 ## When To Use It
 
-Use serve-engine if:
+Use berth if:
 
 - You have one GPU box, or a few GPU boxes, and want one API endpoint.
 - You want vLLM/SGLang/TRT-LLM to stay replaceable.
@@ -55,7 +55,7 @@ Do not use it if:
 - LoRA adapter registry, download, hot-load, and unload paths
 - API keys, admin keys, and request/token rate limits
 - Prometheus metrics, GPU stats, request tracing, lifecycle events, logs, and
-  `serve top`
+  `berth top`
 - Web UI bundled into the Python package, including cluster, services, keys,
   logs, requests, and playground views
 
@@ -101,18 +101,18 @@ This is the test surface I actively care about right now:
 From source:
 
 ```bash
-git clone https://github.com/Mapika/serve-engine
-cd serve-engine
+git clone https://github.com/Mapika/berth
+cd berth
 uv tool install --editable .
-serve doctor
+berth doctor
 ```
 
 From a GitHub release wheel:
 
 ```bash
 uv tool install \
-  https://github.com/Mapika/serve-engine/releases/download/v0.2.2/serve_engine-0.2.2-py3-none-any.whl
-serve doctor
+  https://github.com/Mapika/berth/releases/download/v0.2.2/serve_engine-0.2.2-py3-none-any.whl
+berth doctor
 ```
 
 The project is not published to PyPI yet. Releases are GitHub artifacts for
@@ -121,25 +121,25 @@ now.
 For development:
 
 ```bash
-git clone https://github.com/Mapika/serve-engine
-cd serve-engine
+git clone https://github.com/Mapika/berth
+cd berth
 uv venv
 source .venv/bin/activate
 uv pip install -e ".[dev]"
-serve doctor
+berth doctor
 ```
 
 Daemon in a container:
 
 ```bash
-git clone https://github.com/Mapika/serve-engine
-cd serve-engine
-docker build -f docker/daemon.Dockerfile -t serve-engine:dev .
+git clone https://github.com/Mapika/berth
+cd berth
+docker build -f docker/daemon.Dockerfile -t berth:dev .
 docker run -d --name serve \
   --network host \
   -v ~/.serve:/root/.serve \
   -v /var/run/docker.sock:/var/run/docker.sock \
-  serve-engine:dev
+  berth:dev
 ```
 
 The daemon container does not run inference itself. It talks to the host Docker
@@ -154,19 +154,19 @@ If `serve` is already taken by an existing shell alias (for example
 Start the daemon:
 
 ```bash
-serve daemon start
-serve daemon status
+berth daemon start
+berth daemon status
 ```
 
 By default the public listener binds to `0.0.0.0:11500` and serves HTTPS with a
-generated serve-engine CA. For local-only testing, set
+generated berth CA. For local-only testing, set
 `SERVE_PUBLIC_BIND=127.0.0.1`. For internet-facing use, I prefer putting
-Caddy/Nginx in front with `serve deploy bootstrap --behind-proxy`.
+Caddy/Nginx in front with `berth deploy bootstrap --behind-proxy`.
 
 Create an admin key:
 
 ```bash
-serve key create web --tier admin
+berth key create web --tier admin
 ```
 
 Save the printed `secret:` value:
@@ -194,14 +194,14 @@ token. TCP admin and `/v1/*` requests need a bearer token once any key exists.
 Register and download a small model:
 
 ```bash
-serve pull Qwen/Qwen2.5-0.5B-Instruct --name qwen-0_5b
+berth pull Qwen/Qwen2.5-0.5B-Instruct --name qwen-0_5b
 ```
 
 Start it on GPU 0:
 
 ```bash
-serve run qwen-0_5b --gpu 0 --engine vllm --pin
-serve ps
+berth run qwen-0_5b --gpu 0 --engine vllm --pin
+berth ps
 ```
 
 Call the OpenAI-compatible API:
@@ -221,21 +221,21 @@ curl -k "$SERVE_URL/v1/chat/completions" \
 Stop it:
 
 ```bash
-serve stop
+berth stop
 ```
 
 The happy path looks roughly like this:
 
 ```text
-$ serve pull Qwen/Qwen2.5-0.5B-Instruct --name qwen-0_5b
+$ berth pull Qwen/Qwen2.5-0.5B-Instruct --name qwen-0_5b
 registered qwen-0_5b
 downloaded model files
 
-$ serve run qwen-0_5b --gpu 0 --engine vllm --pin
+$ berth run qwen-0_5b --gpu 0 --engine vllm --pin
 deployment 1 loading
 deployment 1 ready
 
-$ serve ps
+$ berth ps
 ID  MODEL     BACKEND  GPU  STATUS  PIN
 1   qwen-0_5b vllm     0    ready   yes
 
@@ -345,33 +345,33 @@ interface.
 ## CLI
 
 ```text
-serve doctor              check host requirements
-serve setup               first-run wizard
-serve daemon start        start the daemon
-serve daemon stop         stop the daemon
-serve daemon status       show daemon status
-serve pull <repo>         register and download model files
-serve ls                  list registered models
-serve run <name>          start a deployment
-serve pin <name>          keep a deployment loaded
-serve unpin <name>        allow idle eviction
-serve ps                  list deployments
-serve stop [<id>]         stop one deployment or all deployments
-serve top                 terminal dashboard
-serve logs                tail engine container logs
-serve key create          create an API key
-serve key list            list key prefixes
-serve key revoke <id>     revoke a key
-serve adapter ...         manage LoRA adapters
-serve nodes ...           enroll, list, inspect, and remove agent nodes
-serve agent ...           register and run an agent host
-serve config ...          inspect and edit listener/TLS config
-serve backup create       snapshot db, CA, key pepper, and config
-serve predict             inspect predictor candidates and usage history
-serve update-engines      check for newer pinned engine tags
+berth doctor              check host requirements
+berth setup               first-run wizard
+berth daemon start        start the daemon
+berth daemon stop         stop the daemon
+berth daemon status       show daemon status
+berth pull <repo>         register and download model files
+berth ls                  list registered models
+berth run <name>          start a deployment
+berth pin <name>          keep a deployment loaded
+berth unpin <name>        allow idle eviction
+berth ps                  list deployments
+berth stop [<id>]         stop one deployment or all deployments
+berth top                 terminal dashboard
+berth logs                tail engine container logs
+berth key create          create an API key
+berth key list            list key prefixes
+berth key revoke <id>     revoke a key
+berth adapter ...         manage LoRA adapters
+berth nodes ...           enroll, list, inspect, and remove agent nodes
+berth agent ...           register and run an agent host
+berth config ...          inspect and edit listener/TLS config
+berth backup create       snapshot db, CA, key pepper, and config
+berth predict             inspect predictor candidates and usage history
+berth update-engines      check for newer pinned engine tags
 ```
 
-Useful `serve run` options:
+Useful `berth run` options:
 
 ```text
 --engine vllm|sglang|trtllm
@@ -443,7 +443,7 @@ Runtime choices:
 
 ## Files
 
-By default, serve-engine owns `~/.serve`. Override it with `SERVE_HOME`.
+By default, berth owns `~/.serve`. Override it with `SERVE_HOME`.
 
 ```text
 ~/.serve/
@@ -467,17 +467,17 @@ By default, serve-engine owns `~/.serve`. Override it with `SERVE_HOME`.
 
 ## Operator Notes
 
-- Run `serve doctor` before chasing ghosts.
-- Use `serve ps` for deployment state.
-- Use `serve logs` when an engine fails to become healthy.
-- Use `/admin/events` or `serve top` for lifecycle visibility.
+- Run `berth doctor` before chasing ghosts.
+- Use `berth ps` for deployment state.
+- Use `berth logs` when an engine fails to become healthy.
+- Use `/admin/events` or `berth top` for lifecycle visibility.
 - Use the web UI's Requests view when proxy routing or token accounting looks
   wrong.
 - Use `--pin` for services that should stay loaded.
 - Use `--idle-timeout` for services that should leave the GPU when quiet.
 - Use service profiles when launch arguments need to be repeatable.
 - Use routes when the public model name should not be tied to one backend.
-- Use `serve nodes enroll <label>` when a second GPU host is worth the added
+- Use `berth nodes enroll <label>` when a second GPU host is worth the added
   moving parts.
 - If something weird happens, see [docs/troubleshooting.md](docs/troubleshooting.md).
 
@@ -544,7 +544,7 @@ npm run build
 - Built-in ACME/certificate management
 - A Kubernetes replacement
 
-For internet-facing use, prefer `serve deploy bootstrap --behind-proxy` with a
+For internet-facing use, prefer `berth deploy bootstrap --behind-proxy` with a
 TLS-terminating reverse proxy, or configure `[public_tls]` with an
 operator-managed certificate.
 

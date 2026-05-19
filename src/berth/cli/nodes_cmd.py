@@ -11,7 +11,7 @@ from berth.cli import app, ipc
 nodes_app = typer.Typer(help="Manage cluster nodes from the leader.")
 app.add_typer(nodes_app, name="nodes")
 
-ENROLLMENT_URI_SCHEME = "serve://enroll"
+ENROLLMENT_URI_SCHEME = "berth://enroll"
 
 
 def _uds_post(path: str, json_body: dict) -> dict:
@@ -28,7 +28,7 @@ def _uds_delete(path: str) -> None:
 
 
 def build_enrollment_uri(*, leader: str, token: str, ca_fp: str) -> str:
-    """Produce `serve://enroll?leader=...&token=...&ca_fp=...` with proper
+    """Produce `berth://enroll?leader=...&token=...&ca_fp=...` with proper
     URL-encoding of every component."""
     q = urlencode({"leader": leader, "token": token, "ca_fp": ca_fp})
     return f"{ENROLLMENT_URI_SCHEME}?{q}"
@@ -69,9 +69,9 @@ def show(node_id: int):
 def enroll(label: str):
     """Mint a single-use enrollment URI for a new agent.
 
-    Prints a `serve://enroll?leader=…&token=…&ca_fp=…` URI that bundles
+    Prints a `berth://enroll?leader=…&token=…&ca_fp=…` URI that bundles
     the leader URL, single-use token, and CA fingerprint. The agent
-    pastes this into `serve agent register --uri '<uri>'` and the
+    pastes this into `berth agent register --uri '<uri>'` and the
     fingerprint pin prevents MITM during the CA bootstrap."""
     data = _uds_post("/admin/nodes/enroll", {"label": label})
     leader = data["leader_url"]
@@ -87,7 +87,7 @@ def enroll(label: str):
     typer.echo(f"  {uri}")
     typer.echo("")
     typer.echo("On the agent host, run:")
-    typer.echo(f"  serve agent register --uri '{uri}'")
+    typer.echo(f"  berth agent register --uri '{uri}'")
 
 
 @nodes_app.command("remove")

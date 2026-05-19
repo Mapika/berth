@@ -621,7 +621,7 @@ def models(
         {
             "id": m.name,
             "object": "model",
-            "owned_by": "serve-engine",
+            "owned_by": "berth",
             "loaded": m.id in ready_by_model,
             "pinned": ready_by_model[m.id].pinned if m.id in ready_by_model else False,
         }
@@ -633,7 +633,7 @@ def models(
         {
             "id": a.name,
             "object": "model",
-            "owned_by": "serve-engine",
+            "owned_by": "berth",
             "base": a.base_model.name,
             "loaded": bool(da_store.find_deployments_with_adapter(conn, a.id)),
             "downloaded": a.local_path is not None,

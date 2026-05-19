@@ -165,7 +165,7 @@ export default function Logs() {
             </div>
           )}
           {lines.map((line, i) => {
-            const meta = line.startsWith('[serve-engine]')
+            const meta = line.startsWith('[berth]')
             return (
               <div
                 key={i}

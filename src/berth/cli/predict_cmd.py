@@ -84,7 +84,7 @@ def predict(
     ),
     export: Path = typer.Option(
         None, "--export",
-        help="Dump usage_events to a JSONL file (reads ~/.serve/db.sqlite "
+        help="Dump usage_events to a JSONL file (reads ~/.berth/db.sqlite "
              "directly; no daemon needed).",
     ),
     replay: Path = typer.Option(

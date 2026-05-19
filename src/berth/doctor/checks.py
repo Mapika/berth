@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, cast
 
-from berth.config import DEFAULT_PUBLIC_PORT, SERVE_DIR
+from berth.config import BERTH_DIR, DEFAULT_PUBLIC_PORT
 
 try:
     import warnings
@@ -41,7 +41,7 @@ def _docker_from_env() -> Any:
 
 
 def check_paths() -> CheckResult:
-    p = Path(SERVE_DIR)
+    p = Path(BERTH_DIR)
     p.mkdir(parents=True, exist_ok=True)
     if not os.access(p, os.W_OK):
         return CheckResult(

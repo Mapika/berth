@@ -81,7 +81,7 @@ class TRTLLMBackend(ContainerBackend):
             # JSON->Prom translator).
             "enable_iter_perf_stats": True,
             # Mirrors NVIDIA's recommended throughput profile (also writes
-            # per-iter logs to stdout for `serve logs` inspection).
+            # per-iter logs to stdout for `berth logs` inspection).
             "print_iter_log": True,
             "cuda_graph_config": {
                 "enable_padding": True,

@@ -15,7 +15,7 @@ from berth.cli import app, ipc
 daemon_app = typer.Typer(help="Daemon control")
 app.add_typer(daemon_app, name="daemon")
 
-PID_FILE = config.SERVE_DIR / "daemon.pid"
+PID_FILE = config.BERTH_DIR / "daemon.pid"
 
 
 def spawn_daemon(
@@ -26,7 +26,7 @@ def spawn_daemon(
 ) -> int:
     """Spawn the daemon process, write its PID, poll the UDS /healthz
     until it answers. Returns the spawned PID."""
-    config.SERVE_DIR.mkdir(parents=True, exist_ok=True)
+    config.BERTH_DIR.mkdir(parents=True, exist_ok=True)
     log_path = config.LOGS_DIR / "daemon.log"
     log_path.parent.mkdir(parents=True, exist_ok=True)
     cmd = [
@@ -77,7 +77,7 @@ def _print_startup_banner(cfg: config.ResolvedConfig, pid: int) -> None:
     """Print the resolved addresses, certs, and fingerprint."""
     from berth.cluster.ca import fingerprint_ca_pem, load_ca
 
-    ca_dir = config.SERVE_DIR / "ca"
+    ca_dir = config.BERTH_DIR / "ca"
     ca = load_ca(ca_dir)
     ca_fp = fingerprint_ca_pem(ca.cert_pem)
     using_public_cert = bool(cfg.public_cert_path and cfg.public_key_path)
@@ -108,7 +108,7 @@ def _print_startup_banner(cfg: config.ResolvedConfig, pid: int) -> None:
             "— internet-reachable"
         )
         typer.echo(
-            "  consider setting [cluster] bind in ~/.serve/config.toml "
+            "  consider setting [cluster] bind in ~/.berth/config.toml "
             "to restrict it to a private/VPN interface"
         )
 

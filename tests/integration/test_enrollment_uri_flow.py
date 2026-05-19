@@ -3,7 +3,7 @@
 Uses an in-process ASGI transport (no real TLS) for the registration
 HTTP path. Verifies:
   - `nodes enroll` returns leader_url + token + ca_fingerprint
-  - `serve://enroll?...` round-trips through parse/build
+  - `berth://enroll?...` round-trips through parse/build
   - `/admin/ca.pem` returns the CA with the matching fingerprint header
   - a fingerprint-mismatch CA is rejected by the pin check
 """
@@ -54,7 +54,7 @@ async def test_enrollment_uri_flow_end_to_end(tmp_path):
         assert "ca_fingerprint" in enroll
         assert enroll["ca_fingerprint"].startswith("sha256:")
 
-        # 2) The CLI bundles it into a serve://enroll URI.
+        # 2) The CLI bundles it into a berth://enroll URI.
         uri = build_enrollment_uri(
             leader=enroll["leader_url"],
             token=enroll["token"],

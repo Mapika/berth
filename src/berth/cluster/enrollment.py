@@ -15,8 +15,8 @@ class _Entry:
 class EnrollmentTokens:
     """In-memory single-use enrollment token store.
 
-    Tokens are minted by the leader (e.g. via `serve nodes enroll`) and
-    consumed once by an agent during `serve agent register`. Successful
+    Tokens are minted by the leader (e.g. via `berth nodes enroll`) and
+    consumed once by an agent during `berth agent register`. Successful
     consumption returns the label the token was bound to and discards the
     token. Tokens expire after `ttl_seconds`.
     """

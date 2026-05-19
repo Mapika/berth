@@ -1,9 +1,9 @@
-"""`serve backup` — snapshot the daemon's recoverable state to a tarball.
+"""`berth backup` — snapshot the daemon's recoverable state to a tarball.
 
-The DR set is: ~/.serve/db.sqlite (taken via SQLite's `.backup` so the
-WAL is consistent), ~/.serve/ca/ (CA cert + private key — the
-keys-to-the-kingdom for the cluster), ~/.serve/key_pepper (without it
-every API key falls), and ~/.serve/config.toml. Model weights and the
+The DR set is: ~/.berth/db.sqlite (taken via SQLite's `.backup` so the
+WAL is consistent), ~/.berth/ca/ (CA cert + private key — the
+keys-to-the-kingdom for the cluster), ~/.berth/key_pepper (without it
+every API key falls), and ~/.berth/config.toml. Model weights and the
 logs/ directory are deliberately excluded — model weights are large
 and re-downloadable, logs are an operations artefact.
 """
@@ -37,7 +37,7 @@ def create_backup(
     # Take a hot-snapshot of the sqlite file. Using .backup avoids the
     # well-known WAL-tail truncation bug of a naive `cp db.sqlite`.
     snapshot_path = (
-        config.SERVE_DIR / f".db-backup-{int(time.time())}.sqlite"
+        config.BERTH_DIR / f".db-backup-{int(time.time())}.sqlite"
     )
     src = sqlite3.connect(config.DB_PATH)
     dst = sqlite3.connect(snapshot_path)
@@ -51,13 +51,13 @@ def create_backup(
     try:
         with tarfile.open(dest_path, "w:gz") as tar:
             tar.add(str(snapshot_path), arcname="db.sqlite")
-            if (config.SERVE_DIR / "ca").exists():
+            if (config.BERTH_DIR / "ca").exists():
                 tar.add(
-                    str(config.SERVE_DIR / "ca"), arcname="ca",
+                    str(config.BERTH_DIR / "ca"), arcname="ca",
                 )
-            if (config.SERVE_DIR / "key_pepper").exists():
+            if (config.BERTH_DIR / "key_pepper").exists():
                 tar.add(
-                    str(config.SERVE_DIR / "key_pepper"),
+                    str(config.BERTH_DIR / "key_pepper"),
                     arcname="key_pepper",
                 )
             if config.CONFIG_FILE.exists():

@@ -1,4 +1,4 @@
-"""LRU baseline simulator for `serve predict --replay`.
+"""LRU baseline simulator for `berth predict --replay`.
 
 The predictor's success metric - >=30% cold-load reduction vs an LRU baseline  -
 is hard to measure from production cold_loaded counters alone because they

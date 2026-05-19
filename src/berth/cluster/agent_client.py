@@ -213,7 +213,7 @@ class AgentFrameDispatcher:
                     asyncio.run_coroutine_threadsafe(q.put(chunk), loop)
             except Exception as e:
                 asyncio.run_coroutine_threadsafe(
-                    q.put(f"[serve-engine] log error: {e}\n".encode()), loop,
+                    q.put(f"[berth] log error: {e}\n".encode()), loop,
                 )
             finally:
                 asyncio.run_coroutine_threadsafe(q.put(sentinel), loop)
@@ -242,7 +242,7 @@ class AgentFrameDispatcher:
             raise
         except Exception as e:
             try:
-                await _emit(f"[serve-engine] {e}\n".encode(), eof=True)
+                await _emit(f"[berth] {e}\n".encode(), eof=True)
             except Exception:
                 pass
         finally:
@@ -281,7 +281,7 @@ class _DockerAdapter:
 
     2. Remote-deploy: caller sends only HF coordinates + a `model_sentinel`
        placeholder in the argv. We download the model into the agent's
-       own ~/.serve/models, materialise the engine config file inline if
+       own ~/.berth/models, materialise the engine config file inline if
        supplied, mount both as volumes, and substitute the sentinel with
        the in-container model path before running.
     """
@@ -398,7 +398,7 @@ def _load_agent_config(serve_home: Path) -> dict:
     p = serve_home / "agent.yaml"
     if not p.exists():
         raise FileNotFoundError(
-            f"agent config not found at {p}; run `serve agent register` first"
+            f"agent config not found at {p}; run `berth agent register` first"
         )
     with p.open() as f:
         return yaml.safe_load(f)
@@ -421,11 +421,11 @@ async def run_agent(serve_home: Path) -> None:
 
     cfg = _load_agent_config(serve_home)
     ssl_ctx = _build_ssl_context(cfg)
-    dc = DockerClient(network_name="serve-engines")
+    dc = DockerClient(network_name="berth-engines")
     # Engine containers attach to a named bridge network the leader uses
     # by default. The leader's daemon ensures this at startup; the agent
     # must do the same on its own host, otherwise the first remote
-    # deploy errors with "network serve-engines not found".
+    # deploy errors with "network berth-engines not found".
     try:
         dc.ensure_network()
     except Exception as e:

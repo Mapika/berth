@@ -13,27 +13,27 @@ set -euo pipefail
 #   - pull (register) for two models
 #   - run --pin and run --idle-timeout
 #   - /v1/chat/completions routes by `model` field to the right deployment
-#   - serve ps shows pinned / VRAM columns
+#   - berth ps shows pinned / VRAM columns
 #   - stop tears containers down
 
 cleanup() {
-    serve stop 2>/dev/null || true
-    serve daemon stop 2>/dev/null || true
+    berth stop 2>/dev/null || true
+    berth daemon stop 2>/dev/null || true
 }
 trap cleanup EXIT
 
-serve daemon start
+berth daemon start
 
-serve pull Qwen/Qwen2.5-0.5B-Instruct --name qwen-0_5b
-serve pull Qwen/Qwen2.5-1.5B-Instruct --name qwen-1_5b
+berth pull Qwen/Qwen2.5-0.5B-Instruct --name qwen-0_5b
+berth pull Qwen/Qwen2.5-1.5B-Instruct --name qwen-1_5b
 
 # Pinned: never auto-evicted
-serve run qwen-0_5b --gpu 0 --ctx 4096 --pin
+berth run qwen-0_5b --gpu 0 --ctx 4096 --pin
 
 # Auto: idle-evicted after 60 s with no traffic
-serve run qwen-1_5b --gpu 0 --ctx 4096 --idle-timeout 60
+berth run qwen-1_5b --gpu 0 --ctx 4096 --idle-timeout 60
 
-serve ps
+berth ps
 
 # Hit both models — proxy routes by `model` field
 for m in qwen-0_5b qwen-1_5b; do

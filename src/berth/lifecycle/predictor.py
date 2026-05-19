@@ -77,7 +77,7 @@ class PredictorConfig:
 
     @classmethod
     def load(cls, path: Path) -> PredictorConfig:
-        """Read ~/.serve/predictor.yaml. Missing file / malformed YAML /
+        """Read ~/.berth/predictor.yaml. Missing file / malformed YAML /
         missing keys all silently fall back to defaults - operators can
         ship a partial file and only override the fields they care about.
         """

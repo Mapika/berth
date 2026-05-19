@@ -8,7 +8,7 @@ from berth.doctor.runner import CheckResult
 
 
 def test_setup_passes_resolved_config_to_spawn_daemon(monkeypatch, tmp_path):
-    monkeypatch.setattr(setup_cmd.config, "SERVE_DIR", tmp_path)
+    monkeypatch.setattr(setup_cmd.config, "BERTH_DIR", tmp_path)
     monkeypatch.setattr(setup_cmd.config, "CONFIG_FILE", tmp_path / "config.toml")
     monkeypatch.setattr(setup_cmd.config, "SOCK_PATH", tmp_path / "sock")
     monkeypatch.setattr(

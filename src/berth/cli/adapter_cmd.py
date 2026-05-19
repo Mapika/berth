@@ -186,7 +186,7 @@ def _pick_default_deployment(base_name: str) -> int:
     if not candidates:
         typer.echo(
             f"no ready deployment for base {base_name!r}; "
-            f"`serve run {base_name} --max-loras N` first",
+            f"`berth run {base_name} --max-loras N` first",
             err=True,
         )
         raise typer.Exit(1)

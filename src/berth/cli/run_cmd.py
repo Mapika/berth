@@ -48,12 +48,12 @@ def run(
         0, "--max-loras",
         help="Number of LoRA adapter slots to reserve in this deployment "
              "(enables --enable-lora on vLLM, equivalent on SGLang). 0 = "
-             "adapters disabled. Adapters loaded later via `serve adapter load`.",
+             "adapters disabled. Adapters loaded later via `berth adapter load`.",
     ),
     node: str = typer.Option(
         None, "--node",
         help="Target node label. Default: leader host. Other values must "
-             "match an enrolled, currently-ready agent (see `serve nodes ls`). "
+             "match an enrolled, currently-ready agent (see `berth nodes ls`). "
              "When set, the engine container runs on the remote agent's host.",
     ),
 ):
@@ -86,7 +86,7 @@ def run(
         if not any(m["name"] == local_name for m in models):
             typer.echo(
                 f"model {local_name!r} not registered. "
-                "Use `serve pull <hf-repo>` first.",
+                "Use `berth pull <hf-repo>` first.",
                 err=True,
             )
             raise typer.Exit(1)

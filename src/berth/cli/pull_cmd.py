@@ -40,7 +40,7 @@ def pull(
             raise typer.Exit(1) from e
 
     if skip_download:
-        typer.echo("(skipping download - weights fetched at first `serve run`)")
+        typer.echo("(skipping download - weights fetched at first `berth run`)")
         return
 
     typer.echo(f"downloading {hf_repo}@{revision} ... (this may take a few minutes)")

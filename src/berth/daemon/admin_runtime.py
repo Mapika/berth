@@ -127,8 +127,8 @@ async def stream_engine_logs_sse(dep_id: int, request: Request) -> StreamingResp
                         if line:
                             yield f"data: {line}\n\n"
             except Exception as e:
-                yield f"data: [serve-engine] log stream error: {e}\n\n"
-            yield "data: [serve-engine] log stream ended\n\n"
+                yield f"data: [berth] log stream error: {e}\n\n"
+            yield "data: [berth] log stream ended\n\n"
 
         return StreamingResponse(gen_remote(), media_type="text/event-stream")
 
@@ -141,13 +141,13 @@ async def stream_engine_logs_sse(dep_id: int, request: Request) -> StreamingResp
                 dep.container_id, follow=True, tail=500,
             )
         except Exception as e:
-            yield f"data: [serve-engine] failed to attach: {e}\n\n"
+            yield f"data: [berth] failed to attach: {e}\n\n"
             return
         sentinel = object()
         while True:
             chunk = await asyncio.to_thread(next, sync_iter, sentinel)
             if chunk is sentinel:
-                yield "data: [serve-engine] log stream ended\n\n"
+                yield "data: [berth] log stream ended\n\n"
                 return
             if isinstance(chunk, bytes):
                 text = chunk.decode("utf-8", errors="replace")

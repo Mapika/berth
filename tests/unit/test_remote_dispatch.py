@@ -143,9 +143,9 @@ async def test_remote_dispatch_routes_via_agentlink(tmp_path, monkeypatch):
     captured = link.captured
     # Remote-style plan markers.
     assert captured["model_hf_repo"] == "Qwen/Qwen3-0.6B"
-    assert captured["model_sentinel"] == "__SERVE_MODEL_PATH__"
+    assert captured["model_sentinel"] == "__BERTH_MODEL_PATH__"
     # Argv contains the sentinel (not a leader-side path).
-    assert any("__SERVE_MODEL_PATH__" in a for a in captured["command"])
+    assert any("__BERTH_MODEL_PATH__" in a for a in captured["command"])
     # Volumes are NOT set (agent constructs them) — leader-side paths must not leak.
     assert "volumes" not in captured
     # docker.run on the leader was not called.

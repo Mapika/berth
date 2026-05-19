@@ -15,7 +15,7 @@ def fake_docker():
     container.attrs = {
         "NetworkSettings": {
             "Ports": {"8000/tcp": [{"HostIp": "127.0.0.1", "HostPort": "49152"}]},
-            "Networks": {"serve-engines": {"IPAddress": "172.20.0.5"}},
+            "Networks": {"berth-engines": {"IPAddress": "172.20.0.5"}},
         }
     }
     container.reload = MagicMock()  # no-op; attrs is already populated above
@@ -24,7 +24,7 @@ def fake_docker():
 
 
 def test_run_container_returns_handle(fake_docker):
-    dc = DockerClient(client=fake_docker, network_name="serve-engines")
+    dc = DockerClient(client=fake_docker, network_name="berth-engines")
     handle = dc.run(
         image="vllm/vllm-openai:v0.7.3",
         name="vllm-llama-1b",
@@ -46,20 +46,20 @@ def test_run_container_returns_handle(fake_docker):
 def test_run_creates_network_if_missing(fake_docker):
     from docker.errors import NotFound
     fake_docker.networks.get.side_effect = NotFound("not found")
-    dc = DockerClient(client=fake_docker, network_name="serve-engines")
+    dc = DockerClient(client=fake_docker, network_name="berth-engines")
     dc.ensure_network()
-    fake_docker.networks.create.assert_called_once_with("serve-engines", driver="bridge")
+    fake_docker.networks.create.assert_called_once_with("berth-engines", driver="bridge")
 
 
 def test_ensure_network_propagates_other_errors(fake_docker):
     fake_docker.networks.get.side_effect = RuntimeError("daemon connection refused")
-    dc = DockerClient(client=fake_docker, network_name="serve-engines")
+    dc = DockerClient(client=fake_docker, network_name="berth-engines")
     with pytest.raises(RuntimeError, match="daemon connection refused"):
         dc.ensure_network()
 
 
 def test_run_skips_network_create_if_present(fake_docker):
-    dc = DockerClient(client=fake_docker, network_name="serve-engines")
+    dc = DockerClient(client=fake_docker, network_name="berth-engines")
     dc.ensure_network()
     fake_docker.networks.create.assert_not_called()
 
@@ -67,7 +67,7 @@ def test_run_skips_network_create_if_present(fake_docker):
 def test_stop_calls_remove(fake_docker):
     container = MagicMock()
     fake_docker.containers.get.return_value = container
-    dc = DockerClient(client=fake_docker, network_name="serve-engines")
+    dc = DockerClient(client=fake_docker, network_name="berth-engines")
     dc.stop("abc123", timeout=10)
     container.stop.assert_called_once_with(timeout=10)
     container.remove.assert_called_once()
@@ -76,7 +76,7 @@ def test_stop_calls_remove(fake_docker):
 def test_stop_is_idempotent_for_missing_container(fake_docker):
     from docker.errors import NotFound
     fake_docker.containers.get.side_effect = NotFound("gone")
-    dc = DockerClient(client=fake_docker, network_name="serve-engines")
+    dc = DockerClient(client=fake_docker, network_name="berth-engines")
     dc.stop("abc123", timeout=10)  # must not raise
 
 
@@ -84,7 +84,7 @@ def test_stop_preserves_container_when_remove_false(fake_docker):
     """Used by the failed-load path so engine logs survive for inspection."""
     container = MagicMock()
     fake_docker.containers.get.return_value = container
-    dc = DockerClient(client=fake_docker, network_name="serve-engines")
+    dc = DockerClient(client=fake_docker, network_name="berth-engines")
     dc.stop("abc123", timeout=10, remove=False)
     container.stop.assert_called_once_with(timeout=10)
     container.remove.assert_not_called()
@@ -101,12 +101,12 @@ def test_container_pids_returns_all_host_pids(fake_docker):
         ],
     }
     fake_docker.containers.get.return_value = container
-    dc = DockerClient(client=fake_docker, network_name="serve-engines")
+    dc = DockerClient(client=fake_docker, network_name="berth-engines")
     assert dc.container_pids("abc") == [12345, 12346]
 
 
 def test_container_pids_handles_missing_container(fake_docker):
     from docker.errors import NotFound
     fake_docker.containers.get.side_effect = NotFound("gone")
-    dc = DockerClient(client=fake_docker, network_name="serve-engines")
+    dc = DockerClient(client=fake_docker, network_name="berth-engines")
     assert dc.container_pids("abc") == []

@@ -1,10 +1,10 @@
-# Deploying serve-engine on a public VPS
+# Deploying berth on a public VPS
 
 Operator guide for standing up the leader on a small Linux VPS with a
 public DNS name, Caddy as the TLS-terminating front, and one or more
 remote GPU hosts joining as agents.
 
-The `serve deploy bootstrap` command (see [Bootstrap](#bootstrap) below)
+The `berth deploy bootstrap` command (see [Bootstrap](#bootstrap) below)
 automates most of this. This page documents the underlying recipe so
 you can run it manually or audit what the bootstrap does.
 
@@ -36,13 +36,13 @@ you can run it manually or audit what the bootstrap does.
         ↓
    serve.example.com   (Caddy: ACME, rate limit, reverse proxy)
         ↓ 127.0.0.1:11500
-   serve-engine daemon (public listener; http://, behind proxy)
+   berth daemon (public listener; http://, behind proxy)
         ↑ 11501 (mTLS WS)
    ──┬───────────────────
      │ outbound TLS
      ↓
    GPU host A    GPU host B    …
-   serve-engine agent (no inbound exposure)
+   berth agent (no inbound exposure)
 ```
 
 ## Bring-up (manual)
@@ -69,12 +69,12 @@ you can run it manually or audit what the bootstrap does.
    `serve.example.com` → `http://127.0.0.1:11500`. ACME will fetch a
    cert on first start.
 
-4. **Install serve-engine**:
+4. **Install berth**:
 
    ```bash
    sudo -u serve mkdir -p /opt/serve
    sudo -u serve python3 -m venv /opt/serve/venv
-   sudo -u serve /opt/serve/venv/bin/pip install /path/to/serve-engine
+   sudo -u serve /opt/serve/venv/bin/pip install /path/to/berth
    ```
 
 5. **Configure** `/var/lib/serve/.serve/config.toml`:
@@ -93,21 +93,21 @@ you can run it manually or audit what the bootstrap does.
    port = 11501
    ```
 
-6. **Install the systemd unit** (`packaging/serve-engine.service` in
+6. **Install the systemd unit** (`packaging/berth.service` in
    this repo):
 
    ```bash
-   sudo cp packaging/serve-engine.service /etc/systemd/system/
+   sudo cp packaging/berth.service /etc/systemd/system/
    sudo systemctl daemon-reload
-   sudo systemctl enable --now serve-engine
-   sudo systemctl status serve-engine    # confirm active (running)
+   sudo systemctl enable --now berth
+   sudo systemctl status berth    # confirm active (running)
    ```
 
 7. **Mint the first admin key** over the UDS (auth-bypassed for the
    first key only):
 
    ```bash
-   sudo -u serve /opt/serve/venv/bin/serve keys create --tier admin --name root
+   sudo -u serve /opt/serve/venv/bin/berth keys create --tier admin --name root
    # ← prints sk-… once. Save it somewhere safe.
    ```
 
@@ -115,17 +115,17 @@ you can run it manually or audit what the bootstrap does.
 
    ```bash
    # On the leader:
-   sudo -u serve /opt/serve/venv/bin/serve nodes enroll gpu-host-1
+   sudo -u serve /opt/serve/venv/bin/berth nodes enroll gpu-host-1
    # → emits a serve://enroll?leader=…&token=…&ca_fp=… URI
 
    # On the GPU host:
-   serve agent register --uri '<paste>'
-   serve agent start                # or run under systemd similarly
+   berth agent register --uri '<paste>'
+   berth agent start                # or run under systemd similarly
    ```
 
 ## Bootstrap
 
-`serve deploy bootstrap --domain <fqdn>` wraps steps 5 and 7 (write
+`berth deploy bootstrap --domain <fqdn>` wraps steps 5 and 7 (write
 config.toml + mint first admin key) plus the DB/CA/pepper init that
 the daemon would otherwise do on first start. Idempotent: re-running
 preserves the existing config and skips the key mint when keys
@@ -134,7 +134,7 @@ already exist.
 Typical first-run on the VPS:
 
 ```bash
-sudo -u serve /opt/serve/venv/bin/serve deploy bootstrap \
+sudo -u serve /opt/serve/venv/bin/berth deploy bootstrap \
     --domain serve.example.com
 ```
 
@@ -156,7 +156,7 @@ package managers.
 
 ## Backup and DR
 
-`serve backup create /var/backups/serve-$(date +%F).tar.gz` snapshots
+`berth backup create /var/backups/serve-$(date +%F).tar.gz` snapshots
 the recoverable state:
 
 - `db.sqlite` (consistent via SQLite `.backup`)

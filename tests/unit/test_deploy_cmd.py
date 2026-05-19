@@ -1,4 +1,4 @@
-"""`serve deploy bootstrap` provisions a fresh VPS to a ready-to-start
+"""`berth deploy bootstrap` provisions a fresh VPS to a ready-to-start
 configuration: writes config.toml, initialises the DB + CA + pepper,
 mints the first admin key, prints next-step instructions."""
 from __future__ import annotations
@@ -15,7 +15,7 @@ from berth.store import api_keys, db
 def _isolate(monkeypatch, home):
     """Reset module-level state between tests so we don't poison the
     rest of the suite (api_keys has a module-level pepper cache)."""
-    monkeypatch.setattr(config, "SERVE_DIR", home)
+    monkeypatch.setattr(config, "BERTH_DIR", home)
     monkeypatch.setattr(config, "DB_PATH", home / "db.sqlite")
     monkeypatch.setattr(config, "CONFIG_FILE", home / "config.toml")
     monkeypatch.setattr(api_keys, "_PEPPER_PATH", None)

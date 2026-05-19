@@ -1,7 +1,7 @@
 # Examples
 
 These are small copyable starting points. They are not required for normal use;
-the CLI can create the same state through `serve pull`, `serve run`, and the
+the CLI can create the same state through `berth pull`, `berth run`, and the
 admin API.
 
 - `single-node-config.toml`: local single-host daemon settings.

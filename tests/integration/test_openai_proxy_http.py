@@ -83,7 +83,7 @@ async def test_proxy_round_trip_over_real_http(tmp_path, monkeypatch):
     # 1. Spin up the fake engine on a free port
     engine_port = _free_port()
     engine_app = _make_fake_engine_app()
-    # 2. Spin up the serve daemon on another free port
+    # 2. Spin up the berth daemon on another free port
     daemon_port = _free_port()
 
     # Manager.load is bypassed; we manually seed a "ready" deployment that

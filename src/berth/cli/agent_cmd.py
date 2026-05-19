@@ -11,26 +11,27 @@ import yaml
 
 from berth.cli import app
 from berth.cluster.host_info import collect_host_info
+from berth.config import _env_get
 
 agent_app = typer.Typer(help="Manage the local agent on this host.")
 app.add_typer(agent_app, name="agent")
 
 
 def _serve_home() -> Path:
-    """Lazy ~/.serve resolution honouring SERVE_HOME at call time so tests
-    that monkeypatch the env var see the override (config.SERVE_DIR is
-    fixed at import time)."""
-    return Path(os.environ.get("SERVE_HOME", str(Path.home() / ".serve")))
+    """Lazy ~/.berth resolution honouring BERTH_HOME (legacy: SERVE_HOME)
+    at call time so tests that monkeypatch the env var see the override
+    (config.BERTH_DIR is fixed at import time)."""
+    return Path(_env_get(os.environ, "SERVE_HOME") or str(Path.home() / ".berth"))
 
 
 def parse_enrollment_uri(uri: str) -> tuple[str, str, str]:
-    """Parse `serve://enroll?leader=...&token=...&ca_fp=...` into a tuple.
+    """Parse `berth://enroll?leader=...&token=...&ca_fp=...` into a tuple.
 
     Returns `(leader, token, ca_fp)`. Raises `ValueError` on any
     structural problem so the caller can surface a clear error."""
     parsed = urlparse(uri)
-    if parsed.scheme != "serve" or parsed.netloc != "enroll":
-        raise ValueError(f"expected serve://enroll URI, got {uri!r}")
+    if parsed.scheme != "berth" or parsed.netloc != "enroll":
+        raise ValueError(f"expected berth://enroll URI, got {uri!r}")
     q = parse_qs(parsed.query)
     try:
         leader = q["leader"][0]
@@ -133,8 +134,8 @@ def _do_register(
 def register(
     uri: str = typer.Option(
         None, "--uri",
-        help="Single-paste enrollment URI from `serve nodes enroll` "
-             "(format: serve://enroll?leader=…&token=…&ca_fp=…). "
+        help="Single-paste enrollment URI from `berth nodes enroll` "
+             "(format: berth://enroll?leader=…&token=…&ca_fp=…). "
              "Mutually exclusive with --leader/--token.",
     ),
     leader: str = typer.Option(

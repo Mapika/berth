@@ -1,4 +1,4 @@
-# Caddy in front of serve-engine
+# Caddy in front of berth
 
 Caddy terminates TLS for the public OpenAI endpoint and reverse-proxies
 to the daemon's plain-HTTP listener on `127.0.0.1:11500`. The cluster
@@ -68,7 +68,7 @@ sudo ufw allow 11501/tcp
 
 ## Verifying the path
 
-After `systemctl restart serve-engine && systemctl restart caddy`:
+After `systemctl restart berth && systemctl restart caddy`:
 
 ```bash
 # From the operator's laptop:

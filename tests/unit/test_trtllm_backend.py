@@ -108,7 +108,7 @@ def test_engine_config_enables_iter_perf_stats():
     cfg = TRTLLMBackend().engine_config(_plan())
     assert cfg is not None
     assert cfg["enable_iter_perf_stats"] is True
-    assert cfg["print_iter_log"] is True  # also handy for `serve logs`
+    assert cfg["print_iter_log"] is True  # also handy for `berth logs`
 
 
 def test_engine_config_cuda_graph_batch_sizes_cover_target_concurrency():

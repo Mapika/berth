@@ -1,10 +1,10 @@
-# serve-engine daemon as a container.
+# berth daemon as a container.
 #
-# Build:  docker build -f docker/daemon.Dockerfile -t serve-engine:dev .
+# Build:  docker build -f docker/daemon.Dockerfile -t berth:dev .
 # Run:    docker run -d --name serve --network host \
 #             -v ~/.serve:/root/.serve \
 #             -v /var/run/docker.sock:/var/run/docker.sock \
-#             serve-engine:dev
+#             berth:dev
 #
 # Note: --network host is the simplest way to let the daemon spawn sibling
 # engine containers and reach them by 127.0.0.1:<host_port>. With a bridge
@@ -20,7 +20,7 @@ RUN apt-get update \
 RUN curl -LsSf https://astral.sh/uv/install.sh | sh \
  && ln -s /root/.local/bin/uv /usr/local/bin/uv
 
-WORKDIR /opt/serve-engine
+WORKDIR /opt/berth
 COPY pyproject.toml ./
 COPY src ./src
 COPY README.md ./

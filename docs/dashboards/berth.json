@@ -1,8 +1,8 @@
 {
-  "title": "serve-engine cluster",
+  "title": "berth cluster",
   "schemaVersion": 38,
   "version": 1,
-  "tags": ["serve-engine", "inference", "cluster"],
+  "tags": ["berth", "inference", "cluster"],
   "timezone": "browser",
   "refresh": "10s",
   "time": { "from": "now-1h", "to": "now" },

@@ -3,10 +3,10 @@
 Start with:
 
 ```bash
-serve doctor
-serve daemon status
-serve ps
-serve logs
+berth doctor
+berth daemon status
+berth ps
+berth logs
 ```
 
 Most failures are Docker, NVIDIA runtime, Hugging Face auth, TLS, or an engine
@@ -16,7 +16,7 @@ that never became healthy.
 
 Symptoms:
 
-- `serve doctor` warns about Docker GPU access.
+- `berth doctor` warns about Docker GPU access.
 - Engine containers start and immediately fail.
 - Docker errors mention `nvidia`, `device_requests`, or CDI.
 
@@ -31,11 +31,11 @@ Fix:
 
 - Install or repair `nvidia-container-toolkit`.
 - Restart Docker.
-- Re-run `serve doctor`.
+- Re-run `berth doctor`.
 
 ## Browser Warns About The Certificate
 
-First-run serve-engine uses a generated local CA when `[public_tls]` is not
+First-run berth uses a generated local CA when `[public_tls]` is not
 configured. Browsers and SDKs will not trust it by default.
 
 For quick local API testing:
@@ -47,7 +47,7 @@ curl -k https://127.0.0.1:11500/healthz
 For a real exposed service, prefer:
 
 ```bash
-serve deploy bootstrap --domain serve.example.com --behind-proxy
+berth deploy bootstrap --domain serve.example.com --behind-proxy
 ```
 
 Then put Caddy or Nginx in front. See `docs/caddy.md`.
@@ -56,14 +56,14 @@ Then put Caddy or Nginx in front. See `docs/caddy.md`.
 
 Symptoms:
 
-- `serve pull` fails with a 401, 403, or gated-model message.
+- `berth pull` fails with a 401, 403, or gated-model message.
 - The model exists on Hugging Face but cannot be fetched.
 
 Fix:
 
 ```bash
 export HF_TOKEN=hf_...
-serve pull owner/repo --name local-name
+berth pull owner/repo --name local-name
 ```
 
 For private or gated models, make sure the token belongs to an account with
@@ -74,13 +74,13 @@ access to the repo.
 Symptoms:
 
 - Deployment stays `loading`, then moves to `failed`.
-- `serve logs` shows engine startup errors.
+- `berth logs` shows engine startup errors.
 
 Checks:
 
 ```bash
-serve ps
-serve logs
+berth ps
+berth logs
 docker ps -a --filter name=serve-
 ```
 
@@ -94,27 +94,27 @@ Common causes:
 Try a smaller context or lower concurrency:
 
 ```bash
-serve run qwen-0_5b --gpu 0 --engine vllm --ctx 1024 --max-seqs 4
+berth run qwen-0_5b --gpu 0 --engine vllm --ctx 1024 --max-seqs 4
 ```
 
 ## Placement Refuses To Start
 
-This is usually intentional. serve-engine estimated the requested deployment
+This is usually intentional. berth estimated the requested deployment
 would not fit beside what is already loaded.
 
 Useful commands:
 
 ```bash
-serve ps
-serve stop <deployment-id>
-serve run <model> --gpu 0 --ctx 2048 --max-seqs 8
+berth ps
+berth stop <deployment-id>
+berth run <model> --gpu 0 --ctx 2048 --max-seqs 8
 ```
 
 Pinned deployments are not evicted automatically. Unpin or stop them first:
 
 ```bash
-serve unpin <model-name>
-serve stop <deployment-id>
+berth unpin <model-name>
+berth stop <deployment-id>
 ```
 
 ## Port Or Listener Confusion
@@ -128,19 +128,19 @@ Defaults:
 Show resolved config:
 
 ```bash
-serve config show
+berth config show
 ```
 
 For local-only testing:
 
 ```bash
-SERVE_PUBLIC_BIND=127.0.0.1 serve daemon start
+SERVE_PUBLIC_BIND=127.0.0.1 berth daemon start
 ```
 
 For reverse proxy mode, use `docs/caddy.md` or:
 
 ```bash
-serve deploy bootstrap --domain serve.example.com --behind-proxy
+berth deploy bootstrap --domain serve.example.com --behind-proxy
 ```
 
 ## API Key Fails
@@ -148,7 +148,7 @@ serve deploy bootstrap --domain serve.example.com --behind-proxy
 Create a new admin key over the local socket:
 
 ```bash
-serve key create web --tier admin
+berth key create web --tier admin
 ```
 
 Then:

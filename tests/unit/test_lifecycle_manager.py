@@ -99,7 +99,7 @@ def test_load_evicts_previous_when_room_constrained(conn, monkeypatch, tmp_path,
 
 
 def test_load_stops_prior_deployment_of_same_name(conn, monkeypatch, tmp_path, topo_one_gpu):
-    """`serve run X` must stop any existing ready deployment named X before
+    """`berth run X` must stop any existing ready deployment named X before
     starting the new one - that's the CLI contract ("Stops the current
     model first"). Without this, two co-located deployments of the same
     base name burn extra VRAM and the proxy's find_ready_by_model_name
@@ -160,9 +160,9 @@ def test_pin_prevents_eviction(conn, monkeypatch, tmp_path, topo_one_gpu):
 
 
 def test_load_refuses_to_replace_pinned_same_name(conn, monkeypatch, tmp_path, topo_one_gpu):
-    """`serve run X` on a pinned X errors with a clear message instead of
+    """`berth run X` on a pinned X errors with a clear message instead of
     silently replacing - pin is the operator's commitment that the
-    deployment is special. They must `serve unpin X` first.
+    deployment is special. They must `berth unpin X` first.
     """
     docker_client = MagicMock()
     docker_client.run.return_value = ContainerHandle(
@@ -178,7 +178,7 @@ def test_load_refuses_to_replace_pinned_same_name(conn, monkeypatch, tmp_path, t
     model_store.add(conn, name="llama-1b", hf_repo="meta-llama/Llama-3.2-1B-Instruct")
     asyncio.run(mgr.load(replace(_make_plan(), pinned=True)))
 
-    with pytest.raises(RuntimeError, match="is pinned; run `serve unpin"):
+    with pytest.raises(RuntimeError, match="is pinned; run `berth unpin"):
         asyncio.run(mgr.load(_make_plan()))
     # Critical: the pinned deployment is still ready and intact.
     docker_client.stop.assert_not_called()

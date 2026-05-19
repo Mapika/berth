@@ -38,11 +38,11 @@ def test_nodes_enroll_prints_uri(monkeypatch):
     monkeypatch.setattr(nodes_cmd, "_uds_post", _uds_post)
     r = CliRunner().invoke(app, ["nodes", "enroll", "agent-a"])
     assert r.exit_code == 0
-    assert "serve://enroll?" in r.output
+    assert "berth://enroll?" in r.output
     assert "leader=https" in r.output
     assert "token=tok-xyz" in r.output
     assert "ca_fp=sha256" in r.output
-    assert "serve agent register --uri" in r.output
+    assert "berth agent register --uri" in r.output
 
 
 def test_nodes_show(monkeypatch):
@@ -82,7 +82,7 @@ def test_build_enrollment_uri_round_trip():
         token="abc 123",
         ca_fp="sha256:7f3a",
     )
-    assert uri.startswith("serve://enroll?")
+    assert uri.startswith("berth://enroll?")
     from urllib.parse import parse_qs, urlparse
     q = parse_qs(urlparse(uri).query)
     assert q["leader"] == ["https://example.com:11501"]

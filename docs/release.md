@@ -1,6 +1,6 @@
 # Release Process
 
-serve-engine is currently released from source plus GitHub release artifacts.
+berth is currently released from source plus GitHub release artifacts.
 PyPI publishing is intentionally not wired up yet; if that changes, add it as
 an explicit release step with trusted publishing.
 
@@ -40,7 +40,7 @@ uv run --frozen python -m zipfile -l dist/serve_engine-*.whl \
 
 ```bash
 git push origin main
-git tag -a v0.2.2 -m "serve-engine 0.2.2"
+git tag -a v0.2.2 -m "berth 0.2.2"
 git push origin v0.2.2
 ```
 
@@ -48,14 +48,14 @@ Pushing a `v*` tag runs `.github/workflows/release.yml`. That workflow uploads
 the wheel and sdist to the GitHub Release and publishes the daemon image to:
 
 ```text
-ghcr.io/mapika/serve-engine/daemon:<tag>
+ghcr.io/mapika/berth/daemon:<tag>
 ```
 
 ## Install From A Release
 
 ```bash
 uv tool install \
-  https://github.com/Mapika/serve-engine/releases/download/v0.2.2/serve_engine-0.2.2-py3-none-any.whl
+  https://github.com/Mapika/berth/releases/download/v0.2.2/serve_engine-0.2.2-py3-none-any.whl
 ```
 
 ## Smoke Test A Built Wheel

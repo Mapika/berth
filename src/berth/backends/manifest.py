@@ -71,7 +71,7 @@ def load_manifest(path: Path | None = None) -> dict[str, EngineManifest]:
     if path is None:
         text = files("berth.backends").joinpath("backends.yaml").read_text()
         raw = _parse(text)
-        override_path = config.SERVE_DIR / "backends.override.yaml"
+        override_path = config.BERTH_DIR / "backends.override.yaml"
         if override_path.exists():
             raw = _merge(raw, _parse(override_path.read_text()))
     else:
@@ -99,12 +99,12 @@ def load_manifest(path: Path | None = None) -> dict[str, EngineManifest]:
 
 
 def write_override(updates: dict[str, dict]) -> Path:
-    """Persist user-level overrides to ~/.serve/backends.override.yaml.
+    """Persist user-level overrides to ~/.berth/backends.override.yaml.
 
     `updates` is {engine_name: partial_engine_config} (typically just
     {'pinned_tag': 'v0.20.5'}). Existing override entries are merged.
     """
-    override_path = config.SERVE_DIR / "backends.override.yaml"
+    override_path = config.BERTH_DIR / "backends.override.yaml"
     override_path.parent.mkdir(parents=True, exist_ok=True)
     if override_path.exists():
         current = _parse(override_path.read_text())

@@ -302,7 +302,7 @@ async def test_predictor_stats_endpoint(app):
 async def test_create_deployment_409_when_replacing_pinned(app):
     """If a same-name deployment is already pinned, the daemon must return
     a 4xx with the manager's "is pinned" message - not a 500 - so the CLI
-    can show the actionable hint ("run `serve unpin <model>`")."""
+    can show the actionable hint ("run `berth unpin <model>`")."""
     transport = httpx.ASGITransport(app=app)
     async with httpx.AsyncClient(transport=transport, base_url="http://test", timeout=30) as c:
         r1 = await c.post(
@@ -327,7 +327,7 @@ async def test_create_deployment_409_when_replacing_pinned(app):
     assert r2.status_code == 409, r2.text
     body = r2.json()
     assert "is pinned" in body["detail"]
-    assert "serve unpin" in body["detail"]
+    assert "berth unpin" in body["detail"]
 
 
 @pytest.mark.asyncio

@@ -1,4 +1,4 @@
-# Multi-Node serve-engine
+# Multi-Node berth
 
 This page is the operator's guide to running a leader plus one or more
 agent hosts. It sticks to setup, verification, and troubleshooting.
@@ -10,10 +10,10 @@ agent hosts. It sticks to setup, verification, and troubleshooting.
 
 ## Concepts
 
-- **Leader.** The existing `serve daemon`. Owns SQLite state, the
+- **Leader.** The existing `berth daemon`. Owns SQLite state, the
   OpenAI-compatible API, the admin API, the router, and the lifecycle
   manager. There is exactly one leader.
-- **Agent.** A thin daemon (`serve agent start`) that runs on each
+- **Agent.** A thin daemon (`berth agent start`) that runs on each
   additional GPU host. It dials home to the leader over an mTLS
   WebSocket and exposes the host's local Docker through that channel.
 - **Public listener.** The leader's external-facing HTTPS port
@@ -39,10 +39,10 @@ Both the leader and each agent install the same package. There is no
 separate "agent" build — the role is chosen at runtime.
 
 ```bash
-git clone https://github.com/Mapika/serve-engine
-cd serve-engine
+git clone https://github.com/Mapika/berth
+cd berth
 uv tool install --editable .
-serve doctor
+berth doctor
 ```
 
 Linux + NVIDIA + Docker 24+ requirements apply to every agent host. The leader
@@ -58,7 +58,7 @@ directly from uvicorn — no reverse proxy.
 ### Leader
 
 ```bash
-serve daemon start
+berth daemon start
 ```
 
 The startup banner prints both URLs and the CA fingerprint:
@@ -81,16 +81,16 @@ the loopback / local CLI / a trusting `httpx` client).
 Mint an enrollment URI for the new GPU host:
 
 ```bash
-$ serve nodes enroll gpu-rig-2
+$ berth nodes enroll gpu-rig-2
 Enrollment URI (single-use, expires in 10 min):
 
   serve://enroll?leader=https%3A%2F%2F192.168.0.164%3A11501&token=…&ca_fp=sha256%3A7f3a…
 
 On the agent host, run:
-  serve agent register --uri 'serve://enroll?leader=…&token=…&ca_fp=…'
+  berth agent register --uri 'serve://enroll?leader=…&token=…&ca_fp=…'
 ```
 
-Copy the entire `serve agent register --uri '…'` line.
+Copy the entire `berth agent register --uri '…'` line.
 
 ### Agent
 
@@ -98,13 +98,13 @@ On the new GPU host:
 
 ```bash
 # Same install as the leader.
-git clone https://github.com/Mapika/serve-engine
-cd serve-engine
+git clone https://github.com/Mapika/berth
+cd berth
 uv tool install --editable .
 
 # Paste the line you copied.
-serve agent register --uri 'serve://enroll?leader=…&token=…&ca_fp=…'
-serve agent start
+berth agent register --uri 'serve://enroll?leader=…&token=…&ca_fp=…'
+berth agent start
 ```
 
 What `--uri` does under the hood:
@@ -120,14 +120,14 @@ What `--uri` does under the hood:
    mTLS client cert, writes `agent.crt`, `agent.key`, and
    `agent.yaml`.
 
-After that, `serve agent start` runs the agent loop and connects to
+After that, `berth agent start` runs the agent loop and connects to
 `wss://<cluster URL>/cluster/agent` with mTLS.
 
 ### Verify (from the leader)
 
 ```bash
-serve nodes ls            # new node should appear `ready`
-serve nodes show <id>     # GPU inventory, agent_version, last heartbeat
+berth nodes ls            # new node should appear `ready`
+berth nodes show <id>     # GPU inventory, agent_version, last heartbeat
 ```
 
 ### Run on an agent
@@ -135,7 +135,7 @@ serve nodes show <id>     # GPU inventory, agent_version, last heartbeat
 Target the node label when launching directly:
 
 ```bash
-serve run qwen-0_5b --node gpu-rig-2 --gpu 0 --engine vllm
+berth run qwen-0_5b --node gpu-rig-2 --gpu 0 --engine vllm
 ```
 
 Or set `node_label` on a service profile. The leader sends the start request
@@ -149,7 +149,7 @@ then file, then autodetect, then literal default):
 
 1. `--public-host` / `--public-port` / `--public-bind` /
    `--cluster-host` / `--cluster-port` / `--cluster-bind` on
-   `serve daemon start`.
+   `berth daemon start`.
 2. `SERVE_PUBLIC_HOST`, `SERVE_PUBLIC_PORT`, `SERVE_PUBLIC_BIND`,
    `SERVE_CLUSTER_HOST`, `SERVE_CLUSTER_PORT`, `SERVE_CLUSTER_BIND`
    env vars.
@@ -164,7 +164,7 @@ It does not change bind addresses.
 Inspect:
 
 ```bash
-serve config show
+berth config show
 ```
 
 ```
@@ -184,9 +184,9 @@ resolved cluster_url: https://cluster.example.com:11501
 Edit:
 
 ```bash
-serve config set-public host=api.example.com port=11500
-serve config set-cluster host=cluster.example.com bind=10.0.0.1
-serve config set-public-tls cert=/etc/le/.../fullchain.pem \
+berth config set-public host=api.example.com port=11500
+berth config set-cluster host=cluster.example.com bind=10.0.0.1
+berth config set-public-tls cert=/etc/le/.../fullchain.pem \
                             key=/etc/le/.../privkey.pem
 ```
 
@@ -229,12 +229,12 @@ Topology:
 [ public internet ]
                   |
                   v
-       cluster.example.com:11501      (serve daemon, cluster listener)
+       cluster.example.com:11501      (berth daemon, cluster listener)
                   |  (TLS + mTLS, terminated by uvicorn directly)
                   |
                   +-- agents dial in from anywhere
 
-       api.example.com:11500          (serve daemon, public listener)
+       api.example.com:11500          (berth daemon, public listener)
                   |  (TLS, terminated by uvicorn directly)
                   |
                   +-- SDK clients call /v1/*
@@ -245,11 +245,11 @@ cluster URL, so the agent ends up dialing the right port automatically:
 
 ```bash
 # On the leader:
-serve nodes enroll home-rig
+berth nodes enroll home-rig
 
 # On the agent (anywhere with outbound HTTPS to the cluster port):
-serve agent register --uri 'serve://enroll?…'
-serve agent start
+berth agent register --uri 'serve://enroll?…'
+berth agent start
 ```
 
 ### Latency / throughput honesty
@@ -289,7 +289,7 @@ If your leader has a VPN / private interface, bind the cluster
 listener to it:
 
 ```bash
-serve config set-cluster bind=10.0.0.1
+berth config set-cluster bind=10.0.0.1
 ```
 
 Now only hosts on the VPN can reach `/cluster/agent`. Agents on the
@@ -304,7 +304,7 @@ cluster port to known agent source IPs.
 - Every register attempt (success and failure) is logged via the
   `berth.audit` logger with source IP and token prefix.
 - Enrollment tokens are single-use and expire after 10 minutes.
-- `serve nodes remove <id>` causes the next WS handshake from that
+- `berth nodes remove <id>` causes the next WS handshake from that
   agent to be rejected — the cert fingerprint is re-checked against
   the DB on every connection, not cached in-process.
 
@@ -320,7 +320,7 @@ cluster port to known agent source IPs.
   the public listener if you expect hostile traffic.
 - **Compromised agent host.** mTLS authenticates a cert, not a human;
   whoever controls an enrolled agent host can stream traffic into
-  your fleet until you `serve nodes remove` them.
+  your fleet until you `berth nodes remove` them.
 
 ## Legacy: reverse-proxy mode
 
@@ -330,7 +330,7 @@ supported as an opt-in for operators who already run TLS termination
 upstream:
 
 ```bash
-SERVE_TRUST_FORWARDED_FP=1 serve daemon start
+SERVE_TRUST_FORWARDED_FP=1 berth daemon start
 ```
 
 With that flag set, `LeaderHub` will accept the proxy-forwarded
@@ -348,16 +348,16 @@ What you can rely on:
 - Single-use token consumption, rate-limited registration, audit log.
 - mTLS WebSocket connection with real TLS peer-cert verification on
   every connection (DB lookup, no in-process fingerprint cache).
-- `serve nodes ls / show / enroll / remove` and `serve agent
+- `berth nodes ls / show / enroll / remove` and `berth agent
   register / start / status`.
-- `serve config show / set-public / set-cluster / set-public-tls`.
+- `berth config show / set-public / set-cluster / set-public-tls`.
 - Heartbeat-based health watcher (`ready` → `unreachable` after 15 s
   of silence; auto-recovers on reconnect).
 - Remote `start_deployment`, `stop_deployment`, health probe, and log
   streaming through `AgentLink`.
 - Tunneled `/v1/*` data plane through `RemoteAgentLink.proxy_request`
   (exercised in `tests/integration/test_remote_agent_roundtrip.py`).
-- `serve run --node <label>` and service-profile `node_label` targeting.
+- `berth run --node <label>` and service-profile `node_label` targeting.
 - Cluster UI surface for nodes, transport summary, GPU inventory, and
   sparkline metrics.
 
@@ -377,17 +377,17 @@ plane, not a full scheduler.
 
 ## Troubleshooting
 
-**`serve agent register --uri` fails with "CA fingerprint mismatch".**
+**`berth agent register --uri` fails with "CA fingerprint mismatch".**
 
 Either the URI was tampered with in transit, or you're talking to a
 different leader than the one that minted it (e.g., the leader's CA
 was regenerated by deleting `~/.serve/ca/`). Re-mint:
 
 ```bash
-serve nodes enroll <label>
+berth nodes enroll <label>
 ```
 
-**`serve agent start` connects but the WS handshake closes immediately
+**`berth agent start` connects but the WS handshake closes immediately
 with 1008.**
 
 The leader rejected the peer cert. Possible causes:
@@ -395,48 +395,48 @@ The leader rejected the peer cert. Possible causes:
 - The agent's `agent.yaml` points at the wrong leader / port (it now
   defaults to `:11501` for cluster, not `:11500`). Re-register.
 - The leader's CA was rotated since enrollment. Re-register.
-- The node was removed from the DB. Check `serve nodes ls` on the
+- The node was removed from the DB. Check `berth nodes ls` on the
   leader.
 - Logs on the leader (`~/.serve/logs/daemon.log`) should show
   `cluster ws reject:` with the cause.
 
-**`serve nodes ls` shows the node as `unreachable` even though
-`serve agent start` is running.**
+**`berth nodes ls` shows the node as `unreachable` even though
+`berth agent start` is running.**
 
 The health watcher flips to `unreachable` after 15 s without a
 heartbeat. If the agent is alive but the row is stale, the WS isn't
 connected — check the agent logs for reconnect attempts.
 
-**`serve agent register` returns 403 `invalid or expired enrollment
+**`berth agent register` returns 403 `invalid or expired enrollment
 token`.**
 
-Tokens are single-use and expire after 10 minutes. Re-run `serve nodes
+Tokens are single-use and expire after 10 minutes. Re-run `berth nodes
 enroll <label>` on the leader to mint a fresh URI.
 
-**`serve daemon start` fails with `port already in use` on 11501.**
+**`berth daemon start` fails with `port already in use` on 11501.**
 
-Either another daemon is running (`serve daemon status`) or another
+Either another daemon is running (`berth daemon status`) or another
 process holds the port. Pick a different cluster port:
 
 ```bash
-serve config set-cluster port=21501
-serve daemon start
+berth config set-cluster port=21501
+berth daemon start
 ```
 
 Existing agents will still try the old port — re-enroll them.
 
 **Re-enrolling an existing agent.**
 
-`serve nodes enroll <existing-label>` is allowed and rotates the cert
+`berth nodes enroll <existing-label>` is allowed and rotates the cert
 fingerprint on the next register. The agent will need a fresh
-`serve agent register --uri …` run.
+`berth agent register --uri …` run.
 
 ## Decommissioning a node
 
 On the leader:
 
 ```bash
-serve nodes remove <id>
+berth nodes remove <id>
 ```
 
 This unregisters any live AgentLink, deletes the row, and the cert
@@ -499,7 +499,7 @@ local or remote.
 
 ### Sample Grafana dashboard
 
-`docs/dashboards/serve-engine.json` ships a six-panel starter:
+`docs/dashboards/berth.json` ships a six-panel starter:
 GPU utilization, GPU memory, in-flight, p95 latency, request rate,
 error rate. Import it in Grafana's "Import dashboard" page; no auto-
 provisioning. Tune the panel queries for your label conventions.
@@ -612,7 +612,7 @@ engine, so no more bytes are pulled until the client drains a chunk.
 
 For standing up a public-facing leader (Caddy + ACME TLS, systemd,
 proper auth + backups), see [deploy.md](deploy.md) and
-[caddy.md](caddy.md). `serve backup create` snapshots the DR set
+[caddy.md](caddy.md). `berth backup create` snapshots the DR set
 (db, ca/, key_pepper, config.toml).
 
 ## Roadmap

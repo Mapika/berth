@@ -8,7 +8,7 @@ from typing import Any
 
 from fastapi import FastAPI, Response
 
-from berth import __version__ as _serve_version
+from berth import __version__ as _berth_version
 from berth.auth.stream_tokens import StreamTokenStore
 from berth.auth.tiers import load_tiers
 from berth.backends.base import Backend
@@ -110,29 +110,29 @@ def build_apps(
       and manager with public_app.
     """
     # Ensure the local-node row exists before anything that reads it.
-    ensure_local_node(conn, agent_version=_serve_version)
+    ensure_local_node(conn, agent_version=_berth_version)
 
     # Configure the API-key pepper so /v1/* + /admin/* auth uses HMAC-SHA256
-    # rather than plain SHA-256. The pepper lives at SERVE_DIR/key_pepper
+    # rather than plain SHA-256. The pepper lives at BERTH_DIR/key_pepper
     # (mode 0600); it's generated on first start. The file must be
     # backed up alongside db.sqlite — if it's lost, every key falls and
     # operators must re-mint.
     from berth import config as _cfg
     from berth.store import api_keys as _ak_setup
-    _ak_setup.configure_pepper(_cfg.SERVE_DIR / "key_pepper")
+    _ak_setup.configure_pepper(_cfg.BERTH_DIR / "key_pepper")
 
     # Startup warning: the daemon bypasses auth entirely when no API
     # keys exist (a convenience for first-run via the local UDS). If the
     # daemon also exposes a public listener, an operator who walked
-    # away after `serve daemon start` has an open inference endpoint
-    # until they mint a key. `serve deploy bootstrap` mints a starter
+    # away after `berth daemon start` has an open inference endpoint
+    # until they mint a key. `berth deploy bootstrap` mints a starter
     # key as part of provisioning so the window closes immediately;
     # operators bring it up by hand need to know.
     from berth.store import api_keys as _ak_store
     if _ak_store.count_active(conn) == 0:
         log.warning(
             "auth bypass active: no API keys exist; /v1/* and /admin/* "
-            "are unauthenticated until you run `serve keys create`",
+            "are unauthenticated until you run `berth keys create`",
         )
 
     # Wire up the AgentLink registry. Local node first; remote agents join
@@ -161,10 +161,10 @@ def build_apps(
     from berth import config as _cfg
     from berth.cluster.ca import generate_ca, load_ca
     from berth.cluster.enrollment import EnrollmentTokens
-    home = serve_home or _cfg.SERVE_DIR
+    home = serve_home or _cfg.BERTH_DIR
     ca_dir = home / "ca"
     if not (ca_dir / "ca.crt").exists():
-        generate_ca(ca_dir, common_name="serve-engine-ca")
+        generate_ca(ca_dir, common_name="berth-ca")
     ca = load_ca(ca_dir)
     enrollment_tokens = EnrollmentTokens()
 
@@ -198,11 +198,11 @@ def build_apps(
         agent_registry=agent_registry,
     )
     # Predictor pre-warms likely-needed adapters on a fixed interval.
-    # Operators tune it with ~/.serve/predictor.yaml.
+    # Operators tune it with ~/.berth/predictor.yaml.
     from berth import config as _cfg
     from berth.lifecycle.predictor import PredictorConfig
     from berth.lifecycle.usage_rollup_task import UsageRollupTask
-    predictor_cfg = PredictorConfig.load(_cfg.SERVE_DIR / "predictor.yaml")
+    predictor_cfg = PredictorConfig.load(_cfg.BERTH_DIR / "predictor.yaml")
     predictor_task = PredictorTask(
         conn=conn,
         backends=backends,
@@ -304,10 +304,11 @@ def build_apps(
     import os as _os
 
     from berth.cluster.ca import fingerprint_ca_pem
+    from berth.config import _env_get as _berth_env_get
     from berth.daemon.admin import cluster_router as admin_cluster_router
     resolved_leader_url = (
         leader_url
-        or _os.environ.get("SERVE_LEADER_URL")
+        or _berth_env_get(_os.environ, "SERVE_LEADER_URL")
         or "https://127.0.0.1:11501"
     )
     ca_fingerprint = fingerprint_ca_pem(ca.cert_pem)
@@ -335,7 +336,7 @@ def build_apps(
 
     # public_app: external client surface. Owns the lifespan.
     public_app = FastAPI(
-        title="serve-engine (public)", version=_serve_version, lifespan=lifespan,
+        title="berth (public)", version=_berth_version, lifespan=lifespan,
     )
     _attach_state(
         public_app,
@@ -360,7 +361,7 @@ def build_apps(
 
     # cluster_app: agent transport. Hosts the WS hub, registration, and
     # CA endpoint. Does NOT host /v1/* or general admin routes.
-    cluster_app = FastAPI(title="serve-engine (cluster)", version=_serve_version)
+    cluster_app = FastAPI(title="berth (cluster)", version=_berth_version)
     _attach_state(
         cluster_app,
         conn=conn, backends=backends, manager=manager,
@@ -379,7 +380,7 @@ def build_apps(
     )
 
     # uds_app: full local surface for the CLI.
-    uds_app = FastAPI(title="serve-engine (control)", version=_serve_version)
+    uds_app = FastAPI(title="berth (control)", version=_berth_version)
     _attach_state(
         uds_app,
         conn=conn, backends=backends, manager=manager,

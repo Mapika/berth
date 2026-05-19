@@ -89,7 +89,7 @@ class LeaderHub:
     AgentRegistry for the duration of the connection.
 
     The fingerprint check queries the DB on every connection (not the
-    in-memory registry), so `serve nodes remove` takes effect on the
+    in-memory registry), so `berth nodes remove` takes effect on the
     next handshake."""
 
     def __init__(

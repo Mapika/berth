@@ -17,7 +17,7 @@ def ls(json_out: bool = typer.Option(False, "--json")):
         typer.echo(json.dumps(models, indent=2))
         return
     if not models:
-        typer.echo("no models registered. Use `serve pull <hf-repo>` to add one.")
+        typer.echo("no models registered. Use `berth pull <hf-repo>` to add one.")
         return
     typer.echo(f"{'NAME':<30} {'REPO':<50} {'REVISION':<10}")
     for m in models:

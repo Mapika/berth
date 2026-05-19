@@ -1,6 +1,6 @@
 # Contributing
 
-serve-engine is a Python package with a bundled Vite/React UI.
+berth is a Python package with a bundled Vite/React UI.
 
 ## Development Setup
 

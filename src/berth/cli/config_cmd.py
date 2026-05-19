@@ -8,7 +8,7 @@ from berth import config
 from berth.cli import app
 
 config_app = typer.Typer(
-    help="Read and modify ~/.serve/config.toml — public/cluster addresses and TLS."
+    help="Read and modify ~/.berth/config.toml — public/cluster addresses and TLS."
 )
 app.add_typer(config_app, name="config")
 
@@ -51,7 +51,7 @@ def _set_section(section: str, allowed: set[str], kvs: dict[str, str]) -> None:
 def set_public(kv: list[str] = typer.Argument(...)):
     """Set [public] keys. Allowed: host, port, bind.
 
-    Example: serve config set-public host=api.example.com port=11500
+    Example: berth config set-public host=api.example.com port=11500
     """
     _set_section("public", {"host", "port", "bind"}, _parse_kv(kv))
 
@@ -60,7 +60,7 @@ def set_public(kv: list[str] = typer.Argument(...)):
 def set_cluster(kv: list[str] = typer.Argument(...)):
     """Set [cluster] keys. Allowed: host, port, bind.
 
-    Example: serve config set-cluster host=cluster.example.com bind=10.0.0.1
+    Example: berth config set-cluster host=cluster.example.com bind=10.0.0.1
     """
     _set_section("cluster", {"host", "port", "bind"}, _parse_kv(kv))
 
@@ -69,7 +69,7 @@ def set_cluster(kv: list[str] = typer.Argument(...)):
 def set_public_tls(kv: list[str] = typer.Argument(...)):
     """Set [public_tls] keys. Allowed: cert, key.
 
-    Example: serve config set-public-tls cert=/etc/le/fullchain.pem key=/etc/le/privkey.pem
+    Example: berth config set-public-tls cert=/etc/le/fullchain.pem key=/etc/le/privkey.pem
     """
     kvs = _parse_kv(kv)
     for k in ("cert", "key"):

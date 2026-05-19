@@ -41,7 +41,7 @@ def require_auth_dep(request: Request) -> api_keys.ApiKey | None:
         raise HTTPException(
             status.HTTP_401_UNAUTHORIZED,
             detail="missing or malformed Authorization header (expected: Bearer sk-...)",
-            headers={"WWW-Authenticate": 'Bearer realm="serve-engine"'},
+            headers={"WWW-Authenticate": 'Bearer realm="berth"'},
         )
 
     key = api_keys.verify(conn, secret)
@@ -89,7 +89,7 @@ def require_metrics_key(request: Request) -> api_keys.ApiKey | None:
         raise HTTPException(
             status.HTTP_401_UNAUTHORIZED,
             detail="missing or malformed Authorization header (expected: Bearer sk-...)",
-            headers={"WWW-Authenticate": 'Bearer realm="serve-engine"'},
+            headers={"WWW-Authenticate": 'Bearer realm="berth"'},
         )
     key = api_keys.verify(conn, secret)
     if key is None:

@@ -12,19 +12,19 @@ from berth.cluster.ca import (
 
 def test_generate_and_load_ca(tmp_path):
     ca_dir = tmp_path / "ca"
-    generate_ca(ca_dir, common_name="serve-engine-ca")
+    generate_ca(ca_dir, common_name="berth-ca")
     assert (ca_dir / "ca.crt").exists()
     assert (ca_dir / "ca.key").exists()
     ca = load_ca(ca_dir)
     cert = x509.load_pem_x509_certificate(ca.cert_pem)
-    assert "serve-engine-ca" in cert.subject.rfc4514_string()
+    assert "berth-ca" in cert.subject.rfc4514_string()
     # Self-signed: issuer == subject
     assert cert.issuer == cert.subject
 
 
 def test_issue_agent_cert_signed_by_ca(tmp_path):
     ca_dir = tmp_path / "ca"
-    generate_ca(ca_dir, common_name="serve-engine-ca")
+    generate_ca(ca_dir, common_name="berth-ca")
     ca = load_ca(ca_dir)
     bundle = issue_agent_cert(ca, label="agent-a")
     leaf = x509.load_pem_x509_certificate(bundle.cert_pem)

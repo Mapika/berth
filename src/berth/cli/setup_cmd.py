@@ -13,7 +13,7 @@ from berth.doctor.runner import run_all, summarise
 @app.command("setup")
 def setup():
     """First-run wizard: doctor, start daemon, create admin key, print URL."""
-    typer.echo("=== serve-engine setup ===")
+    typer.echo("=== berth setup ===")
     typer.echo()
     typer.echo("Step 1: environment diagnostic")
     results = run_all()
@@ -23,7 +23,7 @@ def setup():
         typer.echo(f"  {labels[r.status]:<4} {r.name}: {r.detail}")
     if fail:
         typer.secho(
-            "\nFAIL doctor reports failures; fix and re-run `serve setup`.",
+            "\nFAIL doctor reports failures; fix and re-run `berth setup`.",
             fg=typer.colors.RED, err=True,
         )
         raise typer.Exit(1)

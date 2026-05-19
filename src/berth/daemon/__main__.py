@@ -44,7 +44,7 @@ def _ensure_cluster_server_cert(
     is on disk. Returns (cert_path, key_path, ca_fingerprint)."""
     ca_dir = serve_home / "ca"
     if not (ca_dir / "ca.crt").exists():
-        generate_ca(ca_dir, common_name="serve-engine-ca")
+        generate_ca(ca_dir, common_name="berth-ca")
     ca = load_ca(ca_dir)
     leader_dir = serve_home / "leader"
     crt_path = leader_dir / "server.crt"
@@ -60,7 +60,7 @@ def _ensure_cluster_server_cert(
 
 async def serve(cfg: config.ResolvedConfig, sock_path: Path) -> None:
     log_ = logging.getLogger(__name__)
-    config.SERVE_DIR.mkdir(parents=True, exist_ok=True)
+    config.BERTH_DIR.mkdir(parents=True, exist_ok=True)
     config.MODELS_DIR.mkdir(parents=True, exist_ok=True)
     config.LOGS_DIR.mkdir(parents=True, exist_ok=True)
 
@@ -74,7 +74,7 @@ async def serve(cfg: config.ResolvedConfig, sock_path: Path) -> None:
         log_.warning(
             "advertising loopback host %s while binding globally on %s — "
             "enrollment URIs and the public_url will not be reachable from "
-            "external clients. Set [public].host in ~/.serve/config.toml to "
+            "external clients. Set [public].host in ~/.berth/config.toml to "
             "your reachable address.",
             cfg.public_host, cfg.public_bind,
         )
@@ -102,7 +102,7 @@ async def serve(cfg: config.ResolvedConfig, sock_path: Path) -> None:
     # is also used as the public-listener fallback when no operator-supplied
     # cert is configured).
     cluster_crt, cluster_key, _ca_fp = _ensure_cluster_server_cert(
-        config.SERVE_DIR,
+        config.BERTH_DIR,
         hosts=[cfg.cluster_host, cfg.public_host],
     )
 
@@ -124,7 +124,7 @@ async def serve(cfg: config.ResolvedConfig, sock_path: Path) -> None:
         public_key = cluster_key
         log_.warning(
             "public listener using cluster-CA cert (no [public_tls] configured). "
-            "External clients must trust %s — set [public_tls] in ~/.serve/config.toml "
+            "External clients must trust %s — set [public_tls] in ~/.berth/config.toml "
             "for browser/SDK use.", _ca_fp,
         )
     else:
@@ -171,7 +171,7 @@ async def serve(cfg: config.ResolvedConfig, sock_path: Path) -> None:
         app=cluster_app,
         host=cfg.cluster_bind, port=cfg.cluster_port,
         ssl_keyfile=str(cluster_key), ssl_certfile=str(cluster_crt),
-        ssl_ca_certs=str(config.SERVE_DIR / "ca" / "ca.crt"),
+        ssl_ca_certs=str(config.BERTH_DIR / "ca" / "ca.crt"),
         ssl_cert_reqs=ssl.CERT_OPTIONAL,
         ws=TLSAwareWebSocketProtocol,
         log_level="info",
@@ -186,7 +186,7 @@ async def serve(cfg: config.ResolvedConfig, sock_path: Path) -> None:
 
 
 def main(argv: list[str] | None = None) -> int:
-    p = argparse.ArgumentParser(prog="serve-engine-daemon")
+    p = argparse.ArgumentParser(prog="berth-daemon")
     p.add_argument("--public-host")
     p.add_argument("--public-port", type=int)
     p.add_argument("--public-bind")

@@ -256,7 +256,7 @@ class LifecycleManager:
                 if prior.pinned:
                     raise RuntimeError(
                         f"deployment #{prior.id} for {plan.model_name!r} is pinned; "
-                        f"run `serve unpin {plan.model_name}` before replacing it"
+                        f"run `berth unpin {plan.model_name}` before replacing it"
                     )
             for prior in priors:
                 await self._stop_locked(prior.id)
@@ -388,7 +388,7 @@ class LifecycleManager:
                         f"node {plan.node_label!r} link disappeared before dispatch"
                     )
 
-                MODEL_SENTINEL = "__SERVE_MODEL_PATH__"
+                MODEL_SENTINEL = "__BERTH_MODEL_PATH__"
                 argv = backend.build_argv(
                     effective_plan,
                     local_model_path=MODEL_SENTINEL,
@@ -520,7 +520,7 @@ class LifecycleManager:
                 # Leave the failed container around so its logs survive - without
                 # them, "engine did not become healthy" is unactionable. The
                 # operator can `docker logs <name>` to find the real error, then
-                # `serve stop <id>` (which removes the container) when done.
+                # `berth stop <id>` (which removes the container) when done.
                 self._docker.stop(handle.id, timeout=10, remove=False)
                 msg = (
                     f"engine did not become healthy within load timeout "
@@ -549,7 +549,7 @@ class LifecycleManager:
         """At startup: walk ready deployments, verify their containers exist.
 
         If the daemon crashed between marking 'ready' and (e.g.) the user
-        running `serve stop`, the DB row is stale. We can't reliably re-bind
+        running `berth stop`, the DB row is stale. We can't reliably re-bind
         to a running container (we'd need to repopulate routing tables and
         recompute the host port). Simpler and safer: mark stale rows failed
         and let the user re-load.

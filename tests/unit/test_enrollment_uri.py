@@ -32,17 +32,17 @@ def test_round_trip_special_chars():
 
 
 def test_rejects_wrong_scheme():
-    with pytest.raises(ValueError, match="serve://enroll"):
+    with pytest.raises(ValueError, match="berth://enroll"):
         parse_enrollment_uri("https://enroll?token=x")
 
 
 def test_rejects_missing_params():
     with pytest.raises(ValueError, match="missing required param"):
-        parse_enrollment_uri("serve://enroll?leader=https://x")
+        parse_enrollment_uri("berth://enroll?leader=https://x")
 
 
 def test_rejects_non_http_leader():
     with pytest.raises(ValueError, match="http"):
         parse_enrollment_uri(
-            "serve://enroll?leader=ftp://x&token=t&ca_fp=sha256:x"
+            "berth://enroll?leader=ftp://x&token=t&ca_fp=sha256:x"
         )

@@ -7,7 +7,7 @@ from berth.doctor.checks import (
 
 
 def test_check_paths_writable(tmp_path, monkeypatch):
-    monkeypatch.setattr("berth.doctor.checks.SERVE_DIR", tmp_path)
+    monkeypatch.setattr("berth.doctor.checks.BERTH_DIR", tmp_path)
     r = check_paths()
     assert r.status == "ok"
     assert "writable" in r.detail.lower()
@@ -17,7 +17,7 @@ def test_check_paths_not_writable(tmp_path, monkeypatch):
     bad = tmp_path / "bad"
     bad.mkdir()
     bad.chmod(0o400)  # read-only
-    monkeypatch.setattr("berth.doctor.checks.SERVE_DIR", bad)
+    monkeypatch.setattr("berth.doctor.checks.BERTH_DIR", bad)
     r = check_paths()
     assert r.status in ("warn", "fail")
     bad.chmod(0o755)  # restore for cleanup

@@ -1,0 +1,47 @@
+# systemd unit for the berth daemon.
+#
+# Install:
+#   sudo cp packaging/berth.service /etc/systemd/system/
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now berth
+#
+# This unit assumes:
+#   - A `berth` user exists (sudo useradd -r -s /bin/false berth).
+#   - /var/lib/berth is owned by `berth:berth` and is set as
+#     BERTH_HOME (see config.py).
+#   - The berth package is installed in a venv at /opt/berth/venv
+#     (e.g. `uv venv /opt/berth/venv && /opt/berth/venv/bin/pip install
+#     -e /opt/berth/serve-engine`).  The PyPI distribution name is
+#     still `serve-engine` for one release; the binary is `berth`.
+#
+# Adjust the ExecStart path to match your install layout.
+
+[Unit]
+Description=berth inference router daemon
+After=network-online.target docker.service
+Wants=network-online.target
+
+[Service]
+Type=exec
+User=berth
+Group=berth
+WorkingDirectory=/var/lib/berth
+Environment=BERTH_HOME=/var/lib/berth
+ExecStart=/opt/berth/venv/bin/berth daemon start --foreground
+Restart=on-failure
+RestartSec=5
+
+# Journald captures stdout/stderr — no log file in $HOME.
+StandardOutput=journal
+StandardError=journal
+
+# Modest hardening. Loosen these if your deployments need additional
+# capabilities (e.g. ReadWritePaths if model weights live elsewhere).
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ProtectHome=true
+ReadWritePaths=/var/lib/berth /var/run/docker.sock
+
+[Install]
+WantedBy=multi-user.target

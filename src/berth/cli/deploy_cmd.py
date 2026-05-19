@@ -1,11 +1,11 @@
-"""`serve deploy` — one-shot provisioning helpers for a fresh VPS.
+"""`berth deploy` — one-shot provisioning helpers for a fresh VPS.
 
-`serve deploy bootstrap` brings the daemon up to a state where:
-- ~/.serve/config.toml is configured for behind-Caddy mode (or direct
+`berth deploy bootstrap` brings the daemon up to a state where:
+- ~/.berth/config.toml is configured for behind-Caddy mode (or direct
   TLS, depending on flags),
 - the sqlite DB is initialised (so migrations run once, here, before
   the daemon ever takes traffic),
-- the key pepper exists at ~/.serve/key_pepper,
+- the key pepper exists at ~/.berth/key_pepper,
 - a first admin API key is minted and printed once,
 - a ready-to-paste Caddyfile snippet is printed,
 - and the operator gets clear next-step instructions for systemd.
@@ -59,7 +59,7 @@ def _systemd_snippet() -> str:
         # The unit ships under packaging/ at repo root, not under the
         # installed package. Try to find it via the source path; on a
         # wheel install operators get the pointer message.
-        candidate = Path(str(pkg)).parent.parent / "packaging" / "serve-engine.service"
+        candidate = Path(str(pkg)).parent.parent / "packaging" / "berth.service"
         if candidate.exists():
             return candidate.read_text()
     except Exception:
@@ -82,7 +82,7 @@ def _bootstrap(
     serve_home.mkdir(parents=True, exist_ok=True)
     # Point all our config constants at this serve_home — important when
     # operators set SERVE_HOME or pass --serve-home.
-    config.SERVE_DIR = serve_home  # type: ignore[misc]
+    config.BERTH_DIR = serve_home  # type: ignore[misc]
     config.MODELS_DIR = serve_home / "models"
     config.LOGS_DIR = serve_home / "logs"
     config.CONFIGS_DIR = serve_home / "configs"
@@ -127,7 +127,7 @@ def _bootstrap(
 
     ca_dir = serve_home / "ca"
     if not (ca_dir / "ca.crt").exists():
-        generate_ca(ca_dir, common_name="serve-engine-ca")
+        generate_ca(ca_dir, common_name="berth-ca")
         out["ca_status"] = f"generated {ca_dir}/ca.crt + ca.key (mode 0600)"
     else:
         out["ca_status"] = f"{ca_dir} already provisioned"
@@ -175,7 +175,7 @@ def bootstrap(
     ),
     serve_home: str = typer.Option(
         None, "--serve-home",
-        help="Override the daemon's home directory (default: ~/.serve).",
+        help="Override the daemon's home directory (default: ~/.berth).",
     ),
     force: bool = typer.Option(
         False, "--force",
@@ -192,7 +192,7 @@ def bootstrap(
         raise typer.BadParameter(
             f"--domain {domain!r} doesn't look like a hostname",
         )
-    home = Path(serve_home).expanduser() if serve_home else config.SERVE_DIR
+    home = Path(serve_home).expanduser() if serve_home else config.BERTH_DIR
 
     out = _bootstrap(
         domain=domain,
@@ -204,7 +204,7 @@ def bootstrap(
     )
 
     typer.echo("=" * 70)
-    typer.echo(f"serve-engine bootstrap → {home}")
+    typer.echo(f"berth bootstrap → {home}")
     typer.echo("=" * 70)
     typer.echo(f"  config : {out['config_status']}")
     typer.echo(f"  ca     : {out['ca_status']}")
@@ -229,18 +229,18 @@ def bootstrap(
         typer.echo("")
         typer.echo(out["caddyfile"])
     typer.echo("2. Install + start the systemd unit:")
-    typer.echo("     sudo cp packaging/serve-engine.service /etc/systemd/system/")
+    typer.echo("     sudo cp packaging/berth.service /etc/systemd/system/")
     typer.echo("     sudo systemctl daemon-reload")
-    typer.echo("     sudo systemctl enable --now serve-engine")
+    typer.echo("     sudo systemctl enable --now berth")
     typer.echo("")
     typer.echo("3. Verify:")
     typer.echo(f"     curl https://{domain}/healthz")
     typer.echo(f"     curl -H 'Authorization: Bearer <KEY>' https://{domain}/metrics")
     typer.echo("")
     typer.echo("4. Enroll an agent on a GPU host:")
-    typer.echo("     serve nodes enroll <label>            # on this leader")
-    typer.echo("     serve agent register --uri '<paste>'  # on the agent host")
-    typer.echo("     serve agent start")
+    typer.echo("     berth nodes enroll <label>            # on this leader")
+    typer.echo("     berth agent register --uri '<paste>'  # on the agent host")
+    typer.echo("     berth agent start")
     typer.echo("")
     typer.echo("Back up the DR set (db + ca + key_pepper + config) regularly:")
-    typer.echo("     serve backup create /var/backups/serve-$(date +%F).tar.gz")
+    typer.echo("     berth backup create /var/backups/serve-$(date +%F).tar.gz")

@@ -1,4 +1,4 @@
-"""`serve backup create` produces a tarball of the DR set."""
+"""`berth backup create` produces a tarball of the DR set."""
 from __future__ import annotations
 
 import tarfile
@@ -10,7 +10,7 @@ from berth.store import db
 
 
 def test_backup_create_writes_tarball_with_dr_set(tmp_path, monkeypatch):
-    monkeypatch.setattr(config, "SERVE_DIR", tmp_path)
+    monkeypatch.setattr(config, "BERTH_DIR", tmp_path)
     monkeypatch.setattr(config, "DB_PATH", tmp_path / "db.sqlite")
     monkeypatch.setattr(config, "CONFIG_FILE", tmp_path / "config.toml")
 

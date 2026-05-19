@@ -102,13 +102,13 @@ enabled: false
 to `~/.serve/predictor.yaml`, then restart the daemon:
 
 ```bash
-serve daemon stop
-serve daemon start
+berth daemon stop
+berth daemon start
 ```
 
 ## Operator-stop interaction
 
-Known gap: if you `serve stop` a deployment that the rules still score
+Known gap: if you `berth stop` a deployment that the rules still score
 highly, the next predictor tick may re-launch it from its recorded plan.
 
 Workarounds:

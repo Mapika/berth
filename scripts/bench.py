@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Performance harness for serve-engine.
+"""Performance harness for berth.
 
 Methodology matches vLLM's `benchmarks/benchmark_serving.py`:
 
@@ -278,7 +278,7 @@ def main() -> int:
     ap.add_argument("--out", default="/tmp/bench-v2.json")
     ap.add_argument("--no-cold-load", action="store_true",
                     help="Skip the stop+run cold-load probe; bench the currently "
-                         "loaded deployment. Use when you've manually tuned `serve run` "
+                         "loaded deployment. Use when you've manually tuned `berth run` "
                          "flags that cold_load would clobber.")
     args = ap.parse_args()
     random.seed(0)

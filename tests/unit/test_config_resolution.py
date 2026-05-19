@@ -10,7 +10,7 @@ from berth import config
 @pytest.fixture(autouse=True)
 def _isolated_serve_home(tmp_path, monkeypatch):
     """Point SERVE_HOME at a tmp dir for every test in this module."""
-    monkeypatch.setattr(config, "SERVE_DIR", tmp_path, raising=True)
+    monkeypatch.setattr(config, "BERTH_DIR", tmp_path, raising=True)
     monkeypatch.setattr(config, "CONFIG_FILE", tmp_path / "config.toml", raising=True)
     return tmp_path
 

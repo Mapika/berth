@@ -50,7 +50,7 @@ def require_admin_key(
     Trust model:
     - Local UDS requests bypass auth entirely. The user controls the host
       filesystem; presence on the socket is sufficient. This is also the
-      bootstrap path: `serve key create web --tier admin` over UDS works
+      bootstrap path: `berth key create web --tier admin` over UDS works
       even after other tier=admin keys exist.
     - TCP requests fall through to require_auth_dep. If no keys exist at
       all, that dep also bypasses (homelab UX). Otherwise it requires a
