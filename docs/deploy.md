@@ -125,8 +125,34 @@ you can run it manually or audit what the bootstrap does.
 
 ## Bootstrap
 
-`serve deploy bootstrap` (planned) wraps steps 4–7 into a single
-script. Until that lands, use the manual recipe above.
+`serve deploy bootstrap --domain <fqdn>` wraps steps 5 and 7 (write
+config.toml + mint first admin key) plus the DB/CA/pepper init that
+the daemon would otherwise do on first start. Idempotent: re-running
+preserves the existing config and skips the key mint when keys
+already exist.
+
+Typical first-run on the VPS:
+
+```bash
+sudo -u serve /opt/serve/venv/bin/serve deploy bootstrap \
+    --domain serve.example.com
+```
+
+Output includes:
+
+- A ready-to-paste Caddyfile snippet (drop into `/etc/caddy/Caddyfile`,
+  `sudo systemctl reload caddy`).
+- The first admin API key (shown once — save it).
+- The exact systemd commands to enable + start the service.
+
+For a direct-TLS deployment (no Caddy in front), pass `--direct-tls`.
+The daemon's TLS will use the cluster-CA-signed server cert by default;
+override with `[public_tls]` in `config.toml` if you want a custom
+chain (Let's Encrypt minted out-of-band, an internal CA, etc.).
+
+Operator-controlled sudo steps (install systemd unit, install Caddy)
+stay manual on purpose — bootstrap doesn't write to /etc or run
+package managers.
 
 ## Backup and DR
 

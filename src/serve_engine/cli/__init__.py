@@ -14,6 +14,7 @@ from serve_engine.cli import (  # noqa: E402
     backup_cmd,  # noqa: F401  registers `backup` sub-app
     config_cmd,  # noqa: F401  registers `config` sub-app
     daemon_cmd,  # noqa: F401  registers `daemon` sub-app
+    deploy_cmd,  # noqa: F401  registers `deploy` sub-app
     doctor_cmd,  # noqa: F401  registers command
     key_cmd,  # noqa: F401  registers `key` sub-app
     logs_cmd,  # noqa: F401  registers command
