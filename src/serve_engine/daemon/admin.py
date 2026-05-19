@@ -87,6 +87,38 @@ def require_admin_key(
 router = APIRouter(prefix="/admin", dependencies=[Depends(require_admin_key)])
 
 
+def render_metrics_snapshot(aggregator, *, nodes) -> dict:
+    """Pure assembler for the /admin/metrics/snapshot response.
+
+    `aggregator` is a MetricsAggregator; `nodes` is an iterable of objects
+    with `.id` and `.label`. Kept module-level + pure so tests don't have
+    to stand up FastAPI/auth to validate output shape.
+    """
+    labels = {n.id: n.label for n in nodes}
+    out: list[dict] = []
+    for node_id, latest in sorted(aggregator.snapshot().items()):
+        label = labels.get(node_id, str(node_id))
+        series_gpu_util: dict[str, list[int]] = {}
+        for g in latest.get("gpus", []):
+            idx = g.get("index", -1)
+            series_gpu_util[f"gpu{idx}"] = aggregator.series(
+                node_id=node_id, key="gpu_util_pct", gpu=idx,
+            )
+        out.append({
+            "node_id": node_id,
+            "label": label,
+            "gpus": latest.get("gpus", []),
+            "deployments": latest.get("deployments", []),
+            "series": {
+                "gpu_util_pct": series_gpu_util,
+                "request_rate": aggregator.series(
+                    node_id=node_id, key="request_rate",
+                ),
+            },
+        })
+    return {"nodes": out}
+
+
 def get_manager(request: Request) -> LifecycleManager:
     return request.app.state.manager
 
@@ -1328,6 +1360,23 @@ def admin_nodes_enroll(body: EnrollBody, request: Request):
 def admin_nodes_list(conn: sqlite3.Connection = Depends(get_conn)):
     """All known nodes (the local row + every enrolled remote agent)."""
     return {"nodes": [asdict(n) for n in nodes_store.list_all(conn)]}
+
+
+@router.get("/metrics/snapshot")
+def admin_metrics_snapshot(
+    request: Request,
+    conn: sqlite3.Connection = Depends(get_conn),
+):
+    """Live per-node + per-deployment metrics from the aggregator.
+
+    Consumed by the UI Cluster page for sparklines. Returns an empty
+    `nodes` list when no agents have heartbeated metrics yet."""
+    aggregator = getattr(request.app.state, "metrics_aggregator", None)
+    if aggregator is None:
+        return {"nodes": []}
+    return render_metrics_snapshot(
+        aggregator, nodes=nodes_store.list_all(conn),
+    )
 
 
 @router.get("/nodes/{node_id}")
