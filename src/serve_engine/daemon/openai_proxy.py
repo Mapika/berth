@@ -220,6 +220,11 @@ async def _proxy(
 
     dep_store.touch_last_request(conn, active.id)
     request.app.state.request_count += 1
+    _in_flight = getattr(request.app.state, "in_flight", None)
+    _latency = getattr(request.app.state, "latency", None)
+    if _in_flight is not None:
+        _in_flight.start(active.id)
+    _dispatch_started_at = time.monotonic()
     # Log this request for the predictor. Tokens are 0 at dispatch time,
     # then patched in below via set_tokens once the upstream
     # stream completes and the usage tracker extracts them.
@@ -336,6 +341,16 @@ async def _proxy(
                         conn, key.usage_event_id,
                         tokens_in=tin, tokens_out=tout,
                     )
+                if _in_flight is not None:
+                    _in_flight.finish(active.id)
+                if _latency is not None:
+                    _latency.record(
+                        deployment_id=active.id,
+                        latency_ms=int(
+                            (time.monotonic() - _dispatch_started_at) * 1000
+                        ),
+                        error=first_status >= 500,
+                    )
                 tracer.finalize(
                     trace, status_code=first_status,
                     tokens_in=tin, tokens_out=tout,
@@ -393,6 +408,16 @@ async def _proxy(
             if key is not None and key.usage_event_id is not None:
                 _key_usage_store.set_tokens(
                     conn, key.usage_event_id, tokens_in=tin, tokens_out=tout,
+                )
+            if _in_flight is not None:
+                _in_flight.finish(active.id)
+            if _latency is not None:
+                _latency.record(
+                    deployment_id=active.id,
+                    latency_ms=int(
+                        (time.monotonic() - _dispatch_started_at) * 1000
+                    ),
+                    error=resp.status_code >= 500,
                 )
             tracer.finalize(
                 trace,

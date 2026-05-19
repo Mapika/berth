@@ -250,3 +250,35 @@ async def test_proxy_forwards_upstream_500(tmp_path, monkeypatch):
         )
     assert r.status_code == 500
     assert b"cuda oom" in r.content
+
+
+@pytest.mark.asyncio
+async def test_proxy_records_in_flight_and_latency(app_with_active_deployment):
+    """After a successful request the in-flight counter must be zero
+    and the latency recorder must have one sample for the dispatched
+    deployment."""
+    app, _ = app_with_active_deployment
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(
+        transport=transport, base_url="http://test", timeout=30,
+    ) as c:
+        async with c.stream(
+            "POST", "/v1/chat/completions",
+            json={
+                "model": "llama-1b",
+                "messages": [{"role": "user", "content": "hi"}],
+                "stream": True,
+            },
+        ) as r:
+            assert r.status_code == 200
+            _ = [chunk async for chunk in r.aiter_bytes()]
+
+    from serve_engine.store import deployments as _dep
+    dep = _dep.find_ready_by_model_name(app.state.conn, "llama-1b")
+    assert dep is not None
+    # In-flight released on completion.
+    assert app.state.in_flight.snapshot() == {}
+    # Latency recorder captured exactly one sample for this deployment.
+    summary = app.state.latency.summarize_and_reset(dep.id)
+    assert summary.requests_last_window == 1
+    assert summary.errors_last_window == 0

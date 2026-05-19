@@ -41,6 +41,11 @@ def _attach_state(
     stream_tokens: StreamTokenStore,
     request_tracer: Any,
 ) -> None:
+    from serve_engine.cluster.metrics_collector import (
+        InFlightCounter,
+        LatencyRecorder,
+    )
+
     app.state.conn = conn
     app.state.backends = backends
     app.state.manager = manager
@@ -49,6 +54,8 @@ def _attach_state(
     app.state.tier_cfg = load_tiers()
     app.state.request_count = 0
     app.state.request_tracer = request_tracer
+    app.state.in_flight = InFlightCounter()
+    app.state.latency = LatencyRecorder()
 
     @app.get("/healthz")
     def healthz():
