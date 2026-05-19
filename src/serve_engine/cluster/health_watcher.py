@@ -6,9 +6,24 @@ import sqlite3
 import time
 
 from serve_engine.cluster.agent_registry import AgentRegistry
+from serve_engine.routing.affinity import RoutingAffinity
 from serve_engine.store import nodes as nodes_store
 
 log = logging.getLogger(__name__)
+
+
+def on_node_unreachable(
+    *,
+    node_id: int,
+    label: str,
+    affinity: RoutingAffinity | None,
+) -> None:
+    """Side-effects on node ready → unreachable: emit an audit log line
+    and clear any routing-affinity entries pointing at the lost node.
+    Pure; safe to call from any context."""
+    log.warning("node_loss_audit node_id=%d label=%r", node_id, label)
+    if affinity is not None:
+        affinity.evict_node(node_id)
 
 
 def sweep(
@@ -17,10 +32,12 @@ def sweep(
     *,
     now: float | None = None,
     stale_after_s: float = 15.0,
+    affinity: RoutingAffinity | None = None,
 ) -> None:
     """One pass over the nodes table: any node currently `ready` whose
-    last_seen is older than `stale_after_s` is moved to `unreachable` and
-    unregistered from the live AgentLink registry."""
+    last_seen is older than `stale_after_s` is moved to `unreachable`,
+    unregistered from the live AgentLink registry, and has its routing
+    affinity entries cleared."""
     t = now if now is not None else time.time()
     for n in nodes_store.list_all(conn):
         if n.label == "local":
@@ -30,6 +47,7 @@ def sweep(
                 conn, n.id, status="unreachable", last_seen=n.last_seen,
             )
             registry.unregister(n.id)
+            on_node_unreachable(node_id=n.id, label=n.label, affinity=affinity)
 
 
 async def run_health_watcher(
@@ -38,11 +56,15 @@ async def run_health_watcher(
     *,
     interval_s: float = 5.0,
     stale_after_s: float = 15.0,
+    affinity: RoutingAffinity | None = None,
 ) -> None:
     """Run sweep() in a loop until cancelled."""
     while True:
         try:
-            sweep(conn, registry, stale_after_s=stale_after_s)
+            sweep(
+                conn, registry,
+                stale_after_s=stale_after_s, affinity=affinity,
+            )
         except Exception:
             log.exception("health watcher sweep failed")
         await asyncio.sleep(interval_s)

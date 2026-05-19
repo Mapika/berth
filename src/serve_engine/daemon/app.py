@@ -211,7 +211,9 @@ def build_apps(
                 await _asyncio.sleep(5.0)
 
         cluster_watcher = _asyncio.create_task(
-            run_health_watcher(conn, agent_registry)
+            run_health_watcher(
+                conn, agent_registry, affinity=routing_affinity,
+            )
         )
         local_metrics_task = _asyncio.create_task(_local_metrics_tick())
         yield
