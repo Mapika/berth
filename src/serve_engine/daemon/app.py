@@ -275,6 +275,14 @@ def build_apps(
         request_tracer=request_tracer,
     )
     _wire_common_state(public_app)
+    # Public listener gets a body-size cap. Without one a single multi-GB
+    # POST to /v1/* will OOM a small VPS. uds_app deliberately omits the
+    # cap — operator endpoints upload adapter weights and such.
+    from serve_engine.daemon.body_size_limit import BodySizeLimitMiddleware
+    public_app.add_middleware(
+        BodySizeLimitMiddleware,
+        max_bytes=getattr(resolved_cfg, "max_body_size_bytes", 10 * 1024 * 1024),
+    )
     public_app.include_router(openai_router)
     public_app.include_router(metrics_router)
     public_app.include_router(admin_router)
