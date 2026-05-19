@@ -12,10 +12,14 @@ from serve_engine.auth.middleware import require_auth_dep
 from serve_engine.backends.base import Backend
 from serve_engine.cluster.agent_link import ENGINE_TIMEOUT
 from serve_engine.cluster.agent_registry import AgentRegistry
+from serve_engine.daemon.dispatch import open_upstream_stream
+from serve_engine.daemon.dispatch_errors import NodeUnreachableError
+from serve_engine.daemon.retry_dispatcher import dispatch_with_retry
 from serve_engine.lifecycle.adapter_router import (
     UnknownModel,
     ensure_adapter_loaded,
     find_deployment_for,
+    rank_deployments_for,
     resolve_target,
 )
 from serve_engine.routing.scorer import NodeSignals, RoutingRequest
@@ -250,7 +254,10 @@ async def _proxy(
         tracer.finalize(trace, status_code=503, error=detail)
         raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, detail=detail)
 
-    tracer.update(trace, deployment_id=active.id, backend=active.backend)
+    # tracer.update with deployment_id happens AFTER dispatch_with_retry,
+    # since retry may swap us to a different candidate. Backend is the
+    # same for all candidates of the same model so we read it from the
+    # head here.
     backend = backends.get(active.backend)
     if backend is None:
         tracer.finalize(trace, status_code=500, error=f"unknown backend {active.backend!r}")
@@ -276,31 +283,9 @@ async def _proxy(
                 raise HTTPException(502, detail=f"adapter load failed: {e}") from e
     tracer.update(trace, cold_loaded=cold_loaded)
 
-    dep_store.touch_last_request(conn, active.id)
     request.app.state.request_count += 1
     _in_flight = getattr(request.app.state, "in_flight", None)
     _latency = getattr(request.app.state, "latency", None)
-    if _in_flight is not None:
-        _in_flight.start(active.id)
-    _dispatch_started_at = time.monotonic()
-    # Record affinity so follow-up requests on the same session land on
-    # the same node (and warm KV cache). Updated here optimistically
-    # before dispatch — if dispatch fails the affinity is still useful
-    # for the next attempt since the node was the scorer's first pick.
-    if affinity_key and affinity is not None:
-        affinity.set(affinity_key, node_id=active.node_id)
-    # Log this request for the predictor. Tokens are 0 at dispatch time,
-    # then patched in below via set_tokens once the upstream
-    # stream completes and the usage tracker extracts them.
-    usage_event_id = _usage_events_store.record(
-        conn,
-        model_name=requested_model_name,
-        base_name=target.base_model_name,
-        adapter_name=target.adapter_name,
-        deployment_id=active.id,
-        api_key_id=key.id if key is not None else None,
-        cold_loaded=cold_loaded,
-    )
 
     # Rewrite the upstream payload's `model` field to the adapter name
     # when an adapter is in play - vLLM/SGLang both treat the OpenAI
@@ -321,149 +306,95 @@ async def _proxy(
     headers.pop("authorization", None)
     headers.pop("Authorization", None)
 
-    tracer.update(trace, dispatched_at=time.monotonic())
+    # Determine the ranked candidate list and the dispatch budget.
+    # Adapter requests stay single-shot: only the head deployment has
+    # had the adapter loaded by ensure_adapter_loaded above, so falling
+    # through to another candidate would dispatch to an engine without
+    # the right LoRA slot. Bare-base requests use the full ranking and
+    # the retry budget gets us through transient node-unreachable.
+    if target.adapter_name:
+        ranked_for_dispatch = [active]
+        retry_budget = 0
+    else:
+        full_ranked = rank_deployments_for(
+            conn, target.base_model_name, None,
+            signals_by_node=signals_by_node or {},
+            request=routing_request or RoutingRequest(affinity_key=None),
+        )
+        ranked_for_dispatch = full_ranked or [active]
+        retry_budget = 2
 
-    # Decide between direct-HTTP and tunneled-WS dispatch by node_id.
-    # Local node → existing direct httpx path (lowest overhead).
-    # Remote node → stream chunks through the AgentLink's WS.
     from serve_engine.store import nodes as _nodes_store
     local_node = _nodes_store.find_by_label(conn, "local")
     local_node_id = local_node.id if local_node else 0
-    is_remote = (
-        active.node_id != 0
-        and active.node_id != local_node_id
-    )
+    registry: AgentRegistry = request.app.state.agent_registry
+    engine_path = backend.openai_base + openai_subpath
 
-    if is_remote:
-        registry: AgentRegistry = request.app.state.agent_registry
-        link = registry.get(active.node_id)
-        if link is None or not link.is_ready:
-            tracer.finalize(
-                trace, status_code=503,
-                error=f"node {active.node_id} not connected",
-            )
-            raise HTTPException(
-                503, detail=f"node {active.node_id} agent not connected",
-            )
-        if active.container_id is None:
-            tracer.finalize(trace, status_code=503, error="no container id")
-            raise HTTPException(503, detail="deployment has no container yet")
-
-        engine_path = backend.openai_base + openai_subpath
-        # Buffer the very first chunk to read the upstream content-type;
-        # client expects matching media-type (application/json for non-
-        # streaming, text/event-stream for streaming SSE).
-        agen = link.proxy_request(
-            container_id=active.container_id,
+    async def _open_for(candidate):
+        upstream = await open_upstream_stream(
+            deployment=candidate,
+            local_node_id=local_node_id,
+            registry=registry,
             method="POST",
             path=engine_path,
             headers=headers,
             body=body,
         )
-        first_chunk = None
-        first_status = 502
-        first_headers: dict[str, str] = {}
-        async for ch in agen:
-            if ch.status is not None:
-                first_status = ch.status
-            if ch.headers is not None:
-                first_headers = dict(ch.headers)
-            first_chunk = ch
-            break
-        upstream_ct = first_headers.get(
-            "content-type", "application/json",
+        return (upstream, candidate)
+
+    tracer.update(trace, dispatched_at=time.monotonic())
+    try:
+        upstream, landed = await dispatch_with_retry(
+            ranked=ranked_for_dispatch,
+            open_stream=_open_for,
+            budget=retry_budget,
         )
-        usage_tracker = _UsageTracker(is_sse="event-stream" in upstream_ct)
+    except NodeUnreachableError as e:
+        tracer.finalize(trace, status_code=503, error=str(e))
+        raise HTTPException(503, detail=str(e)) from e
 
-        async def remote_streamer():
-            first_byte_seen = False
-            try:
-                # Yield the buffered first chunk's body before continuing.
-                if first_chunk is not None and first_chunk.body:
-                    first_byte_seen = True
-                    tracer.update(trace, first_byte_at=time.monotonic())
-                    usage_tracker.feed(first_chunk.body)
-                    yield first_chunk.body
-                if first_chunk is None or not first_chunk.eof:
-                    async for ch in agen:
-                        if not first_byte_seen and ch.body:
-                            first_byte_seen = True
-                            tracer.update(trace, first_byte_at=time.monotonic())
-                        if ch.body:
-                            usage_tracker.feed(ch.body)
-                            yield ch.body
-                        if ch.eof:
-                            break
-            finally:
-                tin, tout = usage_tracker.extract()
-                if tin or tout:
-                    _usage_events_store.set_tokens(
-                        conn, usage_event_id, tokens_in=tin, tokens_out=tout,
-                    )
-                if key is not None and key.usage_event_id is not None:
-                    _key_usage_store.set_tokens(
-                        conn, key.usage_event_id,
-                        tokens_in=tin, tokens_out=tout,
-                    )
-                if _in_flight is not None:
-                    _in_flight.finish(active.id)
-                if _latency is not None:
-                    _latency.record(
-                        deployment_id=active.id,
-                        latency_ms=int(
-                            (time.monotonic() - _dispatch_started_at) * 1000
-                        ),
-                        error=first_status >= 500,
-                    )
-                tracer.finalize(
-                    trace, status_code=first_status,
-                    tokens_in=tin, tokens_out=tout,
-                )
+    # Now we know which deployment we actually landed on. All bookkeeping
+    # (in-flight, latency window, usage_event, affinity) is keyed off
+    # `landed`, not the head of the ranking — important when the retry
+    # path swapped to a fallback candidate.
+    tracer.update(trace, deployment_id=landed.id, backend=landed.backend)
+    dep_store.touch_last_request(conn, landed.id)
+    if affinity_key and affinity is not None:
+        affinity.set(affinity_key, node_id=landed.node_id)
+    if _in_flight is not None:
+        _in_flight.start(landed.id)
+    _dispatch_started_at = time.monotonic()
+    usage_event_id = _usage_events_store.record(
+        conn,
+        model_name=requested_model_name,
+        base_name=target.base_model_name,
+        adapter_name=target.adapter_name,
+        deployment_id=landed.id,
+        api_key_id=key.id if key is not None else None,
+        cold_loaded=cold_loaded,
+    )
 
-        # Strip hop-by-hop / framing headers; preserve the rest.
-        forward_headers = {
-            k: v for k, v in first_headers.items()
-            if k.lower() not in _HOP_BY_HOP | {"content-type"}
-        }
-        return StreamingResponse(
-            remote_streamer(),
-            status_code=first_status,
-            headers=forward_headers,
-            media_type=upstream_ct,
-        )
-
-    # ----------- Local dispatch (direct httpx) -----------------------
-    base = f"http://{active.container_address}:{active.container_port}{backend.openai_base}"
-    # Open the upstream stream BEFORE returning so we can read its status
-    # and headers and forward them faithfully to the caller.
-    client = make_engine_client(base)
-    stream_cm = client.stream("POST", openai_subpath, content=body, headers=headers)
-    resp = await stream_cm.__aenter__()
-
-    # Forward upstream status + content-type + selected headers.
-    upstream_ct = resp.headers.get("content-type", "application/octet-stream")
+    upstream_ct = upstream.headers.get(
+        "content-type", "application/octet-stream",
+    )
+    usage_tracker = _UsageTracker(is_sse="event-stream" in upstream_ct)
     forward_headers = {
-        k: v for k, v in resp.headers.items()
+        k: v for k, v in upstream.headers.items()
         if k.lower() not in _HOP_BY_HOP | {"content-type"}
     }
-
-    # Track only the last SSE event's `data:` payload, or the entire body if
-    # it's a single JSON object. ~4 KB cap on the last-line buffer is plenty
-    # for usage payloads which are tens of bytes.
-    usage_tracker = _UsageTracker(is_sse="event-stream" in upstream_ct)
 
     async def streamer():
         first_byte_seen = False
         try:
-            async for chunk in resp.aiter_raw():
+            async for chunk in upstream.body_iter:
                 if not first_byte_seen:
                     first_byte_seen = True
                     tracer.update(trace, first_byte_at=time.monotonic())
-                usage_tracker.feed(chunk)
-                yield chunk
+                if chunk:
+                    usage_tracker.feed(chunk)
+                    yield chunk
         finally:
-            await stream_cm.__aexit__(None, None, None)
-            await client.aclose()
+            await upstream.aclose()
             tin, tout = usage_tracker.extract()
             if tin or tout:
                 _usage_events_store.set_tokens(
@@ -474,25 +405,23 @@ async def _proxy(
                     conn, key.usage_event_id, tokens_in=tin, tokens_out=tout,
                 )
             if _in_flight is not None:
-                _in_flight.finish(active.id)
+                _in_flight.finish(landed.id)
             if _latency is not None:
                 _latency.record(
-                    deployment_id=active.id,
+                    deployment_id=landed.id,
                     latency_ms=int(
                         (time.monotonic() - _dispatch_started_at) * 1000
                     ),
-                    error=resp.status_code >= 500,
+                    error=upstream.status >= 500,
                 )
             tracer.finalize(
-                trace,
-                status_code=resp.status_code,
-                tokens_in=tin,
-                tokens_out=tout,
+                trace, status_code=upstream.status,
+                tokens_in=tin, tokens_out=tout,
             )
 
     return StreamingResponse(
         streamer(),
-        status_code=resp.status_code,
+        status_code=upstream.status,
         headers=forward_headers,
         media_type=upstream_ct,
     )
