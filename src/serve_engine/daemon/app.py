@@ -6,7 +6,7 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Response
 
 from serve_engine import __version__ as _serve_version
 from serve_engine.auth.stream_tokens import StreamTokenStore
@@ -62,10 +62,26 @@ def _attach_state(
     # the same metrics aggregator.
     app.state.in_flight = in_flight if in_flight is not None else InFlightCounter()
     app.state.latency = latency if latency is not None else LatencyRecorder()
+    # Readiness flag. Flipped to True by the lifespan after reconcile +
+    # background tasks have started. /readyz consults this in addition
+    # to a DB liveness check.
+    app.state.ready = False
 
     @app.get("/healthz")
     def healthz():
         return {"ok": True}
+
+    @app.get("/readyz")
+    def readyz(response: Response):
+        if not app.state.ready:
+            response.status_code = 503
+            return {"ready": False, "reason": "lifespan not yet complete"}
+        try:
+            app.state.conn.execute("SELECT 1").fetchone()
+        except Exception as e:
+            response.status_code = 503
+            return {"ready": False, "reason": f"db: {e!r}"}
+        return {"ready": True}
 
 
 def build_apps(
@@ -255,6 +271,11 @@ def build_apps(
             )
         )
         local_metrics_task = _asyncio.create_task(_local_metrics_tick())
+        # All startup tasks launched — flip the readiness flag for /readyz.
+        # All three apps share the same conn + lifecycle here.
+        public_app.state.ready = True
+        cluster_app.state.ready = True
+        uds_app.state.ready = True
         yield
         # Shutdown
         local_metrics_task.cancel()
