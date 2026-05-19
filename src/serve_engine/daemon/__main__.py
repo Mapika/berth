@@ -66,6 +66,18 @@ async def serve(cfg: config.ResolvedConfig, sock_path: Path) -> None:
     conn = db.connect(config.DB_PATH)
     db.init_schema(conn)
 
+    # Operator footgun guard: binding globally but advertising loopback
+    # produces enrollment URIs that nobody can reach. Warn loudly so
+    # the operator notices before they paste the URI into a remote box.
+    if cfg.public_bind in ("0.0.0.0", "::") and cfg.public_host.startswith("127."):
+        log_.warning(
+            "advertising loopback host %s while binding globally on %s — "
+            "enrollment URIs and the public_url will not be reachable from "
+            "external clients. Set [public].host in ~/.serve/config.toml to "
+            "your reachable address.",
+            cfg.public_host, cfg.public_bind,
+        )
+
     docker_client = DockerClient(network_name=config.DOCKER_NETWORK_NAME)
     docker_client.ensure_network()
 
