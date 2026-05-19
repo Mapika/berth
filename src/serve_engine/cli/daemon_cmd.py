@@ -123,15 +123,19 @@ def daemon_start(
     cluster_host: str = typer.Option(None, "--cluster-host"),
     cluster_port: int = typer.Option(None, "--cluster-port"),
     cluster_bind: str = typer.Option(None, "--cluster-bind"),
+    foreground: bool = typer.Option(
+        False, "--foreground",
+        help="Run in the current process (don't spawn a background "
+        "daemon, don't write a PID file). Use under systemd Type=exec, "
+        "or for development debugging.",
+    ),
     # Back-compat aliases.
     host: str = typer.Option(None, "--host", hidden=True),
     port: int = typer.Option(None, "--port", hidden=True),
 ):
-    """Start the daemon in the background.
-
-    Without flags: resolves addresses from ~/.serve/config.toml or
-    autodetects the LAN interface."""
-    if _is_running():
+    """Start the daemon. Defaults to background mode with a PID file
+    and detached process; `--foreground` runs it in this terminal."""
+    if not foreground and _is_running():
         typer.echo("daemon already running")
         raise typer.Exit(0)
     cfg = config.resolve_config(
@@ -144,6 +148,21 @@ def daemon_start(
         cli_public_cert=public_cert,
         cli_public_key=public_key,
     )
+    if foreground:
+        # Run the daemon in-process. Stdout/stderr go to the parent
+        # (systemd captures them into journald; humans see them in
+        # their terminal). No PID file — the supervising process
+        # tracks us already.
+        from serve_engine.daemon.__main__ import (
+            configure_logging,
+            serve as _serve_inline,
+        )
+        configure_logging()
+        try:
+            asyncio.run(_serve_inline(cfg, config.SOCK_PATH))
+        except KeyboardInterrupt:
+            pass
+        return
     try:
         pid = spawn_daemon(cfg)
     except TimeoutError as e:
