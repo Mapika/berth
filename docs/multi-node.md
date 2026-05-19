@@ -514,10 +514,70 @@ and renders inline SVG sparklines on each node card.
 - The leader's in-flight counter increments for every request the
   proxy dispatches, including those routed to remote nodes. The local
   sample therefore over-counts when remote deploys are active. Per-node
-  attribution is part of the smart-routing plan.
+  attribution is part of the smart-routing follow-up.
 - Remote agents currently report empty deployment lists — instrumenting
   the agent's `_run_http_stream` dispatch path to populate in-flight +
   latency is a small follow-up.
+
+## Routing & resilience
+
+Multi-deployment selection is driven by a load-aware scorer
+(`src/serve_engine/routing/scorer.py`). For a given (base, adapter)
+target, the proxy:
+
+1. Collects every ready deployment as a candidate.
+2. For adapter requests, applies the existing tier filter
+   (already-loaded > free-slot > needs-evict). Only the best tier is
+   scored — we don't mix tiers, because that would hide cold-load
+   latency behind a fast idle node.
+3. Calls the scorer with per-node `NodeSignals` derived from the
+   metrics aggregator (mem free, in-flight, p95 latency).
+
+### Default scorer
+
+Hard memory filter then lexicographic rank by:
+
+1. `affinity_hit` (1 if the leader's affinity map points at this node).
+2. `-in_flight` (less loaded first).
+3. `-p95_latency_ms` (faster recent performance first).
+
+Explicit tiers rather than weighted floats so it's debuggable. A node
+with no aggregator entry yet (just-enrolled) is kept as a candidate but
+ranked last — it can't be filtered for memory without evidence, and
+preferring a known-fit known-fast node is the right bias.
+
+### Affinity
+
+`RoutingAffinity` is a bounded LRU `affinity_key → node_id` map. The
+key precedence is `X-Session-Id` > `X-Conversation-Id` > the API key.
+On every successful dispatch the proxy records the chosen node;
+subsequent requests with the same key get a `affinity_hit=1` boost,
+which keeps a conversation pinned to whichever node holds its KV
+cache. Best-effort: lost on process restart, cleared per-node when a
+node transitions to `unreachable`.
+
+### Node-loss audit
+
+When the health watcher demotes a node to `unreachable`, it emits a
+`node_loss_audit` warning with the node id and label, and clears the
+affinity entries pointing at that node. Routing decisions thereafter
+treat the node as gone until it re-handshakes.
+
+### Pending follow-ups
+
+- **Pre-first-byte retry across distinct nodes.** The `dispatch_with_retry`
+  helper (`src/serve_engine/daemon/retry_dispatcher.py`) and the
+  pre-first-byte classifier (`src/serve_engine/daemon/dispatch_errors.py`)
+  are landed and unit-tested. Wiring them into the proxy's dispatch
+  site requires carving the existing remote/local branching out of
+  `openai_proxy.py` into a dedicated `daemon/dispatch.py` — a focused
+  refactor scheduled as a separate change.
+- **SSE backpressure.** A bounded `asyncio.Queue` between the engine
+  reader and client writer so a slow consumer pauses generation. Same
+  proxy file; lands with the dispatch carve.
+- **Mid-stream failover** is explicitly out of scope. A node dying
+  mid-generation propagates the error; KV-cache transfer is not on the
+  roadmap.
 
 ## Roadmap
 
