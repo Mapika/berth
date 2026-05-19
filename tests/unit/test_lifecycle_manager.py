@@ -221,13 +221,8 @@ def test_load_marks_failed_on_unhealthy(conn, monkeypatch, tmp_path, topo_one_gp
 
 def test_reconcile_marks_orphan_failed(conn, monkeypatch, tmp_path, topo_one_gpu):
     """A ready row whose container no longer exists must be marked failed."""
-    from docker.errors import NotFound
     docker_client = MagicMock()
-
-    # Make containers.get raise NotFound for our orphan
-    inner_client = MagicMock()
-    inner_client.containers.get.side_effect = NotFound("gone")
-    docker_client._client = inner_client
+    docker_client.container_status.return_value = None  # container gone
 
     mgr = LifecycleManager(
         conn=conn, docker_client=docker_client,
@@ -256,11 +251,7 @@ def test_reconcile_marks_orphan_failed(conn, monkeypatch, tmp_path, topo_one_gpu
 
 def test_reconcile_keeps_running_container(conn, monkeypatch, tmp_path, topo_one_gpu):
     docker_client = MagicMock()
-    inner_client = MagicMock()
-    fake_container = MagicMock()
-    fake_container.status = "running"
-    inner_client.containers.get.return_value = fake_container
-    docker_client._client = inner_client
+    docker_client.container_status.return_value = "running"
 
     mgr = LifecycleManager(
         conn=conn, docker_client=docker_client,
@@ -321,11 +312,7 @@ def test_reconcile_fails_loading_container_that_never_becomes_healthy(
     conn, monkeypatch, tmp_path, topo_one_gpu,
 ):
     docker_client = MagicMock()
-    inner_client = MagicMock()
-    fake_container = MagicMock()
-    fake_container.status = "running"
-    inner_client.containers.get.return_value = fake_container
-    docker_client._client = inner_client
+    docker_client.container_status.return_value = "running"
     monkeypatch.setattr(
         "serve_engine.lifecycle.manager.wait_healthy",
         AsyncMock(return_value=False),

@@ -92,6 +92,17 @@ class DockerClient:
         if remove:
             c.remove()
 
+    def container_status(self, container_id: str) -> str | None:
+        """Return the container's status string ("running", "exited",
+        "created", ...) or None if it no longer exists. Used by
+        reconcile to detect orphaned rows without reaching into
+        `self._client` directly."""
+        try:
+            c = self._client.containers.get(container_id)
+        except NotFound:
+            return None
+        return c.status
+
     def container_image_id(self, container_id: str) -> str | None:
         """Return the content-addressable id (`sha256:...`) of the image the
         container was started from. The docker SDK exposes this on

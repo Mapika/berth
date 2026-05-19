@@ -594,10 +594,8 @@ class LifecycleManager:
                         last_error=f"daemon found stale {d.status!r} row without container",
                     )
                     continue
-                try:
-                    container = self._docker._client.containers.get(d.container_id)
-                    status = container.status
-                except Exception:
+                status = self._docker.container_status(d.container_id)
+                if status is None:
                     log.warning(
                         "reconcile: deployment %s container %s missing; marking failed",
                         d.id, d.container_id,
