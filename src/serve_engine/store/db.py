@@ -175,7 +175,6 @@ def init_schema(conn: sqlite3.Connection) -> None:
     ship, it's older than the DB. We refuse to start rather than
     operate against an unknown future schema.
     """
-    _ensure_migrations_table(conn)
     mig_dir = files("serve_engine.store.migrations")
     on_disk = {
         entry.name for entry in mig_dir.iterdir()
@@ -194,6 +193,7 @@ def init_schema(conn: sqlite3.Connection) -> None:
         lock_handle = lock_path.open("w")
         fcntl.flock(lock_handle, fcntl.LOCK_EX)
     try:
+        _ensure_migrations_table(conn)
         # Forward-version safety: applied filenames the binary doesn't
         # ship. Check this inside the lock so a racing upgrade doesn't
         # invalidate our view between read and apply.

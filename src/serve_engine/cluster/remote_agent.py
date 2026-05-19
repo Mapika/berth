@@ -155,10 +155,11 @@ class RemoteAgentLink:
             ))
             while True:
                 chunk = await q.get()
+                if chunk.eof:
+                    completed = True
                 if chunk.body_b64:
                     yield base64.b64decode(chunk.body_b64)
                 if chunk.eof:
-                    completed = True
                     break
         finally:
             self._log_streams.pop(stream_id, None)
@@ -214,6 +215,8 @@ class RemoteAgentLink:
             first = True
             while True:
                 chunk = await q.get()
+                if chunk.eof:
+                    completed = True
                 body_bytes = (
                     base64.b64decode(chunk.body_b64) if chunk.body_b64 else b""
                 )
@@ -225,7 +228,6 @@ class RemoteAgentLink:
                 )
                 first = False
                 if chunk.eof:
-                    completed = True
                     break
         finally:
             self._streams.pop(stream_id, None)

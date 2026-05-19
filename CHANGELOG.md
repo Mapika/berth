@@ -5,6 +5,7 @@
 - Allowed daemon startup on hosts where NVML is installed but no NVIDIA driver
   is available, reporting an empty GPU topology instead of crashing.
 - Stopped sending remote-agent HTTP/log cancel frames after a clean EOF.
+- Moved first-time migration table creation under the migration file lock.
 
 ## 0.2.1 - 2026-05-19
 

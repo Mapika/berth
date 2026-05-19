@@ -172,11 +172,12 @@ async def test_proxy_request_does_not_cancel_after_clean_eof():
     run_task = asyncio.create_task(link.run())
 
     async def consumer():
-        async for _ in link.proxy_request(
+        async for chunk in link.proxy_request(
             container_id="cid", method="GET", path="/v1/models",
             headers={}, body=b"",
         ):
-            pass
+            if chunk.eof:
+                break
 
     consumer_task = asyncio.create_task(consumer())
 
