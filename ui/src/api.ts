@@ -167,7 +167,39 @@ export const api = {
   removeNode: (id: number) => jfetch<void>('DELETE', `/admin/nodes/${id}`),
   getClusterInfo: () => jfetch<ClusterInfo>('GET', '/admin/cluster'),
   getConfig: () => jfetch<DaemonConfig>('GET', '/admin/config'),
+  getMetricsSnapshot: () =>
+    jfetch<MetricsSnapshot>('GET', '/admin/metrics/snapshot'),
 }
+
+export type MetricsSnapshotGpu = {
+  index: number
+  mem_used_mb: number
+  mem_total_mb: number
+  util_pct: number
+}
+
+export type MetricsSnapshotDeployment = {
+  deployment_id: number
+  model_id: string
+  in_flight: number
+  latency_p50_ms: number
+  latency_p95_ms: number
+  errors_last_window: number
+  requests_last_window: number
+}
+
+export type MetricsSnapshotNode = {
+  node_id: number
+  label: string
+  gpus: MetricsSnapshotGpu[]
+  deployments: MetricsSnapshotDeployment[]
+  series: {
+    gpu_util_pct: Record<string, number[]>
+    request_rate: number[]
+  }
+}
+
+export type MetricsSnapshot = { nodes: MetricsSnapshotNode[] }
 
 // Cluster types.
 

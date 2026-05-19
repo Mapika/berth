@@ -5,6 +5,7 @@ import {
   enrollmentUri,
   type ClusterInfo,
   type EnrollResponse,
+  type MetricsSnapshotNode,
   type Node,
   type NodeGpu,
 } from '../api'
@@ -244,10 +245,12 @@ function NodeCard({
   node,
   selected,
   onSelect,
+  liveMetrics,
 }: {
   node: Node
   selected: boolean
   onSelect: () => void
+  liveMetrics?: MetricsSnapshotNode
 }) {
   const isLocal = node.label === 'local'
   return (
@@ -287,6 +290,21 @@ function NodeCard({
         <div className="text-mute tracking-wider">heartbeat</div>
         <div className="text-right text-dim">{fmtRelative(node.last_seen)}</div>
       </div>
+
+      {liveMetrics && (
+        <div className="mt-4 pt-3 border-t border-rule/40 space-y-1.5 text-[10px]">
+          {Object.entries(liveMetrics.series.gpu_util_pct).map(([gpu, vals]) => (
+            <div key={gpu} className="flex items-center justify-between">
+              <span className="text-mute tracking-wider">{gpu} util</span>
+              <Sparkline values={vals} />
+            </div>
+          ))}
+          <div className="flex items-center justify-between">
+            <span className="text-mute tracking-wider">req/s</span>
+            <Sparkline values={liveMetrics.series.request_rate} />
+          </div>
+        </div>
+      )}
     </button>
   )
 }
@@ -683,12 +701,35 @@ function TransportSummary({ info }: { info: ClusterInfo }) {
 // Page
 // ---------------------------------------------------------------------------
 
+function Sparkline({
+  values, width = 80, height = 20,
+}: { values: number[]; width?: number; height?: number }) {
+  if (values.length === 0) {
+    return <span style={{ color: '#888' }}>—</span>
+  }
+  const max = Math.max(1, ...values)
+  const step = width / Math.max(1, values.length - 1)
+  const points = values
+    .map((v, i) => `${(i * step).toFixed(1)},${(height - (v / max) * height).toFixed(1)}`)
+    .join(' ')
+  return (
+    <svg width={width} height={height} aria-label="sparkline">
+      <polyline fill="none" stroke="currentColor" strokeWidth="1" points={points} />
+    </svg>
+  )
+}
+
 export default function Cluster() {
   const qc = useQueryClient()
   const nodesQ = useQuery({
     queryKey: ['nodes'],
     queryFn: api.listNodes,
     refetchInterval: 3000,
+  })
+  const metricsQ = useQuery({
+    queryKey: ['metrics-snapshot'],
+    queryFn: api.getMetricsSnapshot,
+    refetchInterval: 5000,
   })
   const clusterQ = useQuery({
     queryKey: ['cluster-info'],
@@ -801,6 +842,7 @@ export default function Cluster() {
               node={n}
               selected={selectedId === n.id}
               onSelect={() => setSelectedId(n.id)}
+              liveMetrics={metricsQ.data?.nodes.find(m => m.node_id === n.id)}
             />
           ))}
         </div>
