@@ -96,6 +96,15 @@ def build_apps(
     # Ensure the local-node row exists before anything that reads it.
     ensure_local_node(conn, agent_version=_serve_version)
 
+    # Configure the API-key pepper so /v1/* + /admin/* auth uses HMAC-SHA256
+    # rather than plain SHA-256. The pepper lives at SERVE_DIR/key_pepper
+    # (mode 0600); it's generated on first start. The file must be
+    # backed up alongside db.sqlite — if it's lost, every key falls and
+    # operators must re-mint.
+    from serve_engine import config as _cfg
+    from serve_engine.store import api_keys as _ak_setup
+    _ak_setup.configure_pepper(_cfg.SERVE_DIR / "key_pepper")
+
     # Startup warning: the daemon bypasses auth entirely when no API
     # keys exist (a convenience for first-run via the local UDS). If the
     # daemon also exposes a public listener, an operator who walked

@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import hashlib
+import hmac
 import json
 import secrets
 import sqlite3
 from dataclasses import dataclass
+from pathlib import Path
 
 
 @dataclass(frozen=True)
@@ -26,8 +28,46 @@ class ApiKey:
     usage_event_id: int | None = None
 
 
+# Module-level pepper state. configure_pepper() loads (or mints) a 32-byte
+# secret from disk at daemon startup; from then on _hash uses HMAC-SHA256
+# with that pepper rather than plain SHA-256. Tests that don't configure
+# a pepper stay on legacy SHA-256 — keeps the suite running unchanged.
+_PEPPER_PATH: Path | None = None
+_PEPPER_CACHED: bytes | None = None
+
+
+def configure_pepper(path: Path) -> None:
+    """Point the key-hash pepper at a file. Mints a fresh 32-byte secret
+    at the path (mode 0600) on first call if absent. Idempotent."""
+    global _PEPPER_PATH, _PEPPER_CACHED
+    _PEPPER_PATH = path
+    _PEPPER_CACHED = None  # force reload via _get_pepper on next call
+
+
+def _get_pepper() -> bytes:
+    """Returns the pepper bytes, loading or creating the file lazily.
+    Returns empty bytes when no pepper is configured (legacy mode)."""
+    global _PEPPER_CACHED
+    if _PEPPER_CACHED is not None:
+        return _PEPPER_CACHED
+    if _PEPPER_PATH is None:
+        return b""
+    if not _PEPPER_PATH.exists():
+        _PEPPER_PATH.parent.mkdir(parents=True, exist_ok=True)
+        _PEPPER_PATH.write_bytes(secrets.token_bytes(32))
+        try:
+            _PEPPER_PATH.chmod(0o600)
+        except OSError:
+            pass  # best-effort on platforms without POSIX modes
+    _PEPPER_CACHED = _PEPPER_PATH.read_bytes()
+    return _PEPPER_CACHED
+
+
 def _hash(secret: str) -> str:
-    return hashlib.sha256(secret.encode()).hexdigest()
+    pepper = _get_pepper()
+    if not pepper:
+        return hashlib.sha256(secret.encode()).hexdigest()
+    return hmac.new(pepper, secret.encode(), hashlib.sha256).hexdigest()
 
 
 def _decode_allowed_models(raw: object) -> list[str] | None:
