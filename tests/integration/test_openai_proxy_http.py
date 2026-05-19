@@ -13,11 +13,11 @@ import httpx
 import pytest
 import uvicorn
 
-from serve_engine.backends.vllm import VLLMBackend
-from serve_engine.daemon.app import build_app
-from serve_engine.lifecycle.docker_client import ContainerHandle
-from serve_engine.lifecycle.topology import GPUInfo, Topology
-from serve_engine.store import db
+from berth.backends.vllm import VLLMBackend
+from berth.daemon.app import build_app
+from berth.lifecycle.docker_client import ContainerHandle
+from berth.lifecycle.topology import GPUInfo, Topology
+from berth.store import db
 
 
 def _free_port() -> int:
@@ -90,15 +90,15 @@ async def test_proxy_round_trip_over_real_http(tmp_path, monkeypatch):
     # points at engine_port. That lets the proxy resolve a target without
     # needing Docker or HF.
     monkeypatch.setattr(
-        "serve_engine.lifecycle.manager.wait_healthy",
+        "berth.lifecycle.manager.wait_healthy",
         AsyncMock(return_value=True),
     )
     monkeypatch.setattr(
-        "serve_engine.lifecycle.manager.download_model_async",
+        "berth.lifecycle.manager.download_model_async",
         AsyncMock(return_value=str(tmp_path / "w")),
     )
     monkeypatch.setattr(
-        "serve_engine.lifecycle.manager.estimate_vram_mb",
+        "berth.lifecycle.manager.estimate_vram_mb",
         lambda inp: 20_000,
     )
     (tmp_path / "w").mkdir(exist_ok=True)

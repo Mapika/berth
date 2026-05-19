@@ -2,9 +2,9 @@ import httpx
 import pytest
 from fastapi import Depends, FastAPI
 
-from serve_engine.auth import tiers
-from serve_engine.auth.middleware import require_auth_dep
-from serve_engine.store import api_keys, db, key_usage
+from berth.auth import tiers
+from berth.auth.middleware import require_auth_dep
+from berth.store import api_keys, db, key_usage
 
 
 @pytest.fixture

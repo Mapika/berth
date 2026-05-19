@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from serve_engine.cluster import metrics_collector as mc
+from berth.cluster import metrics_collector as mc
 
 
 def test_in_flight_counter_starts_at_zero():
@@ -49,7 +49,7 @@ def test_latency_recorder_resets_after_summarize():
 
 
 def test_build_snapshot_assembles_all_three_sections(monkeypatch):
-    from serve_engine.observability.gpu_stats import GPUSnapshot
+    from berth.observability.gpu_stats import GPUSnapshot
 
     monkeypatch.setattr(
         mc, "read_gpu_stats",

@@ -3,18 +3,18 @@ import json
 
 import pytest
 
-from serve_engine.daemon.app import build_app
-from serve_engine.observability.events import Event
-from serve_engine.store import db
+from berth.daemon.app import build_app
+from berth.observability.events import Event
+from berth.store import db
 
 
 @pytest.fixture
 def app_with_bus(tmp_path):
     from unittest.mock import MagicMock
 
-    from serve_engine.backends.vllm import VLLMBackend
-    from serve_engine.lifecycle.docker_client import ContainerHandle
-    from serve_engine.lifecycle.topology import GPUInfo, Topology
+    from berth.backends.vllm import VLLMBackend
+    from berth.lifecycle.docker_client import ContainerHandle
+    from berth.lifecycle.topology import GPUInfo, Topology
 
     conn = db.connect(tmp_path / "t.db")
     db.init_schema(conn)
@@ -99,7 +99,7 @@ async def test_events_handler_returns_streaming_response(app_with_bus):
 
     from fastapi.responses import StreamingResponse
 
-    from serve_engine.daemon.admin import events
+    from berth.daemon.admin import events
 
     request = MagicMock()
     request.app.state.event_bus = app_with_bus.state.event_bus
@@ -141,9 +141,9 @@ async def test_engine_logs_handler_returns_streaming_response(tmp_path):
 
     from fastapi.responses import StreamingResponse
 
-    from serve_engine.daemon.admin import stream_engine_logs_sse
-    from serve_engine.store import deployments as dep_store
-    from serve_engine.store import models as model_store
+    from berth.daemon.admin import stream_engine_logs_sse
+    from berth.store import deployments as dep_store
+    from berth.store import models as model_store
 
     conn = db.connect(tmp_path / "t.db")
     db.init_schema(conn)

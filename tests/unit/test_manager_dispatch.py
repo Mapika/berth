@@ -2,9 +2,9 @@ from __future__ import annotations
 
 import pytest
 
-from serve_engine.cluster.agent_link import StartedContainer
-from serve_engine.cluster.agent_registry import AgentRegistry
-from serve_engine.lifecycle.manager import _dispatch_start, _dispatch_stop
+from berth.cluster.agent_link import StartedContainer
+from berth.cluster.agent_registry import AgentRegistry
+from berth.lifecycle.manager import _dispatch_start, _dispatch_stop
 
 
 class _FakeLink:

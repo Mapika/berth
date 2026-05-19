@@ -5,10 +5,10 @@ from unittest.mock import AsyncMock, MagicMock
 import httpx
 import pytest
 
-from serve_engine.backends.vllm import VLLMBackend
-from serve_engine.daemon.app import build_app
-from serve_engine.lifecycle.docker_client import ContainerHandle
-from serve_engine.store import db
+from berth.backends.vllm import VLLMBackend
+from berth.daemon.app import build_app
+from berth.lifecycle.docker_client import ContainerHandle
+from berth.store import db
 
 
 class FakeEngineApp:
@@ -43,7 +43,7 @@ class FakeEngineApp:
 
 @pytest.fixture
 def app_with_active_deployment(tmp_path, monkeypatch):
-    from serve_engine.lifecycle.topology import GPUInfo, Topology
+    from berth.lifecycle.topology import GPUInfo, Topology
 
     fake_engine = FakeEngineApp([b"data: hello\n\n", b"data: [DONE]\n\n"])
 
@@ -53,20 +53,20 @@ def app_with_active_deployment(tmp_path, monkeypatch):
             base_url="http://engine",
         )
     monkeypatch.setattr(
-        "serve_engine.daemon.openai_proxy.make_engine_client",
+        "berth.daemon.openai_proxy.make_engine_client",
         fake_async_client_factory,
     )
 
     monkeypatch.setattr(
-        "serve_engine.lifecycle.manager.wait_healthy",
+        "berth.lifecycle.manager.wait_healthy",
         AsyncMock(return_value=True),
     )
     monkeypatch.setattr(
-        "serve_engine.lifecycle.manager.download_model_async",
+        "berth.lifecycle.manager.download_model_async",
         AsyncMock(return_value=str(tmp_path / "weights")),
     )
     monkeypatch.setattr(
-        "serve_engine.lifecycle.manager.estimate_vram_mb",
+        "berth.lifecycle.manager.estimate_vram_mb",
         lambda inp: 20_000,
     )
     (tmp_path / "weights").mkdir(exist_ok=True)
@@ -186,9 +186,9 @@ async def test_proxy_forwards_upstream_500(tmp_path, monkeypatch):
     """Engine returns 500 -> proxy must return 500 (not silently 200)."""
     from unittest.mock import AsyncMock, MagicMock
 
-    from serve_engine.backends.vllm import VLLMBackend
-    from serve_engine.lifecycle.docker_client import ContainerHandle
-    from serve_engine.lifecycle.topology import GPUInfo, Topology
+    from berth.backends.vllm import VLLMBackend
+    from berth.lifecycle.docker_client import ContainerHandle
+    from berth.lifecycle.topology import GPUInfo, Topology
 
     fake_engine = FakeEngineApp([b'{"error":"cuda oom"}'], status_code=500)
     def fake_async_client_factory(base_url):
@@ -197,19 +197,19 @@ async def test_proxy_forwards_upstream_500(tmp_path, monkeypatch):
             base_url="http://engine",
         )
     monkeypatch.setattr(
-        "serve_engine.daemon.openai_proxy.make_engine_client",
+        "berth.daemon.openai_proxy.make_engine_client",
         fake_async_client_factory,
     )
     monkeypatch.setattr(
-        "serve_engine.lifecycle.manager.wait_healthy",
+        "berth.lifecycle.manager.wait_healthy",
         AsyncMock(return_value=True),
     )
     monkeypatch.setattr(
-        "serve_engine.lifecycle.manager.download_model_async",
+        "berth.lifecycle.manager.download_model_async",
         AsyncMock(return_value=str(tmp_path / "w")),
     )
     monkeypatch.setattr(
-        "serve_engine.lifecycle.manager.estimate_vram_mb",
+        "berth.lifecycle.manager.estimate_vram_mb",
         lambda inp: 20_000,
     )
     (tmp_path / "w").mkdir(exist_ok=True)
@@ -273,7 +273,7 @@ async def test_proxy_records_in_flight_and_latency(app_with_active_deployment):
             assert r.status_code == 200
             _ = [chunk async for chunk in r.aiter_bytes()]
 
-    from serve_engine.store import deployments as _dep
+    from berth.store import deployments as _dep
     dep = _dep.find_ready_by_model_name(app.state.conn, "llama-1b")
     assert dep is not None
     # In-flight released on completion.

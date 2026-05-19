@@ -5,8 +5,8 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from serve_engine.daemon.dispatch import open_upstream_stream
-from serve_engine.daemon.dispatch_errors import NodeUnreachableError
+from berth.daemon.dispatch import open_upstream_stream
+from berth.daemon.dispatch_errors import NodeUnreachableError
 
 
 @dataclass
@@ -74,7 +74,7 @@ async def test_local_decision_when_node_id_matches_local():
                   container_address="127.0.0.1", container_port=8000)
     # Stub the local-open to avoid an httpx round-trip. Return a 200
     # UpstreamOpen so the wrapper's status check passes through.
-    from serve_engine.daemon import dispatch
+    from berth.daemon import dispatch
     async def noop_body():
         if False:
             yield b""
@@ -100,8 +100,8 @@ async def test_local_decision_when_node_id_matches_local():
 async def test_retryable_5xx_status_raises_upstream_http_error():
     """A pre-first-byte 503 from the upstream must surface as
     UpstreamHttpError so dispatch_with_retry can fall through."""
-    from serve_engine.daemon import dispatch
-    from serve_engine.daemon.dispatch_errors import UpstreamHttpError
+    from berth.daemon import dispatch
+    from berth.daemon.dispatch_errors import UpstreamHttpError
 
     async def empty_body():
         if False:

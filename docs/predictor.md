@@ -22,7 +22,7 @@ Pre-warming is advisory. A real request always wins:
 
 ## The three rules
 
-All three live in `src/serve_engine/lifecycle/predictor.py` and read only
+All three live in `src/berth/lifecycle/predictor.py` and read only
 from `usage_events`.
 
 ### `time_of_day`
@@ -49,7 +49,7 @@ max.
 ## `~/.serve/predictor.yaml`
 
 Fields and defaults, from `PredictorConfig` in
-`src/serve_engine/lifecycle/predictor.py`:
+`src/berth/lifecycle/predictor.py`:
 
 | Field | Default | Meaning |
 |---|---|---|

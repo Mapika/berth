@@ -2,9 +2,9 @@ from __future__ import annotations
 
 import pytest
 
-from serve_engine.cluster.agent_link import ProxyResponseChunk
-from serve_engine.cluster.agent_registry import AgentRegistry
-from serve_engine.daemon.openai_proxy import _proxy_via_link
+from berth.cluster.agent_link import ProxyResponseChunk
+from berth.cluster.agent_registry import AgentRegistry
+from berth.daemon.openai_proxy import _proxy_via_link
 
 
 class _RecordingLink:

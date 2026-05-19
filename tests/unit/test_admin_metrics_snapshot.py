@@ -2,8 +2,8 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock
 
-from serve_engine.daemon.admin import render_metrics_snapshot
-from serve_engine.daemon.metrics_aggregator import MetricsAggregator
+from berth.daemon.admin import render_metrics_snapshot
+from berth.daemon.metrics_aggregator import MetricsAggregator
 
 
 def _sample(util=42, in_flight=3):

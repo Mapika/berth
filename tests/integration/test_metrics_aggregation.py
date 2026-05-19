@@ -2,11 +2,11 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock
 
-from serve_engine.cluster.leader_hub import LeaderHub
-from serve_engine.cluster.protocol import Heartbeat
-from serve_engine.daemon.admin import render_metrics_snapshot
-from serve_engine.daemon.metrics_aggregator import MetricsAggregator
-from serve_engine.observability.metrics import format_cluster_metrics
+from berth.cluster.leader_hub import LeaderHub
+from berth.cluster.protocol import Heartbeat
+from berth.daemon.admin import render_metrics_snapshot
+from berth.daemon.metrics_aggregator import MetricsAggregator
+from berth.observability.metrics import format_cluster_metrics
 
 
 def _sample(util):

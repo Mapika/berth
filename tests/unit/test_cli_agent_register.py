@@ -4,7 +4,7 @@ import httpx
 import yaml
 from typer.testing import CliRunner
 
-from serve_engine.cli import app
+from berth.cli import app
 
 
 def test_register_writes_config(tmp_path, monkeypatch):

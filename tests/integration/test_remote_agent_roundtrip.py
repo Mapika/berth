@@ -19,10 +19,10 @@ from unittest.mock import MagicMock
 import httpx
 import pytest
 
-from serve_engine.backends.vllm import VLLMBackend
-from serve_engine.cluster.agent_registry import AgentRegistry
-from serve_engine.cluster.leader_hub import _WSAdapter  # noqa: F401 — used implicitly
-from serve_engine.cluster.protocol import (
+from berth.backends.vllm import VLLMBackend
+from berth.cluster.agent_registry import AgentRegistry
+from berth.cluster.leader_hub import _WSAdapter  # noqa: F401 — used implicitly
+from berth.cluster.protocol import (
     HttpChunk,
     HttpRequest,
     OpResult,
@@ -30,12 +30,12 @@ from serve_engine.cluster.protocol import (
     decode_frame,
     encode_frame,
 )
-from serve_engine.cluster.remote_agent import RemoteAgentLink
-from serve_engine.daemon.app import build_app
-from serve_engine.daemon.openai_proxy import _proxy_via_link
-from serve_engine.lifecycle.docker_client import ContainerHandle
-from serve_engine.store import db
-from serve_engine.store import nodes as nodes_store
+from berth.cluster.remote_agent import RemoteAgentLink
+from berth.daemon.app import build_app
+from berth.daemon.openai_proxy import _proxy_via_link
+from berth.lifecycle.docker_client import ContainerHandle
+from berth.store import db
+from berth.store import nodes as nodes_store
 
 
 class _FakeWS:
@@ -63,7 +63,7 @@ class _FakeWS:
 @pytest.mark.asyncio
 async def test_enrollment_then_router_routes_through_remote_link(tmp_path):
     """The slice end-to-end (control plane only — WS transport via fake)."""
-    from serve_engine.lifecycle.topology import GPUInfo, Topology
+    from berth.lifecycle.topology import GPUInfo, Topology
 
     docker_client = MagicMock()
     docker_client.run.return_value = ContainerHandle(

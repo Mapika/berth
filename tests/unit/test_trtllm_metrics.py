@@ -5,8 +5,8 @@ import json
 
 import pytest
 
-from serve_engine.observability.metrics import gather_engine_metrics
-from serve_engine.observability.trtllm_metrics import (
+from berth.observability.metrics import gather_engine_metrics
+from berth.observability.trtllm_metrics import (
     translate_many,
     translate_trtllm_metrics,
 )
@@ -174,7 +174,7 @@ def test_gather_engine_metrics_translates_json_passes_prometheus(monkeypatch):
         return prom_body if "vllm" in url else json_body
 
     monkeypatch.setattr(
-        "serve_engine.observability.metrics.fetch_engine_metrics", fake_fetch,
+        "berth.observability.metrics.fetch_engine_metrics", fake_fetch,
     )
     text = asyncio.run(gather_engine_metrics([
         (1, "http://vllm-host:8000"),
@@ -197,7 +197,7 @@ def test_gather_engine_metrics_groups_multiple_trtllm_under_one_header(monkeypat
         return body
 
     monkeypatch.setattr(
-        "serve_engine.observability.metrics.fetch_engine_metrics", fake_fetch,
+        "berth.observability.metrics.fetch_engine_metrics", fake_fetch,
     )
     text = asyncio.run(gather_engine_metrics([
         (10, "http://a"),
@@ -218,7 +218,7 @@ def test_gather_engine_metrics_empty_input_returns_empty():
 def test_looks_like_json_handles_whitespace_prefix(body, monkeypatch):
     """Aggregator must classify bodies that begin with whitespace correctly,
     or vLLM responses (which start with `#`) and TRT-LLM (`[`) get swapped."""
-    from serve_engine.observability.metrics import _looks_like_json
+    from berth.observability.metrics import _looks_like_json
     assert _looks_like_json(body)
     assert not _looks_like_json("# HELP foo bar\n")
     assert not _looks_like_json("foo_total 1\n")

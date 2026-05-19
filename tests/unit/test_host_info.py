@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from serve_engine.cluster import host_info as hi
-from serve_engine.cluster.host_info import HostInfo, collect_host_info
+from berth.cluster import host_info as hi
+from berth.cluster.host_info import HostInfo, collect_host_info
 
 
 def test_collect_host_info_returns_populated_struct(monkeypatch):

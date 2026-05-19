@@ -13,19 +13,19 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from serve_engine.backends.vllm import VLLMBackend
-from serve_engine.cluster.agent_link import StartedContainer
-from serve_engine.cluster.agent_registry import AgentRegistry
-from serve_engine.cluster.local_bootstrap import ensure_local_node
-from serve_engine.lifecycle.manager import (
+from berth.backends.vllm import VLLMBackend
+from berth.cluster.agent_link import StartedContainer
+from berth.cluster.agent_registry import AgentRegistry
+from berth.cluster.local_bootstrap import ensure_local_node
+from berth.lifecycle.manager import (
     LifecycleManager,
     _json_safe_docker_kwargs,
 )
-from serve_engine.lifecycle.plan import DeploymentPlan
-from serve_engine.lifecycle.topology import GPUInfo, Topology
-from serve_engine.store import db
-from serve_engine.store import deployments as dep_store
-from serve_engine.store import nodes as nodes_store
+from berth.lifecycle.plan import DeploymentPlan
+from berth.lifecycle.topology import GPUInfo, Topology
+from berth.store import db
+from berth.store import deployments as dep_store
+from berth.store import nodes as nodes_store
 
 
 class _FakeLink:
@@ -108,7 +108,7 @@ async def test_remote_dispatch_routes_via_agentlink(tmp_path, monkeypatch):
         return str(fake_path)
 
     monkeypatch.setattr(
-        "serve_engine.lifecycle.manager.download_model_async", _fake_download,
+        "berth.lifecycle.manager.download_model_async", _fake_download,
     )
 
     topology = Topology(
@@ -198,7 +198,7 @@ def test_json_safe_docker_kwargs_round_trip():
     """The Ulimit-bearing kwargs must encode + decode cleanly."""
     from docker.types import Ulimit
 
-    from serve_engine.cluster.agent_client import _rehydrate_docker_kwargs
+    from berth.cluster.agent_client import _rehydrate_docker_kwargs
 
     original = {
         "device_requests": [
@@ -253,11 +253,11 @@ async def test_remote_dispatch_marks_failed_when_probe_never_succeeds(
     """If the engine never returns 200 to the health probe inside the
     timeout, the deployment row is marked 'failed' and load() raises."""
     monkeypatch.setattr(
-        "serve_engine.lifecycle.manager.download_model_async",
+        "berth.lifecycle.manager.download_model_async",
         AsyncMock(return_value=str(tmp_path / "w")),
     )
     monkeypatch.setattr(
-        "serve_engine.lifecycle.manager.estimate_vram_mb", lambda _: 8000,
+        "berth.lifecycle.manager.estimate_vram_mb", lambda _: 8000,
     )
     (tmp_path / "w").mkdir(exist_ok=True)
     conn = _bootstrap_conn(tmp_path)
@@ -293,7 +293,7 @@ async def test_remote_dispatch_marks_failed_when_probe_never_succeeds(
         await mgr.load(plan)
 
     # Row exists and is marked failed.
-    from serve_engine.store import deployments as dep_store
+    from berth.store import deployments as dep_store
     failed = [d for d in dep_store.list_all(conn) if d.status == "failed"]
     assert failed, "expected a failed deployment row after probe timeout"
 

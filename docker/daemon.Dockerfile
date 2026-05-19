@@ -30,4 +30,4 @@ RUN uv pip install --system --no-cache .
 EXPOSE 11500
 VOLUME ["/root/.serve"]
 
-CMD ["python3", "-m", "serve_engine.daemon", "--host", "0.0.0.0", "--port", "11500"]
+CMD ["python3", "-m", "berth.daemon", "--host", "0.0.0.0", "--port", "11500"]

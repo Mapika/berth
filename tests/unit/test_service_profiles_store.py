@@ -1,7 +1,7 @@
 import pytest
 
-from serve_engine.store import db
-from serve_engine.store import service_profiles as profile_store
+from berth.store import db
+from berth.store import service_profiles as profile_store
 
 
 def _fresh(tmp_path):

@@ -13,19 +13,19 @@ from datetime import UTC, datetime, timedelta
 import httpx
 import pytest
 
-from serve_engine.backends.vllm import VLLMBackend
-from serve_engine.lifecycle.predictor import (
+from berth.backends.vllm import VLLMBackend
+from berth.lifecycle.predictor import (
     KeyAffinityConfig,
     PredictorConfig,
     RuleConfig,
     SequencingConfig,
 )
-from serve_engine.lifecycle.predictor_task import PredictorTask
-from serve_engine.store import adapters as ad_store
-from serve_engine.store import db
-from serve_engine.store import deployment_adapters as da_store
-from serve_engine.store import deployments as dep_store
-from serve_engine.store import models as model_store
+from berth.lifecycle.predictor_task import PredictorTask
+from berth.store import adapters as ad_store
+from berth.store import db
+from berth.store import deployment_adapters as da_store
+from berth.store import deployments as dep_store
+from berth.store import models as model_store
 
 
 def _fresh(tmp_path):
@@ -347,8 +347,8 @@ async def test_tick_disabled_predictor_is_noop(tmp_path, monkeypatch):
 
 from unittest.mock import AsyncMock  # noqa: E402
 
-from serve_engine.lifecycle.plan import DeploymentPlan  # noqa: E402
-from serve_engine.store import deployment_plans as plan_store  # noqa: E402
+from berth.lifecycle.plan import DeploymentPlan  # noqa: E402
+from berth.store import deployment_plans as plan_store  # noqa: E402
 
 
 def _seed_plan(conn, base_name: str, *, max_loras: int = 4) -> int:

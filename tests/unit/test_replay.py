@@ -17,9 +17,9 @@ from pathlib import Path
 
 from typer.testing import CliRunner
 
-from serve_engine import config
-from serve_engine.cli import app
-from serve_engine.lifecycle.replay import ReplayEvent, simulate_lru
+from berth import config
+from berth.cli import app
+from berth.lifecycle.replay import ReplayEvent, simulate_lru
 
 
 def _ev(ts, base, adapter, cold=False):

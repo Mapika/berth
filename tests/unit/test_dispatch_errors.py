@@ -3,7 +3,7 @@ from __future__ import annotations
 import httpx
 import pytest
 
-from serve_engine.daemon.dispatch_errors import (
+from berth.daemon.dispatch_errors import (
     NodeUnreachableError,
     RetryableError,
     classify_pre_first_byte,

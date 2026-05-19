@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from serve_engine.cluster.enrollment import EnrollmentTokens
+from berth.cluster.enrollment import EnrollmentTokens
 
 
 def test_mint_and_consume_once():

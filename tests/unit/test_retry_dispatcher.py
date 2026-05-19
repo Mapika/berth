@@ -4,8 +4,8 @@ from dataclasses import dataclass
 
 import pytest
 
-from serve_engine.daemon.dispatch_errors import NodeUnreachableError
-from serve_engine.daemon.retry_dispatcher import dispatch_with_retry
+from berth.daemon.dispatch_errors import NodeUnreachableError
+from berth.daemon.retry_dispatcher import dispatch_with_retry
 
 
 @dataclass

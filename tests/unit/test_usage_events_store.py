@@ -6,8 +6,8 @@ data layer: insert, query, GC.
 """
 from datetime import UTC, datetime, timedelta
 
-from serve_engine.store import db
-from serve_engine.store import usage_events as ue
+from berth.store import db
+from berth.store import usage_events as ue
 
 
 def _fresh(tmp_path):
@@ -78,8 +78,8 @@ def test_record_with_adapter(tmp_path):
 
 def test_record_with_real_deployment_fk(tmp_path):
     """deployment_id must reference a real deployment row when set."""
-    from serve_engine.store import deployments as dep_store
-    from serve_engine.store import models as model_store
+    from berth.store import deployments as dep_store
+    from berth.store import models as model_store
     conn = _fresh(tmp_path)
     base = model_store.add(conn, name="qwen3-7b", hf_repo="o/qwen")
     dep = dep_store.create(

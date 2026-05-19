@@ -2,8 +2,8 @@ from __future__ import annotations
 
 import pytest
 
-from serve_engine.cli.agent_cmd import parse_enrollment_uri
-from serve_engine.cli.nodes_cmd import build_enrollment_uri
+from berth.cli.agent_cmd import parse_enrollment_uri
+from berth.cli.nodes_cmd import build_enrollment_uri
 
 
 def test_round_trip_simple():

@@ -1,6 +1,6 @@
 import yaml
 
-from serve_engine.backends import manifest as manifest_mod
+from berth.backends import manifest as manifest_mod
 
 
 def test_load_with_override(tmp_path, monkeypatch):

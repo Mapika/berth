@@ -11,7 +11,7 @@ import hmac
 
 import pytest
 
-from serve_engine.store import api_keys
+from berth.store import api_keys
 
 
 @pytest.fixture

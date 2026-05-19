@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "tsc -b && vite build && touch ../src/serve_engine/ui/__init__.py",
+    "build": "tsc -b && vite build && touch ../src/berth/ui/__init__.py",
     "preview": "vite preview"
   },
   "dependencies": {

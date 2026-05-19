@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from serve_engine.store import db
+from berth.store import db
 
 
 def _fresh(tmp_path):

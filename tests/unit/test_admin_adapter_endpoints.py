@@ -9,30 +9,30 @@ from unittest.mock import AsyncMock, MagicMock
 import httpx
 import pytest
 
-from serve_engine.backends.vllm import VLLMBackend
-from serve_engine.daemon.app import build_app
-from serve_engine.lifecycle.docker_client import ContainerHandle
-from serve_engine.store import adapters as ad_store
-from serve_engine.store import db
-from serve_engine.store import deployment_adapters as da_store
-from serve_engine.store import deployments as dep_store
-from serve_engine.store import models as model_store
+from berth.backends.vllm import VLLMBackend
+from berth.daemon.app import build_app
+from berth.lifecycle.docker_client import ContainerHandle
+from berth.store import adapters as ad_store
+from berth.store import db
+from berth.store import deployment_adapters as da_store
+from berth.store import deployments as dep_store
+from berth.store import models as model_store
 
 
 @pytest.fixture
 def app(tmp_path, monkeypatch):
-    from serve_engine.lifecycle.topology import GPUInfo, Topology
+    from berth.lifecycle.topology import GPUInfo, Topology
 
     monkeypatch.setattr(
-        "serve_engine.lifecycle.manager.wait_healthy",
+        "berth.lifecycle.manager.wait_healthy",
         AsyncMock(return_value=True),
     )
     monkeypatch.setattr(
-        "serve_engine.lifecycle.manager.download_model_async",
+        "berth.lifecycle.manager.download_model_async",
         AsyncMock(return_value=str(tmp_path / "weights")),
     )
     monkeypatch.setattr(
-        "serve_engine.lifecycle.manager.estimate_vram_mb",
+        "berth.lifecycle.manager.estimate_vram_mb",
         lambda inp: 20_000,
     )
     (tmp_path / "weights").mkdir(exist_ok=True)
@@ -471,7 +471,7 @@ async def test_hot_unload_calls_engine_unload(app, monkeypatch, tmp_path):
 @pytest.mark.asyncio
 async def test_hot_load_against_trtllm_returns_409(app, monkeypatch, tmp_path):
     """TRT-LLM doesn't support hot-load; the lifecycle refuses cleanly."""
-    from serve_engine.backends.trtllm import TRTLLMBackend
+    from berth.backends.trtllm import TRTLLMBackend
 
     # Replace backends with TRT-LLM only.
     app.state.backends = {"trtllm": TRTLLMBackend()}

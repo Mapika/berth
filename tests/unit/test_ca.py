@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from cryptography import x509
 
-from serve_engine.cluster.ca import (
+from berth.cluster.ca import (
     fingerprint_sha256,
     generate_ca,
     issue_agent_cert,

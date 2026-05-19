@@ -2,9 +2,9 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock
 
-from serve_engine.cluster.leader_hub import LeaderHub
-from serve_engine.cluster.protocol import Heartbeat
-from serve_engine.daemon.metrics_aggregator import MetricsAggregator
+from berth.cluster.leader_hub import LeaderHub
+from berth.cluster.protocol import Heartbeat
+from berth.daemon.metrics_aggregator import MetricsAggregator
 
 
 def test_leader_hub_feeds_aggregator_on_heartbeat():

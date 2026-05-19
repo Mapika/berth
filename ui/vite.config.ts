@@ -4,7 +4,7 @@ import react from '@vitejs/plugin-react'
 export default defineConfig({
   plugins: [react()],
   build: {
-    outDir: '../src/serve_engine/ui',
+    outDir: '../src/berth/ui',
     emptyOutDir: true,
     assetsDir: 'assets',
   },

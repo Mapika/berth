@@ -1,8 +1,8 @@
 from __future__ import annotations
 
-from serve_engine.store import db
-from serve_engine.store import node_gpus as node_gpus_store
-from serve_engine.store import nodes as nodes_store
+from berth.store import db
+from berth.store import node_gpus as node_gpus_store
+from berth.store import nodes as nodes_store
 
 
 def _fresh(tmp_path):

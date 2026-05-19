@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from serve_engine.daemon.metrics_aggregator import MetricsAggregator
+from berth.daemon.metrics_aggregator import MetricsAggregator
 
 
 def _sample(util=10, in_flight=0, p95=100):

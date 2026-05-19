@@ -2,7 +2,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from serve_engine.lifecycle.docker_client import ContainerHandle, DockerClient
+from berth.lifecycle.docker_client import ContainerHandle, DockerClient
 
 
 @pytest.fixture

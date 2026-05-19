@@ -4,7 +4,7 @@ import tomllib
 
 import pytest
 
-from serve_engine import config
+from berth import config
 
 
 @pytest.fixture(autouse=True)

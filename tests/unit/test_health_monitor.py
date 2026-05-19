@@ -5,12 +5,12 @@ from unittest.mock import AsyncMock, MagicMock
 import httpx
 import pytest
 
-from serve_engine.backends.base import ContainerBackend
-from serve_engine.backends.manifest import EngineManifest, Headroom
-from serve_engine.lifecycle.health_monitor import HealthMonitor
-from serve_engine.store import db
-from serve_engine.store import deployments as dep_store
-from serve_engine.store import models as model_store
+from berth.backends.base import ContainerBackend
+from berth.backends.manifest import EngineManifest, Headroom
+from berth.lifecycle.health_monitor import HealthMonitor
+from berth.store import db
+from berth.store import deployments as dep_store
+from berth.store import models as model_store
 
 
 class _StubBackend(ContainerBackend):

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from serve_engine.cluster.health_watcher import on_node_unreachable
-from serve_engine.routing.affinity import RoutingAffinity
+from berth.cluster.health_watcher import on_node_unreachable
+from berth.routing.affinity import RoutingAffinity
 
 
 def test_node_unreachable_evicts_affinity_entries():

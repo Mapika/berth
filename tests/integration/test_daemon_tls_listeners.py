@@ -1,6 +1,6 @@
 """Boot the daemon for real and verify both TLS listeners respond.
 
-This test spawns `python -m serve_engine.daemon` as a subprocess pointed
+This test spawns `python -m berth.daemon` as a subprocess pointed
 at a tmp_path SERVE_HOME, then connects over HTTPS to both the public
 and cluster listeners. The cluster CA is loaded directly from the tmp
 home to validate the server cert chain — proving the certs the daemon
@@ -44,7 +44,7 @@ def test_daemon_tls_both_listeners(tmp_path: Path):
 
     proc = subprocess.Popen(
         [
-            sys.executable, "-m", "serve_engine.daemon",
+            sys.executable, "-m", "berth.daemon",
             "--public-host", "127.0.0.1",
             "--public-port", str(public_port),
             "--public-bind", "127.0.0.1",

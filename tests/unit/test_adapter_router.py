@@ -3,18 +3,18 @@ helper is exercised in tests/unit/test_admin_adapter_endpoints.py and
 tests/unit/test_proxy_adapter_dispatch.py."""
 import pytest
 
-from serve_engine.lifecycle.adapter_router import (
+from berth.lifecycle.adapter_router import (
     UnknownModel,
     find_deployment_for,
     rank_deployments_for,
     resolve_target,
 )
-from serve_engine.routing.scorer import NodeSignals, RoutingRequest
-from serve_engine.store import adapters as ad_store
-from serve_engine.store import db
-from serve_engine.store import deployment_adapters as da_store
-from serve_engine.store import deployments as dep_store
-from serve_engine.store import models as model_store
+from berth.routing.scorer import NodeSignals, RoutingRequest
+from berth.store import adapters as ad_store
+from berth.store import db
+from berth.store import deployment_adapters as da_store
+from berth.store import deployments as dep_store
+from berth.store import models as model_store
 
 
 def _fresh(tmp_path):

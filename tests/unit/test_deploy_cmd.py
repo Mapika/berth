@@ -7,9 +7,9 @@ import tomllib
 
 from typer.testing import CliRunner
 
-from serve_engine import cli, config
-from serve_engine.cli.deploy_cmd import _bootstrap, _ok_hostname
-from serve_engine.store import api_keys, db
+from berth import cli, config
+from berth.cli.deploy_cmd import _bootstrap, _ok_hostname
+from berth.store import api_keys, db
 
 
 def _isolate(monkeypatch, home):

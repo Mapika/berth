@@ -5,7 +5,7 @@ import ssl
 
 from cryptography import x509
 
-from serve_engine.cluster.ca import (
+from berth.cluster.ca import (
     ensure_server_cert,
     fingerprint_ca_pem,
     generate_ca,

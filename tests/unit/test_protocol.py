@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from serve_engine.cluster.protocol import (
+from berth.cluster.protocol import (
     GpuStats,
     Heartbeat,
     Hello,

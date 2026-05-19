@@ -1,4 +1,4 @@
-from serve_engine.lifecycle.placement import (
+from berth.lifecycle.placement import (
     AllocatedDeployment,
     EvictThenFit,
     Fit,
@@ -6,7 +6,7 @@ from serve_engine.lifecycle.placement import (
     PlacementRequest,
     plan_placement,
 )
-from serve_engine.lifecycle.topology import GPUInfo, Topology
+from berth.lifecycle.topology import GPUInfo, Topology
 
 
 def _topo(n: int, nvlink: bool = True) -> Topology:

@@ -2,7 +2,7 @@ import asyncio
 
 import pytest
 
-from serve_engine.observability.events import Event, EventBus
+from berth.observability.events import Event, EventBus
 
 
 @pytest.mark.asyncio

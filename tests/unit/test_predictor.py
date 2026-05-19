@@ -7,7 +7,7 @@ from __future__ import annotations
 import sqlite3
 from datetime import UTC, datetime, timedelta
 
-from serve_engine.lifecycle.predictor import (
+from berth.lifecycle.predictor import (
     Candidate,
     KeyAffinityConfig,
     Predictor,
@@ -16,7 +16,7 @@ from serve_engine.lifecycle.predictor import (
     SequencingConfig,
     _hour_of_week,
 )
-from serve_engine.store import db
+from berth.store import db
 
 
 def _fresh(tmp_path):

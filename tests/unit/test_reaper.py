@@ -3,7 +3,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from serve_engine.lifecycle.reaper import Reaper
+from berth.lifecycle.reaper import Reaper
 
 
 @pytest.mark.asyncio

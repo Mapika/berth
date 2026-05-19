@@ -6,9 +6,9 @@ from unittest.mock import MagicMock
 import httpx
 import pytest
 
-from serve_engine.backends.vllm import VLLMBackend
-from serve_engine.daemon.app import build_app
-from serve_engine.store import db
+from berth.backends.vllm import VLLMBackend
+from berth.daemon.app import build_app
+from berth.store import db
 
 
 @pytest.mark.asyncio

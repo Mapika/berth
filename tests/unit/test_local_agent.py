@@ -3,8 +3,8 @@ from __future__ import annotations
 import httpx
 import pytest
 
-from serve_engine.cluster.local_agent import LocalAgentLink
-from serve_engine.lifecycle.docker_client import DockerClient
+from berth.cluster.local_agent import LocalAgentLink
+from berth.lifecycle.docker_client import DockerClient
 
 
 class _FakeContainer:

@@ -4,27 +4,27 @@ import httpx
 import pytest
 from fastapi import HTTPException
 
-from serve_engine.backends.vllm import VLLMBackend
-from serve_engine.daemon.app import build_app
-from serve_engine.lifecycle.docker_client import ContainerHandle
-from serve_engine.store import api_keys as key_store
-from serve_engine.store import db
+from berth.backends.vllm import VLLMBackend
+from berth.daemon.app import build_app
+from berth.lifecycle.docker_client import ContainerHandle
+from berth.store import api_keys as key_store
+from berth.store import db
 
 
 @pytest.fixture
 def app(tmp_path, monkeypatch):
-    from serve_engine.lifecycle.topology import GPUInfo, Topology
+    from berth.lifecycle.topology import GPUInfo, Topology
 
     monkeypatch.setattr(
-        "serve_engine.lifecycle.manager.wait_healthy",
+        "berth.lifecycle.manager.wait_healthy",
         AsyncMock(return_value=True),
     )
     monkeypatch.setattr(
-        "serve_engine.lifecycle.manager.download_model_async",
+        "berth.lifecycle.manager.download_model_async",
         AsyncMock(return_value=str(tmp_path / "weights")),
     )
     monkeypatch.setattr(
-        "serve_engine.lifecycle.manager.estimate_vram_mb",
+        "berth.lifecycle.manager.estimate_vram_mb",
         lambda inp: 20_000,
     )
     (tmp_path / "weights").mkdir(exist_ok=True)
@@ -431,9 +431,9 @@ async def test_create_deployment_default_backend_is_vllm(app):
 
 @pytest.mark.asyncio
 async def test_list_gpus_returns_list(app, monkeypatch):
-    from serve_engine.observability.gpu_stats import GPUSnapshot
+    from berth.observability.gpu_stats import GPUSnapshot
     monkeypatch.setattr(
-        "serve_engine.daemon.admin._read_gpu_stats",
+        "berth.daemon.admin._read_gpu_stats",
         lambda: [GPUSnapshot(
             index=0, memory_used_mb=10_000, memory_total_mb=80_000,
             gpu_util_pct=42, power_w=350,
@@ -488,7 +488,7 @@ async def test_download_model_endpoint(app, monkeypatch, tmp_path):
         return str(path)
 
     monkeypatch.setattr(
-        "serve_engine.lifecycle.downloader.download_model",
+        "berth.lifecycle.downloader.download_model",
         fake_download_model,
     )
     transport = httpx.ASGITransport(app=app)
@@ -522,15 +522,15 @@ async def test_download_unknown_model_404(app):
 @pytest.mark.asyncio
 async def test_admin_route_requires_admin_tier(tmp_path, monkeypatch):
     """When non-admin keys exist, admin routes return 403 unless the bearer is admin."""
-    from serve_engine.backends.vllm import VLLMBackend
-    from serve_engine.daemon.app import build_app
-    from serve_engine.lifecycle.docker_client import ContainerHandle
-    from serve_engine.lifecycle.topology import GPUInfo, Topology
-    from serve_engine.store import api_keys as _ak
-    from serve_engine.store import db as _db
+    from berth.backends.vllm import VLLMBackend
+    from berth.daemon.app import build_app
+    from berth.lifecycle.docker_client import ContainerHandle
+    from berth.lifecycle.topology import GPUInfo, Topology
+    from berth.store import api_keys as _ak
+    from berth.store import db as _db
 
     monkeypatch.setattr(
-        "serve_engine.lifecycle.manager.estimate_vram_mb",
+        "berth.lifecycle.manager.estimate_vram_mb",
         lambda inp: 20_000,
     )
     (tmp_path / "weights").mkdir(exist_ok=True)
@@ -677,7 +677,7 @@ async def test_create_key_with_allowed_models(app):
 def test_stream_ticket_authorizes_only_stream_routes(app):
     from unittest.mock import MagicMock
 
-    from serve_engine.daemon.admin import require_admin_key
+    from berth.daemon.admin import require_admin_key
 
     key_store.create(app.state.conn, name="root", tier="admin")
     token, _ = app.state.stream_tokens.issue()

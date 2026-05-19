@@ -4,14 +4,14 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from serve_engine.backends.vllm import VLLMBackend
-from serve_engine.lifecycle.docker_client import ContainerHandle
-from serve_engine.lifecycle.manager import LifecycleManager
-from serve_engine.lifecycle.plan import DeploymentPlan
-from serve_engine.lifecycle.topology import GPUInfo, Topology
-from serve_engine.store import db
-from serve_engine.store import deployments as dep_store
-from serve_engine.store import models as model_store
+from berth.backends.vllm import VLLMBackend
+from berth.lifecycle.docker_client import ContainerHandle
+from berth.lifecycle.manager import LifecycleManager
+from berth.lifecycle.plan import DeploymentPlan
+from berth.lifecycle.topology import GPUInfo, Topology
+from berth.store import db
+from berth.store import deployments as dep_store
+from berth.store import models as model_store
 
 
 def _make_plan() -> DeploymentPlan:
@@ -43,15 +43,15 @@ def topo_one_gpu():
 
 def _patch_externals(monkeypatch, tmp_path, vram_mb=20_000):
     monkeypatch.setattr(
-        "serve_engine.lifecycle.manager.wait_healthy",
+        "berth.lifecycle.manager.wait_healthy",
         AsyncMock(return_value=True),
     )
     monkeypatch.setattr(
-        "serve_engine.lifecycle.manager.download_model_async",
+        "berth.lifecycle.manager.download_model_async",
         AsyncMock(return_value=str(tmp_path / "weights")),
     )
     monkeypatch.setattr(
-        "serve_engine.lifecycle.manager.estimate_vram_mb",
+        "berth.lifecycle.manager.estimate_vram_mb",
         lambda inp: vram_mb,
     )
     (tmp_path / "weights").mkdir(exist_ok=True)
@@ -190,15 +190,15 @@ def test_load_marks_failed_on_unhealthy(conn, monkeypatch, tmp_path, topo_one_gp
         id="cid", name="x", address="127.0.0.1", port=49152,
     )
     monkeypatch.setattr(
-        "serve_engine.lifecycle.manager.wait_healthy",
+        "berth.lifecycle.manager.wait_healthy",
         AsyncMock(return_value=False),
     )
     monkeypatch.setattr(
-        "serve_engine.lifecycle.manager.download_model_async",
+        "berth.lifecycle.manager.download_model_async",
         AsyncMock(return_value=str(tmp_path / "w")),
     )
     monkeypatch.setattr(
-        "serve_engine.lifecycle.manager.estimate_vram_mb",
+        "berth.lifecycle.manager.estimate_vram_mb",
         lambda inp: 20_000,
     )
     (tmp_path / "w").mkdir(exist_ok=True)
@@ -345,7 +345,7 @@ def test_reconcile_fails_loading_container_that_never_becomes_healthy(
     docker_client = MagicMock()
     docker_client.container_status.return_value = "running"
     monkeypatch.setattr(
-        "serve_engine.lifecycle.manager.wait_healthy",
+        "berth.lifecycle.manager.wait_healthy",
         AsyncMock(return_value=False),
     )
 
@@ -380,13 +380,13 @@ def test_load_writes_engine_config_yaml_and_mounts_it(conn, monkeypatch, tmp_pat
     minimal stub backend so we can assert without pulling the trtllm image."""
     import yaml
 
-    from serve_engine.backends.base import ContainerBackend
+    from berth.backends.base import ContainerBackend
 
     class _StubBackendWithConfig(ContainerBackend):
         name = "stubcfg"
 
         def __init__(self):
-            from serve_engine.backends.manifest import EngineManifest, Headroom
+            from berth.backends.manifest import EngineManifest, Headroom
             self.manifest = EngineManifest(
                 name="stubcfg", image="stub", pinned_tag="v1",
                 health_path="/health", openai_base="/v1",
@@ -404,7 +404,7 @@ def test_load_writes_engine_config_yaml_and_mounts_it(conn, monkeypatch, tmp_pat
             return {"hello": "world", "n": plan.target_concurrency}
 
     # Allow the stub backend through DeploymentPlan validation.
-    import serve_engine.lifecycle.plan as plan_mod
+    import berth.lifecycle.plan as plan_mod
     monkeypatch.setattr(plan_mod, "SUPPORTED_BACKENDS", ("vllm", "sglang", "trtllm", "stubcfg"))
 
     docker_client = MagicMock()
@@ -447,13 +447,13 @@ def test_load_writes_engine_config_yaml_and_mounts_it(conn, monkeypatch, tmp_pat
 def test_stop_removes_engine_config_yaml(conn, monkeypatch, tmp_path, topo_one_gpu):
     """Per-deployment config files are cleaned up on stop so configs_dir
     doesn't accumulate stale files across many load/stop cycles."""
-    from serve_engine.backends.base import ContainerBackend
+    from berth.backends.base import ContainerBackend
 
     class _StubBackend(ContainerBackend):
         name = "stubcfg2"
 
         def __init__(self):
-            from serve_engine.backends.manifest import EngineManifest, Headroom
+            from berth.backends.manifest import EngineManifest, Headroom
             self.manifest = EngineManifest(
                 name="stubcfg2", image="stub", pinned_tag="v1",
                 health_path="/health", openai_base="/v1",
@@ -467,7 +467,7 @@ def test_stop_removes_engine_config_yaml(conn, monkeypatch, tmp_path, topo_one_g
         def engine_config(self, plan):
             return {"k": "v"}
 
-    import serve_engine.lifecycle.plan as plan_mod
+    import berth.lifecycle.plan as plan_mod
     monkeypatch.setattr(plan_mod, "SUPPORTED_BACKENDS", ("vllm", "sglang", "trtllm", "stubcfg2"))
 
     docker_client = MagicMock()

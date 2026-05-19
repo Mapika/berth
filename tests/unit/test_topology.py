@@ -1,9 +1,9 @@
 from unittest.mock import MagicMock, patch
 
-from serve_engine.lifecycle.topology import read_topology, reset_cache
+from berth.lifecycle.topology import read_topology, reset_cache
 
 
-@patch("serve_engine.lifecycle.topology.pynvml")
+@patch("berth.lifecycle.topology.pynvml")
 def test_read_topology_basic(mock_nvml):
     reset_cache()
     mock_nvml.nvmlInit = MagicMock()
@@ -26,7 +26,7 @@ def test_read_topology_basic(mock_nvml):
     assert topo.nvlink_island(1) == frozenset({0, 1})
 
 
-@patch("serve_engine.lifecycle.topology.pynvml")
+@patch("berth.lifecycle.topology.pynvml")
 def test_read_topology_no_nvlink(mock_nvml):
     reset_cache()
     mock_nvml.nvmlInit = MagicMock()
@@ -40,14 +40,14 @@ def test_read_topology_no_nvlink(mock_nvml):
     assert topo.nvlink_island(0) == frozenset({0})
 
 
-@patch("serve_engine.lifecycle.topology.pynvml", None)
+@patch("berth.lifecycle.topology.pynvml", None)
 def test_read_topology_no_pynvml():
     reset_cache()
     topo = read_topology()
     assert topo.gpus == []
 
 
-@patch("serve_engine.lifecycle.topology.pynvml")
+@patch("berth.lifecycle.topology.pynvml")
 def test_read_topology_nvml_init_failure_returns_empty_topology(mock_nvml):
     reset_cache()
     mock_nvml.nvmlInit.side_effect = RuntimeError("NVML unavailable")

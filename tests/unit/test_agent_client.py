@@ -5,8 +5,8 @@ import base64
 
 import pytest
 
-from serve_engine.cluster.agent_client import AgentFrameDispatcher
-from serve_engine.cluster.protocol import (
+from berth.cluster.agent_client import AgentFrameDispatcher
+from berth.cluster.protocol import (
     HttpChunk,
     HttpRequest,
     OpResult,
@@ -166,8 +166,8 @@ async def test_http_request_with_engine_failure_returns_502():
 
 
 def test_build_heartbeat_frame_without_collectors_is_bare():
-    from serve_engine.cluster.agent_client import build_heartbeat_frame
-    from serve_engine.cluster.protocol import Heartbeat
+    from berth.cluster.agent_client import build_heartbeat_frame
+    from berth.cluster.protocol import Heartbeat
 
     frame = build_heartbeat_frame(
         in_flight=None, latency=None,
@@ -178,9 +178,9 @@ def test_build_heartbeat_frame_without_collectors_is_bare():
 
 
 def test_build_heartbeat_frame_with_collectors_carries_metrics(monkeypatch):
-    from serve_engine.cluster import metrics_collector as mc
-    from serve_engine.cluster.agent_client import build_heartbeat_frame
-    from serve_engine.cluster.protocol import Heartbeat, decode_frame, encode_frame
+    from berth.cluster import metrics_collector as mc
+    from berth.cluster.agent_client import build_heartbeat_frame
+    from berth.cluster.protocol import Heartbeat, decode_frame, encode_frame
 
     # Stub out NVML so the test doesn't depend on a GPU host.
     monkeypatch.setattr(mc, "read_gpu_stats", lambda: [])

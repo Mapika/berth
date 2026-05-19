@@ -1,7 +1,7 @@
 import httpx
 import pytest
 
-from serve_engine.cli import ipc
+from berth.cli import ipc
 
 
 @pytest.mark.asyncio

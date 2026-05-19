@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from serve_engine.cluster.agent_registry import AgentRegistry
+from berth.cluster.agent_registry import AgentRegistry
 
 
 class _Stub:

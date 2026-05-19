@@ -9,7 +9,7 @@ an explicit release step with trusted publishing.
 Keep these in sync:
 
 - `pyproject.toml`
-- `src/serve_engine/__init__.py`
+- `src/berth/__init__.py`
 - `uv.lock`
 - `CHANGELOG.md`
 
@@ -33,7 +33,7 @@ Inspect the wheel for packaged runtime data:
 
 ```bash
 uv run --frozen python -m zipfile -l dist/serve_engine-*.whl \
-  | rg 'serve_engine/(store/migrations|backends/.*yaml|auth/tiers.yaml|ui/index.html)'
+  | rg 'berth/(store/migrations|backends/.*yaml|auth/tiers.yaml|ui/index.html)'
 ```
 
 ## Tag And Publish

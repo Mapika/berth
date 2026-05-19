@@ -5,8 +5,8 @@ import tarfile
 
 from typer.testing import CliRunner
 
-from serve_engine import cli, config
-from serve_engine.store import db
+from berth import cli, config
+from berth.store import db
 
 
 def test_backup_create_writes_tarball_with_dr_set(tmp_path, monkeypatch):

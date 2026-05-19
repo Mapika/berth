@@ -2,9 +2,9 @@ from __future__ import annotations
 
 from typer.testing import CliRunner
 
-from serve_engine import cli
-from serve_engine.cli import setup_cmd
-from serve_engine.doctor.runner import CheckResult
+from berth import cli
+from berth.cli import setup_cmd
+from berth.doctor.runner import CheckResult
 
 
 def test_setup_passes_resolved_config_to_spawn_daemon(monkeypatch, tmp_path):

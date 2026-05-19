@@ -1,4 +1,4 @@
-from serve_engine.observability.metrics import format_daemon_metrics
+from berth.observability.metrics import format_daemon_metrics
 
 
 def test_format_daemon_metrics_empty():

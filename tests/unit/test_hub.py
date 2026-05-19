@@ -1,9 +1,9 @@
 from unittest.mock import MagicMock, patch
 
-from serve_engine.backends.hub import latest_stable_tag
+from berth.backends.hub import latest_stable_tag
 
 
-@patch("serve_engine.backends.hub.httpx.get")
+@patch("berth.backends.hub.httpx.get")
 def test_latest_stable_tag_picks_first_semver(mock_get):
     mock_get.return_value = MagicMock(
         status_code=200,
@@ -20,7 +20,7 @@ def test_latest_stable_tag_picks_first_semver(mock_get):
     assert tag == "v0.5.11"
 
 
-@patch("serve_engine.backends.hub.httpx.get")
+@patch("berth.backends.hub.httpx.get")
 def test_latest_stable_tag_returns_none_on_no_match(mock_get):
     mock_get.return_value = MagicMock(
         status_code=200,
@@ -30,6 +30,6 @@ def test_latest_stable_tag_returns_none_on_no_match(mock_get):
     assert latest_stable_tag("foo/bar") is None
 
 
-@patch("serve_engine.backends.hub.httpx.get", side_effect=Exception("network down"))
+@patch("berth.backends.hub.httpx.get", side_effect=Exception("network down"))
 def test_latest_stable_tag_handles_network_error(mock_get):
     assert latest_stable_tag("foo/bar") is None

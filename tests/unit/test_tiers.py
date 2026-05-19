@@ -1,6 +1,6 @@
 import pytest
 
-from serve_engine.auth import tiers
+from berth.auth import tiers
 
 
 def test_load_default_tiers_contains_standard():

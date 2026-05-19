@@ -5,7 +5,7 @@ import base64
 
 import pytest
 
-from serve_engine.cluster.protocol import (
+from berth.cluster.protocol import (
     HttpCancel,
     HttpChunk,
     HttpRequest,
@@ -15,7 +15,7 @@ from serve_engine.cluster.protocol import (
     decode_frame,
     encode_frame,
 )
-from serve_engine.cluster.remote_agent import RemoteAgentLink
+from berth.cluster.remote_agent import RemoteAgentLink
 
 
 class _FakeWS:

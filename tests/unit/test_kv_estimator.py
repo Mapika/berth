@@ -2,7 +2,7 @@ import json
 
 import pytest
 
-from serve_engine.lifecycle.kv_estimator import (
+from berth.lifecycle.kv_estimator import (
     KVEstimateInput,
     default_target_concurrency,
     estimate_vram_mb,

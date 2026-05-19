@@ -9,11 +9,11 @@ from __future__ import annotations
 
 import json
 
-from serve_engine.lifecycle.plan import DeploymentPlan
-from serve_engine.store import db
-from serve_engine.store import deployment_plans as plan_store
-from serve_engine.store import deployments as dep_store
-from serve_engine.store import models as model_store
+from berth.lifecycle.plan import DeploymentPlan
+from berth.store import db
+from berth.store import deployment_plans as plan_store
+from berth.store import deployments as dep_store
+from berth.store import models as model_store
 
 
 def _conn(tmp_path):

@@ -1,5 +1,5 @@
-from serve_engine.backends.vllm import VLLMBackend
-from serve_engine.lifecycle.plan import DeploymentPlan
+from berth.backends.vllm import VLLMBackend
+from berth.lifecycle.plan import DeploymentPlan
 
 
 def _plan(**overrides):

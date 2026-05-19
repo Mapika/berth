@@ -1,8 +1,8 @@
 import pytest
 
-from serve_engine.store import adapters as ad_store
-from serve_engine.store import db
-from serve_engine.store import models as model_store
+from berth.store import adapters as ad_store
+from berth.store import db
+from berth.store import models as model_store
 
 
 def _fresh(tmp_path):

@@ -7,7 +7,7 @@ import time
 
 import pytest
 
-from serve_engine.store import db
+from berth.store import db
 
 
 def test_init_schema_is_idempotent(tmp_path):

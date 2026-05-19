@@ -15,16 +15,16 @@ from unittest.mock import MagicMock
 import httpx
 import pytest
 
-from serve_engine.backends.vllm import VLLMBackend
-from serve_engine.cli.agent_cmd import parse_enrollment_uri
-from serve_engine.cli.nodes_cmd import build_enrollment_uri
-from serve_engine.daemon.app import build_app
-from serve_engine.store import db
+from berth.backends.vllm import VLLMBackend
+from berth.cli.agent_cmd import parse_enrollment_uri
+from berth.cli.nodes_cmd import build_enrollment_uri
+from berth.daemon.app import build_app
+from berth.store import db
 
 
 @pytest.mark.asyncio
 async def test_enrollment_uri_flow_end_to_end(tmp_path):
-    from serve_engine.lifecycle.topology import GPUInfo, Topology
+    from berth.lifecycle.topology import GPUInfo, Topology
 
     docker_client = MagicMock()
     conn = db.connect(tmp_path / "t.db")
@@ -90,7 +90,7 @@ async def test_enrollment_uri_flow_end_to_end(tmp_path):
 async def test_ca_pem_endpoint_returns_pem_and_fingerprint(tmp_path):
     """The cluster CA endpoint must be reachable without auth and must
     expose the same fingerprint the enrollment URI pins."""
-    from serve_engine.lifecycle.topology import GPUInfo, Topology
+    from berth.lifecycle.topology import GPUInfo, Topology
 
     conn = db.connect(tmp_path / "t.db")
     db.init_schema(conn)

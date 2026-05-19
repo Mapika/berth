@@ -1,7 +1,7 @@
 import json
 from unittest.mock import patch
 
-from serve_engine.lifecycle.adapter_downloader import (
+from berth.lifecycle.adapter_downloader import (
     download_adapter,
     parse_adapter_metadata,
 )
@@ -15,7 +15,7 @@ def test_download_adapter_calls_snapshot_download(tmp_path):
     (fake_dir / "adapter_config.json").write_bytes(b"x" * (1 * 1024 * 1024))
 
     with patch(
-        "serve_engine.lifecycle.adapter_downloader.snapshot_download",
+        "berth.lifecycle.adapter_downloader.snapshot_download",
         return_value=str(fake_dir),
     ) as mock_sd:
         path, size_mb = download_adapter(
@@ -35,7 +35,7 @@ def test_download_adapter_size_zero_for_empty_dir(tmp_path):
     fake_dir = tmp_path / "empty_snap"
     fake_dir.mkdir()
     with patch(
-        "serve_engine.lifecycle.adapter_downloader.snapshot_download",
+        "berth.lifecycle.adapter_downloader.snapshot_download",
         return_value=str(fake_dir),
     ):
         _, size_mb = download_adapter(
@@ -96,7 +96,7 @@ def test_download_adapter_recurses_into_subdirs(tmp_path):
     nested.mkdir(parents=True)
     (nested / "weights.bin").write_bytes(b"x" * (5 * 1024 * 1024))
     with patch(
-        "serve_engine.lifecycle.adapter_downloader.snapshot_download",
+        "berth.lifecycle.adapter_downloader.snapshot_download",
         return_value=str(fake_dir),
     ):
         _, size_mb = download_adapter(

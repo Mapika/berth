@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from serve_engine.lifecycle.placement import (
+from berth.lifecycle.placement import (
     AllocatedDeployment,
     EvictThenFit,
     Fit,
@@ -8,7 +8,7 @@ from serve_engine.lifecycle.placement import (
     PlacementRequest,
     plan_placement_multi,
 )
-from serve_engine.lifecycle.topology import GPUInfo, Topology
+from berth.lifecycle.topology import GPUInfo, Topology
 
 
 def _topo(gpus_mb: list[int]) -> Topology:

@@ -1,8 +1,8 @@
 import pytest
 
-from serve_engine.store import db
-from serve_engine.store import deployments as dep_store
-from serve_engine.store import models as model_store
+from berth.store import db
+from berth.store import deployments as dep_store
+from berth.store import models as model_store
 
 
 def test_init_schema_creates_tables(tmp_path):

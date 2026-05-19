@@ -4,16 +4,16 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from serve_engine.cluster.agent_registry import AgentRegistry
-from serve_engine.cluster.leader_hub import LeaderHub
-from serve_engine.cluster.protocol import (
+from berth.cluster.agent_registry import AgentRegistry
+from berth.cluster.leader_hub import LeaderHub
+from berth.cluster.protocol import (
     Hello,
     Welcome,
     decode_frame,
     encode_frame,
 )
-from serve_engine.store import db
-from serve_engine.store import nodes as nodes_store
+from berth.store import db
+from berth.store import nodes as nodes_store
 
 
 def _fresh(tmp_path):

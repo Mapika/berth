@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from serve_engine.daemon.metrics_aggregator import MetricsAggregator
-from serve_engine.observability.metrics import format_cluster_metrics
+from berth.daemon.metrics_aggregator import MetricsAggregator
+from berth.observability.metrics import format_cluster_metrics
 
 
 def _sample():

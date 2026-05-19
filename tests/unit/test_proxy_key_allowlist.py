@@ -13,21 +13,21 @@ from unittest.mock import AsyncMock, MagicMock
 import httpx
 import pytest
 
-from serve_engine.backends.vllm import VLLMBackend
-from serve_engine.daemon.app import build_app
-from serve_engine.lifecycle.docker_client import ContainerHandle
-from serve_engine.store import api_keys as ak_store
-from serve_engine.store import db
-from serve_engine.store import deployments as dep_store
-from serve_engine.store import models as model_store
+from berth.backends.vllm import VLLMBackend
+from berth.daemon.app import build_app
+from berth.lifecycle.docker_client import ContainerHandle
+from berth.store import api_keys as ak_store
+from berth.store import db
+from berth.store import deployments as dep_store
+from berth.store import models as model_store
 
 
 @pytest.fixture
 def app(tmp_path, monkeypatch):
-    from serve_engine.lifecycle.topology import GPUInfo, Topology
+    from berth.lifecycle.topology import GPUInfo, Topology
 
     monkeypatch.setattr(
-        "serve_engine.lifecycle.manager.wait_healthy",
+        "berth.lifecycle.manager.wait_healthy",
         AsyncMock(return_value=True),
     )
     docker_client = MagicMock()
@@ -101,7 +101,7 @@ def _patch_engine(monkeypatch):
             return None
 
     monkeypatch.setattr(
-        "serve_engine.daemon.openai_proxy.make_engine_client",
+        "berth.daemon.openai_proxy.make_engine_client",
         lambda base_url: FakeEngineClient(base_url),
     )
 

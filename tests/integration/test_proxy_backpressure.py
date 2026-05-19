@@ -11,7 +11,7 @@ import asyncio
 
 import pytest
 
-from serve_engine.daemon.openai_proxy import _bounded_pipe
+from berth.daemon.openai_proxy import _bounded_pipe
 
 
 class _CountingProducer:

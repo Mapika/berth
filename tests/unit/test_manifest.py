@@ -1,6 +1,6 @@
 import pytest
 
-from serve_engine.backends.manifest import Headroom, load_manifest
+from berth.backends.manifest import Headroom, load_manifest
 
 
 def test_load_default_manifest_has_all_engines():

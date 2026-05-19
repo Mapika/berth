@@ -1,6 +1,6 @@
 import pytest
 
-from serve_engine.lifecycle.plan import DeploymentPlan
+from berth.lifecycle.plan import DeploymentPlan
 
 
 def test_plan_basic_fields():

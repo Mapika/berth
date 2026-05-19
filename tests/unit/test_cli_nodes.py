@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typer.testing import CliRunner
 
-from serve_engine.cli import app, nodes_cmd
+from berth.cli import app, nodes_cmd
 
 
 def test_nodes_ls(monkeypatch):

@@ -302,7 +302,7 @@ cluster port to known agent source IPs.
 - `/admin/nodes/register` is rate-limited: 10 attempts per source IP
   per minute. Returns 429 + `Retry-After` on overflow.
 - Every register attempt (success and failure) is logged via the
-  `serve_engine.audit` logger with source IP and token prefix.
+  `berth.audit` logger with source IP and token prefix.
 - Enrollment tokens are single-use and expire after 10 minutes.
 - `serve nodes remove <id>` causes the next WS handshake from that
   agent to be rejected — the cert fingerprint is re-checked against
@@ -453,19 +453,19 @@ them:
 
 - **Heartbeat interval.** Agent sends every 5 s; leader marks a node
   `unreachable` after 15 s of silence. Both live in
-  `src/serve_engine/cluster/agent_client.py` (heartbeat task) and
-  `src/serve_engine/cluster/health_watcher.py` (`stale_after_s`).
+  `src/berth/cluster/agent_client.py` (heartbeat task) and
+  `src/berth/cluster/health_watcher.py` (`stale_after_s`).
   Hard-coded for v1; lift to config when you actually need to tune.
 - **Reconnect backoff.** Agent starts at 1 s, doubles to 30 s cap.
   See `run_agent()` in `agent_client.py`.
 - **Enrollment token TTL.** Default 600 s. See `EnrollmentTokens` in
-  `src/serve_engine/cluster/enrollment.py`.
+  `src/berth/cluster/enrollment.py`.
 - **Registration rate limit.** Default 10 attempts / IP / 60 s.
-  See `_rate_limit` in `src/serve_engine/daemon/admin.py`.
+  See `_rate_limit` in `src/berth/daemon/admin.py`.
 - **Server-cert validity.** 5 years. Regenerated automatically when
   `public_host` / `cluster_host` change and the existing SAN doesn't
   cover the new value. See `ensure_server_cert` in
-  `src/serve_engine/cluster/ca.py`.
+  `src/berth/cluster/ca.py`.
 
 ## Observability
 
@@ -523,7 +523,7 @@ and renders inline SVG sparklines on each node card.
 ## Routing & resilience
 
 Multi-deployment selection is driven by a load-aware scorer
-(`src/serve_engine/routing/scorer.py`). For a given (base, adapter)
+(`src/berth/routing/scorer.py`). For a given (base, adapter)
 target, the proxy:
 
 1. Collects every ready deployment as a candidate.
@@ -566,7 +566,7 @@ treat the node as gone until it re-handshakes.
 
 ### Request-level retry
 
-`dispatch_with_retry` (`src/serve_engine/daemon/retry_dispatcher.py`)
+`dispatch_with_retry` (`src/berth/daemon/retry_dispatcher.py`)
 wraps the dispatch step. For a bare-base request the proxy gets the
 full scorer-ranked candidate list and walks it, retrying when the
 chosen node raises a retryable pre-first-byte error: connection
@@ -585,7 +585,7 @@ refused, timeout, 502/503/504 upstream, or `NodeUnreachableError`
   roadmap.
 
 The dispatch step itself was carved out of `openai_proxy.py` into
-`src/serve_engine/daemon/dispatch.py:open_upstream_stream`. The unit
+`src/berth/daemon/dispatch.py:open_upstream_stream`. The unit
 knows nothing about request context or usage tracking — it just opens
 a stream and returns once status + headers are known. The proxy wraps
 the returned `body_iter` in one unified streamer that handles
@@ -593,7 +593,7 @@ in-flight/latency/usage attribution against the **landing** deployment.
 
 ### SSE backpressure
 
-`_bounded_pipe` (`src/serve_engine/daemon/openai_proxy.py`) sits
+`_bounded_pipe` (`src/berth/daemon/openai_proxy.py`) sits
 between the upstream reader task and the FastAPI streamer. It uses an
 `asyncio.Queue(maxsize=N)` to cap how far the engine can run ahead of
 a slow client: once the queue is full, the reader blocks on `put()`

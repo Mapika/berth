@@ -3,7 +3,7 @@ from __future__ import annotations
 import pytest
 from fastapi import HTTPException, Request
 
-from serve_engine.daemon import admin as admin_mod
+from berth.daemon import admin as admin_mod
 
 
 def _make_request(

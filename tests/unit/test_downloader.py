@@ -1,10 +1,10 @@
 from unittest.mock import patch
 
-from serve_engine.lifecycle.downloader import download_model
+from berth.lifecycle.downloader import download_model
 
 
 def test_download_model_calls_snapshot_download(tmp_path):
-    with patch("serve_engine.lifecycle.downloader.snapshot_download") as mock_sd:
+    with patch("berth.lifecycle.downloader.snapshot_download") as mock_sd:
         mock_sd.return_value = str(tmp_path / "x")
         result = download_model(
             hf_repo="meta-llama/Llama-3.2-1B-Instruct",

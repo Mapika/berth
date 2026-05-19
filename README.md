@@ -146,7 +146,7 @@ The daemon container does not run inference itself. It talks to the host Docker
 socket and starts separate engine containers.
 
 If `serve` is already taken by an existing shell alias (for example
-`alias serve='python -m http.server'`), invoke as `python -m serve_engine` or
+`alias serve='python -m http.server'`), invoke as `python -m berth` or
 `unalias serve`.
 
 ## First Run
@@ -438,7 +438,7 @@ Runtime choices:
   signals and affinity, retries pre-first-byte failures for bare-base requests,
   and records usage/token counters.
 - State lives in SQLite under `~/.serve`.
-- Engine defaults come from `src/serve_engine/backends/backends.yaml`.
+- Engine defaults come from `src/berth/backends/backends.yaml`.
 - Per-host engine overrides live in `~/.serve/backends.override.yaml`.
 
 ## Files

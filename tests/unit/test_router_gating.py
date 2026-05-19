@@ -2,9 +2,9 @@ from __future__ import annotations
 
 import pytest
 
-from serve_engine.cluster.agent_registry import AgentRegistry
-from serve_engine.daemon.openai_proxy import _proxy_via_link
-from serve_engine.lifecycle.adapter_router import _filter_by_reachable_nodes
+from berth.cluster.agent_registry import AgentRegistry
+from berth.daemon.openai_proxy import _proxy_via_link
+from berth.lifecycle.adapter_router import _filter_by_reachable_nodes
 
 
 class _ReadyLink:

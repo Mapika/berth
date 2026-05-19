@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from serve_engine.routing.scorer import (
+from berth.routing.scorer import (
     DeploymentCandidate,
     NodeSignals,
     RoutingRequest,

@@ -1,5 +1,5 @@
-from serve_engine.backends.trtllm import TRTLLMBackend
-from serve_engine.lifecycle.plan import DeploymentPlan
+from berth.backends.trtllm import TRTLLMBackend
+from berth.lifecycle.plan import DeploymentPlan
 
 
 def _plan(**overrides):

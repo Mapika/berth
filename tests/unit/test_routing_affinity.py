@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from serve_engine.routing.affinity import RoutingAffinity
+from berth.routing.affinity import RoutingAffinity
 
 
 def test_empty_lookup_returns_none():

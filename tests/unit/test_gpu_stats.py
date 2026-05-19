@@ -1,9 +1,9 @@
 from unittest.mock import MagicMock, patch
 
-from serve_engine.observability.gpu_stats import read_gpu_stats
+from berth.observability.gpu_stats import read_gpu_stats
 
 
-@patch("serve_engine.observability.gpu_stats.pynvml")
+@patch("berth.observability.gpu_stats.pynvml")
 def test_read_gpu_stats(mock_nvml):
     mock_nvml.nvmlInit = MagicMock()
     mock_nvml.nvmlDeviceGetCount.return_value = 1
@@ -27,6 +27,6 @@ def test_read_gpu_stats(mock_nvml):
     assert s.power_w == 350
 
 
-@patch("serve_engine.observability.gpu_stats.pynvml", None)
+@patch("berth.observability.gpu_stats.pynvml", None)
 def test_read_gpu_stats_without_pynvml():
     assert read_gpu_stats() == []
