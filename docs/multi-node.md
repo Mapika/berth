@@ -590,12 +590,22 @@ a stream and returns once status + headers are known. The proxy wraps
 the returned `body_iter` in one unified streamer that handles
 in-flight/latency/usage attribution against the **landing** deployment.
 
-### Pending follow-up
+### SSE backpressure
 
-- **SSE backpressure.** A bounded `asyncio.Queue` between the engine
-  reader and client writer so a slow consumer pauses generation rather
-  than buffering unbounded. The dispatch carve makes this a localized
-  change in the unified streamer.
+`_bounded_pipe` (`src/serve_engine/daemon/openai_proxy.py`) sits
+between the upstream reader task and the FastAPI streamer. It uses an
+`asyncio.Queue(maxsize=N)` to cap how far the engine can run ahead of
+a slow client: once the queue is full, the reader blocks on `put()`
+and that backpressure propagates through the upstream stream to the
+engine, so no more bytes are pulled until the client drains a chunk.
+
+- **Default depth**: 64 chunks. Tunable per-app via
+  `app.state.sse_queue_depth`.
+- **Exception forwarding**: errors raised by the upstream iterator are
+  passed through the queue and re-raised in the streamer, so the
+  proxy's existing usage-tracker + tracer finalize path always runs.
+- **Early-close cleanup**: if the client disconnects, the streamer's
+  `finally` cancels the reader task — no lingering pull on the upstream.
 
 ## Roadmap
 

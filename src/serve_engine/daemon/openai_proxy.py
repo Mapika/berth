@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 import sqlite3
 import time
@@ -33,6 +34,60 @@ from serve_engine.store import service_routes as _route_store
 from serve_engine.store import usage_events as _usage_events_store
 
 router = APIRouter()
+
+
+# Default bounded queue depth between the upstream reader and the client
+# writer. Overridable per-app via `app.state.sse_queue_depth`. Sized at
+# 64 chunks — large enough that fast clients never block, small enough
+# that a slow consumer pauses the engine within a few hundred ms instead
+# of buffering the whole generation.
+SSE_QUEUE_DEPTH_DEFAULT = 64
+
+# End-of-stream sentinel for the bounded pipe (cannot be a real chunk
+# value since chunks are bytes).
+_END_OF_STREAM = object()
+
+
+async def _bounded_pipe(body_iter, *, queue_depth: int):
+    """Decouple an upstream body iterator from a slow downstream consumer
+    via a bounded asyncio.Queue.
+
+    The reader task pulls from `body_iter` and puts each chunk on a
+    queue with `maxsize=queue_depth`. The generator yields chunks as
+    fast as the caller awaits. When the queue is full the reader blocks
+    on `put()` — backpressure flows back to the upstream stream and,
+    through it, to the engine.
+
+    Exceptions raised by `body_iter` are forwarded through the queue
+    and re-raised in the generator so the proxy's existing finally
+    block runs.
+    """
+    q: asyncio.Queue = asyncio.Queue(maxsize=queue_depth)
+
+    async def reader():
+        try:
+            async for chunk in body_iter:
+                await q.put(chunk)
+        except BaseException as e:
+            await q.put(e)
+            return
+        await q.put(_END_OF_STREAM)
+
+    reader_task = asyncio.create_task(reader())
+    try:
+        while True:
+            item = await q.get()
+            if item is _END_OF_STREAM:
+                return
+            if isinstance(item, BaseException):
+                raise item
+            yield item
+    finally:
+        reader_task.cancel()
+        try:
+            await reader_task
+        except (Exception, asyncio.CancelledError):
+            pass
 
 
 def _build_signals_by_node(aggregator) -> dict[int, NodeSignals]:
@@ -383,10 +438,16 @@ async def _proxy(
         if k.lower() not in _HOP_BY_HOP | {"content-type"}
     }
 
+    queue_depth = getattr(
+        request.app.state, "sse_queue_depth", SSE_QUEUE_DEPTH_DEFAULT,
+    )
+
     async def streamer():
         first_byte_seen = False
         try:
-            async for chunk in upstream.body_iter:
+            async for chunk in _bounded_pipe(
+                upstream.body_iter, queue_depth=queue_depth,
+            ):
                 if not first_byte_seen:
                     first_byte_seen = True
                     tracer.update(trace, first_byte_at=time.monotonic())
