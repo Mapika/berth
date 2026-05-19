@@ -14,6 +14,12 @@ from pathlib import Path
 import httpx
 
 from serve_engine.backends.base import Backend
+from serve_engine.routing.scorer import (
+    DeploymentCandidate,
+    NodeSignals,
+    RoutingRequest,
+    default_scorer,
+)
 from serve_engine.store import adapters as ad_store
 from serve_engine.store import deployment_adapters as da_store
 from serve_engine.store import deployments as dep_store
@@ -95,23 +101,13 @@ def _filter_by_reachable_nodes(candidates, registry):
     return out
 
 
-def find_deployment_for(
+def _legacy_find_deployment_for(
     conn: sqlite3.Connection,
     base_model_name: str,
     adapter_name: str | None,
 ) -> dep_store.Deployment | None:
-    """Pick a ready deployment for (base, adapter), preferring already-
-    loaded over needs-hot-load. Returns None if no ready deployment of
-    the base exists at all (caller's choice whether to start one).
-
-    Preference ordering when adapter is requested:
-    1. ready deployment of base with this adapter ALREADY LOADED
-    2. ready deployment of base with LoRA enabled + free adapter slot
-    3. ready deployment of base with LoRA enabled (will need slot evict)
-
-    For bare-base requests, we just delegate to v1's
-    find_ready_by_model_name which already does the right thing.
-    """
+    """Pre-scorer body of find_deployment_for. Used when no signals are
+    passed (existing call sites that aren't cluster-aware)."""
     if adapter_name is None:
         return dep_store.find_ready_by_model_name(conn, base_model_name)
 
@@ -119,27 +115,125 @@ def find_deployment_for(
     if a is None:
         return None
 
-    # Walk all ready deployments of the base, scoring each.
     candidates: list[tuple[int, dep_store.Deployment]] = []
     for d in dep_store.list_ready(conn):
         if d.model_id != a.base_model.id:
             continue
         if d.max_loras <= 0:
-            continue  # LoRA not enabled on this deployment
+            continue
         loaded_into = da_store.find_deployments_with_adapter(conn, a.id)
         already_loaded = d.id in loaded_into
         if already_loaded:
-            candidates.append((0, d))  # best
+            candidates.append((0, d))
         else:
             count = da_store.count_for_deployment(conn, d.id)
             if count < d.max_loras:
-                candidates.append((1, d))  # has free slot
+                candidates.append((1, d))
             else:
-                candidates.append((2, d))  # will need eviction
+                candidates.append((2, d))
     if not candidates:
         return None
     candidates.sort(key=lambda t: t[0])
     return candidates[0][1]
+
+
+def rank_deployments_for(
+    conn: sqlite3.Connection,
+    base_model_name: str,
+    adapter_name: str | None,
+    *,
+    signals_by_node: dict[int, NodeSignals],
+    request: RoutingRequest,
+) -> list[dep_store.Deployment]:
+    """Return ready deployments for (base, adapter) ranked best-first.
+
+    For adapter requests, the existing adapter-affinity tiers (already-
+    loaded > free-slot > needs-evict) act as a prefilter — only the best
+    tier is scored further. Within a tier, the node-level scorer chooses
+    the order. We don't mix tiers because that would hide cold-load
+    latency behind a fast idle node.
+    """
+    if adapter_name is None:
+        base = model_store_get_by_name(conn, base_model_name)
+        if base is None:
+            return []
+        ready = [
+            d for d in dep_store.list_ready(conn)
+            if d.model_id == base.id
+        ]
+    else:
+        a = ad_store.get_by_name(conn, adapter_name)
+        if a is None:
+            return []
+        tiered: list[tuple[int, dep_store.Deployment]] = []
+        for d in dep_store.list_ready(conn):
+            if d.model_id != a.base_model.id:
+                continue
+            if d.max_loras <= 0:
+                continue
+            loaded_into = da_store.find_deployments_with_adapter(conn, a.id)
+            if d.id in loaded_into:
+                tiered.append((0, d))
+            else:
+                count = da_store.count_for_deployment(conn, d.id)
+                if count < d.max_loras:
+                    tiered.append((1, d))
+                else:
+                    tiered.append((2, d))
+        if not tiered:
+            return []
+        best_tier = min(t[0] for t in tiered)
+        ready = [d for t, d in tiered if t == best_tier]
+
+    if not ready:
+        return []
+
+    candidates = [
+        DeploymentCandidate(
+            deployment_id=d.id,
+            node_id=d.node_id,
+            model_required_mb=d.vram_reserved_mb,
+        )
+        for d in ready
+    ]
+    scored = default_scorer(
+        candidates=candidates,
+        signals_by_node=signals_by_node,
+        request=request,
+    )
+    by_id = {d.id: d for d in ready}
+    return [by_id[c.deployment_id] for c in scored]
+
+
+def find_deployment_for(
+    conn: sqlite3.Connection,
+    base_model_name: str,
+    adapter_name: str | None,
+    *,
+    signals_by_node: dict[int, NodeSignals] | None = None,
+    request: RoutingRequest | None = None,
+) -> dep_store.Deployment | None:
+    """Head of `rank_deployments_for` when signals are passed; legacy
+    behavior (first-match, ignoring node load) otherwise.
+
+    The legacy fallback exists so existing test fixtures and any caller
+    that hasn't been updated still gets a deployment. New cluster-aware
+    call sites should pass signals + request.
+    """
+    if signals_by_node is None:
+        return _legacy_find_deployment_for(conn, base_model_name, adapter_name)
+    ranked = rank_deployments_for(
+        conn, base_model_name, adapter_name,
+        signals_by_node=signals_by_node,
+        request=request or RoutingRequest(affinity_key=None),
+    )
+    return ranked[0] if ranked else None
+
+
+def model_store_get_by_name(conn, name):
+    """Lazy import to avoid a circular dep at module import time."""
+    from serve_engine.store import models as _model_store
+    return _model_store.get_by_name(conn, name)
 
 
 async def ensure_adapter_loaded(

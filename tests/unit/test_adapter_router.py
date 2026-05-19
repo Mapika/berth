@@ -6,8 +6,10 @@ import pytest
 from serve_engine.lifecycle.adapter_router import (
     UnknownModel,
     find_deployment_for,
+    rank_deployments_for,
     resolve_target,
 )
+from serve_engine.routing.scorer import NodeSignals, RoutingRequest
 from serve_engine.store import adapters as ad_store
 from serve_engine.store import db
 from serve_engine.store import deployment_adapters as da_store
@@ -162,3 +164,96 @@ def test_find_deployment_for_no_ready_returns_none(tmp_path):
     ad_store.add(conn, name="x", base_model_name="qwen3-7b", hf_repo="o/lora")
     found = find_deployment_for(conn, "qwen3-7b", "x")
     assert found is None
+
+
+# ---- rank_deployments_for ----
+
+
+def _seed_dep_on_node(conn, *, model_id: int, node_id: int, vram_mb: int = 8000):
+    d = dep_store.create(
+        conn, model_id=model_id, backend="vllm", image_tag="vllm:test",
+        gpu_ids=[0], tensor_parallel=1, max_model_len=4096, dtype="auto",
+        vram_reserved_mb=vram_mb,
+    )
+    dep_store.set_container(
+        conn, d.id,
+        container_id=f"c{d.id}", container_name=f"x{d.id}",
+        container_port=49152 + d.id, container_address="127.0.0.1",
+        node_id=node_id,
+    )
+    dep_store.update_status(conn, d.id, "ready")
+    return d
+
+
+def test_rank_deployments_for_orders_by_scorer(tmp_path):
+    """Three deployments of the same base on three nodes. Scorer prefers
+    lower in_flight; the ranked order matches."""
+    conn = _fresh(tmp_path)
+    base = model_store.add(conn, name="test-base", hf_repo="o/x")
+    d10 = _seed_dep_on_node(conn, model_id=base.id, node_id=10)
+    d11 = _seed_dep_on_node(conn, model_id=base.id, node_id=11)
+    d12 = _seed_dep_on_node(conn, model_id=base.id, node_id=12)
+    signals = {
+        10: NodeSignals(node_id=10, mem_free_mb=20000, in_flight=5, latency_p95_ms=200),
+        11: NodeSignals(node_id=11, mem_free_mb=20000, in_flight=1, latency_p95_ms=100),
+        12: NodeSignals(node_id=12, mem_free_mb=20000, in_flight=3, latency_p95_ms=150),
+    }
+    ranked = rank_deployments_for(
+        conn, base_model_name="test-base", adapter_name=None,
+        signals_by_node=signals,
+        request=RoutingRequest(affinity_key=None),
+    )
+    assert [d.id for d in ranked] == [d11.id, d12.id, d10.id]
+
+
+def test_rank_deployments_for_filters_by_memory(tmp_path):
+    """Node 11 has too-low mem_free → dropped from the ranking."""
+    conn = _fresh(tmp_path)
+    base = model_store.add(conn, name="test-base", hf_repo="o/x")
+    _seed_dep_on_node(conn, model_id=base.id, node_id=10, vram_mb=8000)
+    _seed_dep_on_node(conn, model_id=base.id, node_id=11, vram_mb=8000)
+    _seed_dep_on_node(conn, model_id=base.id, node_id=12, vram_mb=8000)
+    signals = {
+        10: NodeSignals(node_id=10, mem_free_mb=20000, in_flight=0, latency_p95_ms=100),
+        11: NodeSignals(node_id=11, mem_free_mb=500, in_flight=0, latency_p95_ms=100),
+        12: NodeSignals(node_id=12, mem_free_mb=20000, in_flight=0, latency_p95_ms=100),
+    }
+    ranked = rank_deployments_for(
+        conn, base_model_name="test-base", adapter_name=None,
+        signals_by_node=signals,
+        request=RoutingRequest(affinity_key=None),
+    )
+    assert 11 not in {d.node_id for d in ranked}
+    assert len(ranked) == 2
+
+
+def test_find_deployment_for_is_head_of_rank_deployments_for(tmp_path):
+    conn = _fresh(tmp_path)
+    base = model_store.add(conn, name="test-base", hf_repo="o/x")
+    _seed_dep_on_node(conn, model_id=base.id, node_id=10)
+    _seed_dep_on_node(conn, model_id=base.id, node_id=11)
+    signals = {
+        10: NodeSignals(node_id=10, mem_free_mb=20000, in_flight=5, latency_p95_ms=200),
+        11: NodeSignals(node_id=11, mem_free_mb=20000, in_flight=1, latency_p95_ms=100),
+    }
+    ranked = rank_deployments_for(
+        conn, base_model_name="test-base", adapter_name=None,
+        signals_by_node=signals,
+        request=RoutingRequest(affinity_key=None),
+    )
+    head = find_deployment_for(
+        conn, "test-base", None,
+        signals_by_node=signals,
+        request=RoutingRequest(affinity_key=None),
+    )
+    assert head == ranked[0]
+
+
+def test_find_deployment_for_legacy_path_when_signals_omitted(tmp_path):
+    """Existing callers that don't pass signals must still get a deployment."""
+    conn = _fresh(tmp_path)
+    base = model_store.add(conn, name="test-base", hf_repo="o/x")
+    d10 = _seed_dep_on_node(conn, model_id=base.id, node_id=10)
+    found = find_deployment_for(conn, "test-base", None)
+    assert found is not None
+    assert found.id == d10.id
