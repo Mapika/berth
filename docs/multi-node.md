@@ -468,6 +468,57 @@ them:
   cover the new value. See `ensure_server_cert` in
   `src/serve_engine/cluster/ca.py`.
 
+## Observability
+
+Each agent samples GPU + per-deployment in-flight + recent latency on
+every heartbeat tick (5 s by default) and ships the snapshot on the
+existing WebSocket. The leader's `MetricsAggregator` keeps a 60 s
+rolling window per node and exposes the data three ways:
+
+### Prometheus
+
+`GET /metrics` (on the public listener) appends the cluster series
+after the existing daemon and engine sections. Stable label sets, safe
+to scrape with the default 30 s interval.
+
+| Series | Type | Labels |
+| --- | --- | --- |
+| `serve_node_gpu_util_pct` | gauge | `node`, `gpu` |
+| `serve_node_gpu_mem_used_bytes` | gauge | `node`, `gpu` |
+| `serve_deployment_in_flight` | gauge | `node`, `deployment`, `model` |
+| `serve_deployment_requests_total` | counter | `node`, `deployment`, `model` |
+| `serve_deployment_latency_p50_ms` | gauge | `node`, `deployment`, `model` |
+| `serve_deployment_latency_p95_ms` | gauge | `node`, `deployment`, `model` |
+| `serve_deployment_errors_total` | counter | `node`, `deployment`, `model` |
+
+The leader's own node also appears in these series — a small background
+task on the daemon mirrors the agent heartbeat for the local node so
+operators get one consistent surface regardless of whether a metric is
+local or remote.
+
+### Sample Grafana dashboard
+
+`docs/dashboards/serve-engine.json` ships a six-panel starter:
+GPU utilization, GPU memory, in-flight, p95 latency, request rate,
+error rate. Import it in Grafana's "Import dashboard" page; no auto-
+provisioning. Tune the panel queries for your label conventions.
+
+### Admin snapshot endpoint
+
+`GET /admin/metrics/snapshot` returns the latest per-node sample plus
+short sparkline series. The UI Cluster page consumes it on a 5 s poll
+and renders inline SVG sparklines on each node card.
+
+### Known limitations (today)
+
+- The leader's in-flight counter increments for every request the
+  proxy dispatches, including those routed to remote nodes. The local
+  sample therefore over-counts when remote deploys are active. Per-node
+  attribution is part of the smart-routing plan.
+- Remote agents currently report empty deployment lists — instrumenting
+  the agent's `_run_http_stream` dispatch path to populate in-flight +
+  latency is a small follow-up.
+
 ## Roadmap
 
 Tracked in the design docs, in priority order:
