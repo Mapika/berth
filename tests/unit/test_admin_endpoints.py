@@ -452,7 +452,7 @@ async def test_list_gpus_returns_list(app, monkeypatch):
 async def test_create_list_revoke_key(app):
     transport = httpx.ASGITransport(app=app)
     async with httpx.AsyncClient(transport=transport, base_url="http://test", timeout=30) as c:
-        # Create admin key first (bypass is active at this point - no keys exist yet)
+        # The fixture uses the local control app, so it can create the first key.
         r = await c.post("/admin/keys", json={"name": "alice", "tier": "admin"})
         assert r.status_code == 201
         body = r.json()
@@ -523,7 +523,7 @@ async def test_download_unknown_model_404(app):
 async def test_admin_route_requires_admin_tier(tmp_path, monkeypatch):
     """When non-admin keys exist, admin routes return 403 unless the bearer is admin."""
     from berth.backends.vllm import VLLMBackend
-    from berth.daemon.app import build_app
+    from berth.daemon.app import build_apps
     from berth.lifecycle.docker_client import ContainerHandle
     from berth.lifecycle.topology import GPUInfo, Topology
     from berth.store import api_keys as _ak
@@ -540,14 +540,15 @@ async def test_admin_route_requires_admin_tier(tmp_path, monkeypatch):
     )
     conn = _db.connect(tmp_path / "t.db")
     _db.init_schema(conn)
-    # Create a standard-tier key so the bypass is off
+    # Create keys before constructing the public app; TCP admin routes
+    # must require a bearer and then enforce admin tier.
     std_secret, _ = _ak.create(conn, name="user", tier="standard")
     admin_secret, _ = _ak.create(conn, name="root", tier="admin")
     topology = Topology(
         gpus=[GPUInfo(index=0, name="H100", total_mb=80 * 1024)],
         _islands={0: frozenset({0})},
     )
-    app = build_app(
+    app, _cluster_app, _uds_app = build_apps(
         conn=conn, docker_client=docker_client,
         backends={"vllm": VLLMBackend()}, models_dir=tmp_path, topology=topology,
     )
@@ -583,7 +584,7 @@ async def test_patch_key_allowed_models_success(app):
     """
     transport = httpx.ASGITransport(app=app)
     async with httpx.AsyncClient(transport=transport, base_url="http://test", timeout=30) as c:
-        # First key bypasses auth (no keys registered yet).
+        # Local control app can create the first key without a bearer.
         r = await c.post("/admin/keys", json={"name": "alice", "tier": "admin"})
         assert r.status_code == 201
         kid = r.json()["id"]
@@ -636,7 +637,7 @@ async def test_patch_key_404_when_missing(app):
     """PATCH on a nonexistent key id returns 404."""
     transport = httpx.ASGITransport(app=app)
     async with httpx.AsyncClient(transport=transport, base_url="http://test", timeout=30) as c:
-        # No keys exist - the bypass is active so we don't need to authenticate.
+        # Local control app can access admin endpoints without a bearer.
         r = await c.patch(
             "/admin/keys/99999",
             json={"allowed_models": ["nope"]},
@@ -649,9 +650,7 @@ async def test_create_key_with_allowed_models(app):
     """POST /admin/keys persists allowed_models when supplied."""
     transport = httpx.ASGITransport(app=app)
     async with httpx.AsyncClient(transport=transport, base_url="http://test", timeout=30) as c:
-        # First create an admin key for follow-up auth - once a key exists,
-        # the no-keys bypass disables and subsequent admin reads need a
-        # bearer (and admin tier).
+        # First create an admin key for follow-up bearer-auth coverage.
         r = await c.post("/admin/keys", json={"name": "root", "tier": "admin"})
         assert r.status_code == 201
         admin_auth = {"Authorization": f"Bearer {r.json()['secret']}"}
@@ -675,22 +674,118 @@ async def test_create_key_with_allowed_models(app):
 
 
 def test_stream_ticket_authorizes_only_stream_routes(app):
+    from types import SimpleNamespace
     from unittest.mock import MagicMock
 
     from berth.daemon.admin import require_admin_key
 
     key_store.create(app.state.conn, name="root", tier="admin")
-    token, _ = app.state.stream_tokens.issue()
+    token, _ = app.state.stream_tokens.issue(path="/admin/events")
+    public_app = SimpleNamespace(
+        state=SimpleNamespace(
+            conn=app.state.conn,
+            stream_tokens=app.state.stream_tokens,
+            tier_cfg=app.state.tier_cfg,
+            local_control_surface=False,
+        )
+    )
     request = MagicMock()
     request.method = "GET"
     request.scope = {"client": ("127.0.0.1", 12345)}
     request.url.path = "/admin/events"
     request.query_params = {"stream_token": token}
-    request.app = app
+    request.app = public_app
 
     assert require_admin_key(request) is None
-
-    request.url.path = "/admin/keys"
     with pytest.raises(HTTPException) as exc:
         require_admin_key(request)
     assert exc.value.status_code == 401
+
+    token, _ = app.state.stream_tokens.issue(path="/admin/events")
+    request.url.path = "/admin/keys"
+    request.query_params = {"stream_token": token}
+    with pytest.raises(HTTPException) as exc:
+        require_admin_key(request)
+    assert exc.value.status_code == 401
+
+
+def test_stream_ticket_is_bound_to_issued_path(app):
+    from types import SimpleNamespace
+    from unittest.mock import MagicMock
+
+    from berth.daemon.admin import require_admin_key
+
+    key_store.create(app.state.conn, name="root", tier="admin")
+    token, _ = app.state.stream_tokens.issue(path="/admin/events")
+    public_app = SimpleNamespace(
+        state=SimpleNamespace(
+            conn=app.state.conn,
+            stream_tokens=app.state.stream_tokens,
+            tier_cfg=app.state.tier_cfg,
+            local_control_surface=False,
+        )
+    )
+    request = MagicMock()
+    request.method = "GET"
+    request.scope = {"client": ("127.0.0.1", 12345)}
+    request.url.path = "/admin/requests/stream"
+    request.query_params = {"stream_token": token}
+    request.app = public_app
+
+    with pytest.raises(HTTPException) as exc:
+        require_admin_key(request)
+    assert exc.value.status_code == 401
+
+
+@pytest.mark.asyncio
+async def test_create_stream_token_rejects_non_stream_path(app):
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(
+        transport=transport, base_url="http://test", timeout=30,
+    ) as c:
+        r = await c.post("/admin/keys", json={"name": "root", "tier": "admin"})
+        assert r.status_code == 201
+        admin_auth = {"Authorization": f"Bearer {r.json()['secret']}"}
+        r = await c.post(
+            "/admin/stream-token",
+            headers=admin_auth,
+            json={"path": "/admin/keys"},
+        )
+    assert r.status_code == 400
+
+
+@pytest.mark.asyncio
+async def test_create_stream_token_rejects_malformed_log_stream_path(app):
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(
+        transport=transport, base_url="http://test", timeout=30,
+    ) as c:
+        r = await c.post("/admin/keys", json={"name": "root", "tier": "admin"})
+        assert r.status_code == 201
+        admin_auth = {"Authorization": f"Bearer {r.json()['secret']}"}
+        r = await c.post(
+            "/admin/stream-token",
+            headers=admin_auth,
+            json={"path": "/admin/deployments/../../keys/logs/stream"},
+        )
+    assert r.status_code == 400
+
+
+@pytest.mark.asyncio
+async def test_create_stream_token_returns_path_bound_ticket(app):
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(
+        transport=transport, base_url="http://test", timeout=30,
+    ) as c:
+        r = await c.post("/admin/keys", json={"name": "root", "tier": "admin"})
+        assert r.status_code == 201
+        admin_auth = {"Authorization": f"Bearer {r.json()['secret']}"}
+        r = await c.post(
+            "/admin/stream-token",
+            headers=admin_auth,
+            json={"path": "/admin/events"},
+        )
+    assert r.status_code == 200
+    body = r.json()
+    assert body["path"] == "/admin/events"
+    assert body["token"]

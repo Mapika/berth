@@ -9,6 +9,7 @@ and re-downloadable, logs are an operations artefact.
 """
 from __future__ import annotations
 
+import os
 import sqlite3
 import tarfile
 import time
@@ -49,19 +50,27 @@ def create_backup(
         dst.close()
 
     try:
-        with tarfile.open(dest_path, "w:gz") as tar:
-            tar.add(str(snapshot_path), arcname="db.sqlite")
-            if (config.BERTH_DIR / "ca").exists():
-                tar.add(
-                    str(config.BERTH_DIR / "ca"), arcname="ca",
-                )
-            if (config.BERTH_DIR / "key_pepper").exists():
-                tar.add(
-                    str(config.BERTH_DIR / "key_pepper"),
-                    arcname="key_pepper",
-                )
-            if config.CONFIG_FILE.exists():
-                tar.add(str(config.CONFIG_FILE), arcname="config.toml")
+        fd = os.open(dest_path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        try:
+            os.fchmod(fd, 0o600)
+            with os.fdopen(fd, "wb") as f:
+                fd = -1
+                with tarfile.open(fileobj=f, mode="w:gz") as tar:
+                    tar.add(str(snapshot_path), arcname="db.sqlite")
+                    if (config.BERTH_DIR / "ca").exists():
+                        tar.add(
+                            str(config.BERTH_DIR / "ca"), arcname="ca",
+                        )
+                    if (config.BERTH_DIR / "key_pepper").exists():
+                        tar.add(
+                            str(config.BERTH_DIR / "key_pepper"),
+                            arcname="key_pepper",
+                        )
+                    if config.CONFIG_FILE.exists():
+                        tar.add(str(config.CONFIG_FILE), arcname="config.toml")
+        finally:
+            if fd >= 0:
+                os.close(fd)
     finally:
         snapshot_path.unlink(missing_ok=True)
     typer.echo(f"wrote backup → {dest_path}")

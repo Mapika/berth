@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import os
 import socket
+import stat
 import subprocess
 import sys
 import time
@@ -35,29 +36,45 @@ def _wait_for_port(port: int, *, timeout_s: float = 30.0) -> None:
     raise TimeoutError(f"port {port} did not open within {timeout_s}s")
 
 
+def _start_daemon(
+    tmp_path: Path,
+    public_port: int,
+    cluster_port: int,
+    sock_path: Path,
+    *,
+    umask: int | None = None,
+) -> subprocess.Popen[str]:
+    env = os.environ.copy()
+    env["BERTH_HOME"] = str(tmp_path)
+    args = [
+        sys.executable, "-m", "berth.daemon",
+        "--public-host", "127.0.0.1",
+        "--public-port", str(public_port),
+        "--public-bind", "127.0.0.1",
+        "--cluster-host", "127.0.0.1",
+        "--cluster-port", str(cluster_port),
+        "--cluster-bind", "127.0.0.1",
+        "--sock", str(sock_path),
+    ]
+    old_umask = os.umask(umask) if umask is not None else None
+    try:
+        return subprocess.Popen(
+            args,
+            env=env,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+        )
+    finally:
+        if old_umask is not None:
+            os.umask(old_umask)
+
+
 def test_daemon_tls_both_listeners(tmp_path: Path):
     public_port = _free_port()
     cluster_port = _free_port()
     sock_path = tmp_path / "sock"
-    env = os.environ.copy()
-    env["SERVE_HOME"] = str(tmp_path)
-
-    proc = subprocess.Popen(
-        [
-            sys.executable, "-m", "berth.daemon",
-            "--public-host", "127.0.0.1",
-            "--public-port", str(public_port),
-            "--public-bind", "127.0.0.1",
-            "--cluster-host", "127.0.0.1",
-            "--cluster-port", str(cluster_port),
-            "--cluster-bind", "127.0.0.1",
-            "--sock", str(sock_path),
-        ],
-        env=env,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.STDOUT,
-        text=True,
-    )
+    proc = _start_daemon(tmp_path, public_port, cluster_port, sock_path)
     try:
         _wait_for_port(public_port)
         _wait_for_port(cluster_port)
@@ -76,6 +93,51 @@ def test_daemon_tls_both_listeners(tmp_path: Path):
         import hashlib
         fp = "sha256:" + hashlib.sha256(r.text.encode("utf-8")).hexdigest()
         assert r.headers["x-serve-ca-fingerprint"] == fp
+    finally:
+        proc.terminate()
+        try:
+            proc.wait(timeout=10)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+            proc.wait()
+
+
+def test_daemon_control_socket_is_owner_only(tmp_path: Path):
+    public_port = _free_port()
+    cluster_port = _free_port()
+    sock_path = tmp_path / "sock"
+    proc = _start_daemon(
+        tmp_path,
+        public_port,
+        cluster_port,
+        sock_path,
+        umask=0o022,
+    )
+    try:
+        _wait_for_port(public_port)
+        mode = stat.S_IMODE(sock_path.stat().st_mode)
+        assert mode == 0o600
+    finally:
+        proc.terminate()
+        try:
+            proc.wait(timeout=10)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+            proc.wait()
+
+
+def test_daemon_serve_home_is_owner_only(tmp_path: Path):
+    serve_home = tmp_path / "home"
+    serve_home.mkdir()
+    serve_home.chmod(0o755)
+    public_port = _free_port()
+    cluster_port = _free_port()
+    sock_path = serve_home / "sock"
+    proc = _start_daemon(serve_home, public_port, cluster_port, sock_path)
+    try:
+        _wait_for_port(public_port)
+        mode = stat.S_IMODE(serve_home.stat().st_mode)
+        assert mode == 0o700
     finally:
         proc.terminate()
         try:

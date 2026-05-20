@@ -14,8 +14,9 @@ def logs(follow: bool = typer.Option(True, "--follow/--no-follow", "-f")):
     """Stream logs from the currently active deployment's engine container."""
     async def run():
         transport = httpx.AsyncHTTPTransport(uds=str(config.SOCK_PATH))
+        timeout = httpx.Timeout(connect=5.0, read=None, write=5.0, pool=5.0)
         async with httpx.AsyncClient(
-            transport=transport, base_url="http://daemon", timeout=None
+            transport=transport, base_url="http://daemon", timeout=timeout,
         ) as c:
             try:
                 async with c.stream("GET", "/admin/deployments/current/logs") as r:

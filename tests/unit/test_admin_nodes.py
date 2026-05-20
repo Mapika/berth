@@ -70,6 +70,37 @@ async def test_enroll_different_calls_yield_different_tokens(app):
 
 
 @pytest.mark.asyncio
+async def test_enroll_rejects_reserved_local_label(app):
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as c:
+        r = await c.post("/admin/nodes/enroll", json={"label": "local"})
+    assert r.status_code == 400
+    assert "reserved" in r.json()["detail"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "label",
+    [
+        "",
+        " ",
+        " local",
+        "local ",
+        "agent\nx",
+        "../agent",
+        "agent/x",
+        "a" * 64,
+    ],
+)
+async def test_enroll_rejects_unsafe_labels(app, label):
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as c:
+        r = await c.post("/admin/nodes/enroll", json={"label": label})
+    assert r.status_code == 400
+    assert "label" in r.json()["detail"]
+
+
+@pytest.mark.asyncio
 async def test_list_includes_local_node(app):
     transport = httpx.ASGITransport(app=app)
     async with httpx.AsyncClient(transport=transport, base_url="http://test") as c:

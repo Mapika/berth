@@ -47,7 +47,7 @@ curl -k https://127.0.0.1:11500/healthz
 For a real exposed service, prefer:
 
 ```bash
-berth deploy bootstrap --domain serve.example.com --behind-proxy
+berth deploy bootstrap --domain serve.example.com
 ```
 
 Then put Caddy or Nginx in front. See `docs/caddy.md`.
@@ -123,7 +123,7 @@ Defaults:
 
 - Public API/UI: `https://<public_host>:11500`
 - Cluster agent listener: `https://<cluster_host>:11501`
-- Local CLI control socket: `~/.serve/sock`
+- Local CLI control socket: `~/.berth/sock`
 
 Show resolved config:
 
@@ -134,13 +134,13 @@ berth config show
 For local-only testing:
 
 ```bash
-SERVE_PUBLIC_BIND=127.0.0.1 berth daemon start
+BERTH_PUBLIC_BIND=127.0.0.1 berth daemon start
 ```
 
 For reverse proxy mode, use `docs/caddy.md` or:
 
 ```bash
-berth deploy bootstrap --domain serve.example.com --behind-proxy
+berth deploy bootstrap --domain serve.example.com
 ```
 
 ## API Key Fails
@@ -158,5 +158,5 @@ export SERVE_TOKEN=sk-...
 curl -k "$SERVE_URL/v1/models" -H "Authorization: Bearer $SERVE_TOKEN"
 ```
 
-If the key pepper file was lost from `~/.serve/key_pepper`, old keys cannot be
+If the key pepper file was lost from `~/.berth/key_pepper`, old keys cannot be
 verified. Mint new keys and back up `db.sqlite` and `key_pepper` together.

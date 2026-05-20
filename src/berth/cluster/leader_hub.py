@@ -2,9 +2,11 @@ from __future__ import annotations
 
 import hashlib
 import logging
+import os
 import sqlite3
 import time
 from collections.abc import Callable
+from ipaddress import ip_address, ip_network
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect, status
 
@@ -24,6 +26,7 @@ log = logging.getLogger(__name__)
 
 
 FingerprintResolver = Callable[[WebSocket], str | None]
+_MAX_INVENTORY_INT = 1_000_000_000
 
 
 def _peer_cert_fingerprint(ws: WebSocket) -> str | None:
@@ -53,17 +56,89 @@ def _default_fingerprint_resolver(ws: WebSocket) -> str | None:
     """Production resolver: trust the TLS layer's peer cert.
 
     Falls back to an `x-serve-client-fingerprint` header only if a
-    proxy is explicitly configured to forward it via the environment
-    variable `SERVE_TRUST_FORWARDED_FP=1`. This preserves the old
-    reverse-proxy deployment as an opt-in but defaults to direct
-    TLS termination."""
-    import os
+    proxy is explicitly configured to forward it via
+    `BERTH_TRUST_FORWARDED_FP=1` (legacy: `SERVE_TRUST_FORWARDED_FP=1`)
+    and the direct TCP peer is in `BERTH_FORWARDED_ALLOW_IPS` (legacy:
+    `SERVE_FORWARDED_ALLOW_IPS`). This preserves old reverse-proxy
+    deployments as an opt-in without accepting spoofed headers from
+    arbitrary internet clients."""
     fp = _peer_cert_fingerprint(ws)
     if fp is not None:
         return fp
-    if os.environ.get("SERVE_TRUST_FORWARDED_FP") == "1":
-        return ws.headers.get("x-serve-client-fingerprint")
+    if _env_get("SERVE_TRUST_FORWARDED_FP") == "1":
+        client_host = _websocket_client_host(ws)
+        allowlist = _env_get("SERVE_FORWARDED_ALLOW_IPS") or "127.0.0.1"
+        if client_host is not None and _allowed_proxy(client_host, allowlist):
+            return ws.headers.get("x-serve-client-fingerprint")
+        log.warning(
+            "cluster ws reject: forwarded fingerprint from untrusted peer %s",
+            client_host,
+        )
     return None
+
+
+def _env_get(legacy_serve_key: str) -> str | None:
+    berth_key = "BERTH_" + legacy_serve_key[len("SERVE_"):]
+    return os.environ.get(berth_key) or os.environ.get(legacy_serve_key)
+
+
+def _allowed_proxy(host: str, allowlist: str) -> bool:
+    for raw in allowlist.split(","):
+        entry = raw.strip()
+        if not entry:
+            continue
+        if entry == "*":
+            return True
+        try:
+            if ip_address(host) in ip_network(entry, strict=False):
+                return True
+        except ValueError:
+            if host == entry:
+                return True
+    return False
+
+
+def _websocket_client_host(ws: WebSocket) -> str | None:
+    client = ws.client
+    if client is None:
+        client = ws.scope.get("client")
+    if client is None:
+        return None
+    host = getattr(client, "host", None)
+    if host is not None:
+        return str(host)
+    if isinstance(client, tuple) and client:
+        return str(client[0])
+    return str(client)
+
+
+def _coerce_inventory_int(value: object, field: str) -> int:
+    if isinstance(value, bool):
+        raise ValueError(f"{field} must be a non-negative integer")
+    if isinstance(value, int):
+        parsed = value
+    elif isinstance(value, str):
+        parsed = int(value)
+    else:
+        raise ValueError(f"{field} must be a non-negative integer")
+    if parsed < 0 or parsed > _MAX_INVENTORY_INT:
+        raise ValueError(f"{field} must be between 0 and {_MAX_INVENTORY_INT}")
+    return parsed
+
+
+def _parse_hello_inventory(host_info: dict[str, object]) -> dict[str, int]:
+    return {
+        "cpu_count": _coerce_inventory_int(host_info.get("cpu_count", 0), "cpu_count"),
+        "total_ram_mb": _coerce_inventory_int(
+            host_info.get("total_ram_mb", 0),
+            "total_ram_mb",
+        ),
+        "gpu_count": _coerce_inventory_int(host_info.get("gpu_count", 0), "gpu_count"),
+        "total_vram_mb": _coerce_inventory_int(
+            host_info.get("total_vram_mb", 0),
+            "total_vram_mb",
+        ),
+    }
 
 
 class _WSAdapter:
@@ -145,14 +220,24 @@ class LeaderHub:
             await ws.close(code=status.WS_1003_UNSUPPORTED_DATA)
             return
 
+        try:
+            inventory = _parse_hello_inventory(hello.host_info)
+        except ValueError as e:
+            log.warning(
+                "cluster ws reject: malformed hello inventory from node %s: %s",
+                node.id, e,
+            )
+            await ws.close(code=status.WS_1008_POLICY_VIOLATION)
+            return
+
         now = time.time()
         nodes_store.update_inventory(
             self._conn, node.id,
             agent_version=hello.agent_version,
-            cpu_count=int(hello.host_info.get("cpu_count", 0)),
-            total_ram_mb=int(hello.host_info.get("total_ram_mb", 0)),
-            gpu_count=int(hello.host_info.get("gpu_count", 0)),
-            total_vram_mb=int(hello.host_info.get("total_vram_mb", 0)),
+            cpu_count=inventory["cpu_count"],
+            total_ram_mb=inventory["total_ram_mb"],
+            gpu_count=inventory["gpu_count"],
+            total_vram_mb=inventory["total_vram_mb"],
         )
         nodes_store.set_status(self._conn, node.id, status="ready", last_seen=now)
         try:

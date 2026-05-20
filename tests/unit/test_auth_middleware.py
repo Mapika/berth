@@ -9,7 +9,12 @@ from berth.store import api_keys, db, key_usage
 
 @pytest.fixture
 def app_factory(tmp_path):
-    def make(create_admin_key: bool, **key_kwargs):
+    def make(
+        create_admin_key: bool,
+        *,
+        local_control_surface: bool = False,
+        **key_kwargs,
+    ):
         conn = db.connect(tmp_path / "t.db")
         db.init_schema(conn)
         secret = None
@@ -18,6 +23,7 @@ def app_factory(tmp_path):
         a = FastAPI()
         a.state.conn = conn
         a.state.tier_cfg = tiers.load_tiers()
+        a.state.local_control_surface = local_control_surface
 
         @a.post("/v1/test")
         async def _test(key=Depends(require_auth_dep)):
@@ -31,9 +37,20 @@ def app_factory(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_no_keys_table_empty_means_bypass(app_factory):
-    """When the api_keys table is empty, auth is bypassed entirely."""
+async def test_tcp_no_keys_table_empty_requires_bearer(app_factory):
+    """A publicly reachable listener must not become unauthenticated just
+    because the operator has not minted the first key yet."""
     app, _ = app_factory(create_admin_key=False)
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://t") as c:
+        r = await c.post("/v1/test")
+    assert r.status_code == 401
+
+
+@pytest.mark.asyncio
+async def test_local_control_surface_no_keys_can_bootstrap(app_factory):
+    """Local UDS/control requests remain the bootstrap path for the first key."""
+    app, _ = app_factory(create_admin_key=False, local_control_surface=True)
     transport = httpx.ASGITransport(app=app)
     async with httpx.AsyncClient(transport=transport, base_url="http://t") as c:
         r = await c.post("/v1/test")

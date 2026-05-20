@@ -23,17 +23,15 @@ def _public_app(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_metrics_unauth_when_no_keys_exist_is_allowed(tmp_path):
-    """Bootstrap window: before any key is minted, /metrics is still
-    reachable (operator may be checking startup health). Once a key
-    exists, auth kicks in."""
+async def test_metrics_requires_auth_even_when_no_keys_exist(tmp_path):
+    """Public metrics must not expose inventory during first-run bootstrap."""
     app, _ = _public_app(tmp_path)
     transport = httpx.ASGITransport(app=app)
     async with httpx.AsyncClient(
         transport=transport, base_url="http://1.2.3.4",
     ) as c:
         r = await c.get("/metrics")
-    assert r.status_code == 200
+    assert r.status_code == 401
 
 
 @pytest.mark.asyncio

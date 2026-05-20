@@ -3,6 +3,7 @@ configuration: writes config.toml, initialises the DB + CA + pepper,
 mints the first admin key, prints next-step instructions."""
 from __future__ import annotations
 
+import stat
 import tomllib
 
 from typer.testing import CliRunner
@@ -111,6 +112,21 @@ def test_bootstrap_initialises_db_ca_and_pepper(tmp_path, monkeypatch):
     assert (tmp_path / "ca" / "ca.key").exists()
     assert (tmp_path / "key_pepper").exists()
     assert "migrations applied" in out["db_status"]
+
+
+def test_bootstrap_makes_existing_home_owner_only(tmp_path, monkeypatch):
+    home = tmp_path / "home"
+    home.mkdir()
+    home.chmod(0o755)
+    _isolate(monkeypatch, home)
+
+    _bootstrap(
+        domain="serve.example.com",
+        public_port=11500, cluster_port=11501,
+        behind_proxy=True, serve_home=home, force=False,
+    )
+
+    assert stat.S_IMODE(home.stat().st_mode) == 0o700
 
 
 def test_bootstrap_mints_first_admin_key_when_table_empty(tmp_path, monkeypatch):

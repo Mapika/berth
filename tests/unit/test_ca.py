@@ -1,5 +1,9 @@
 from __future__ import annotations
 
+import os
+import stat
+from pathlib import Path
+
 from cryptography import x509
 
 from berth.cluster.ca import (
@@ -69,3 +73,29 @@ def test_ca_key_is_mode_600(tmp_path):
     generate_ca(ca_dir, common_name="x")
     mode = (ca_dir / "ca.key").stat().st_mode & 0o777
     assert mode == 0o600
+
+
+def test_ca_key_is_owner_only_if_creation_stops_before_chmod(
+    tmp_path,
+    monkeypatch,
+):
+    ca_dir = tmp_path / "ca"
+    key_path = ca_dir / "ca.key"
+    real_chmod = Path.chmod
+
+    def fail_key_chmod(self, mode):
+        if self == key_path and mode == 0o600:
+            raise RuntimeError("simulated interruption")
+        return real_chmod(self, mode)
+
+    monkeypatch.setattr(Path, "chmod", fail_key_chmod)
+    old_umask = os.umask(0)
+    try:
+        try:
+            generate_ca(ca_dir, common_name="x")
+        except RuntimeError:
+            pass
+    finally:
+        os.umask(old_umask)
+
+    assert stat.S_IMODE(key_path.stat().st_mode) == 0o600

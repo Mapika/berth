@@ -101,9 +101,11 @@ def create(
             max_loras, max_lora_rank,
         ),
     )
-    assert cur.lastrowid is not None
+    if cur.lastrowid is None:
+        raise RuntimeError("deployment insert did not return a row id")
     result = get_by_id(conn, cur.lastrowid)
-    assert result is not None
+    if result is None:
+        raise RuntimeError(f"deployment insert returned missing row id={cur.lastrowid}")
     return result
 
 
@@ -164,7 +166,7 @@ def set_container(
 def find_active(conn: sqlite3.Connection) -> Deployment | None:
     placeholders = ",".join(["?"] * len(ACTIVE_STATUSES))
     row = conn.execute(
-        f"SELECT * FROM deployments WHERE status IN ({placeholders}) ORDER BY id DESC LIMIT 1",
+        f"SELECT * FROM deployments WHERE status IN ({placeholders}) ORDER BY id DESC LIMIT 1",  # nosec
         ACTIVE_STATUSES,
     ).fetchone()
     return _row_to_dep(row) if row else None

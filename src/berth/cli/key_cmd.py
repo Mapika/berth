@@ -35,7 +35,7 @@ def list_keys(json_out: bool = typer.Option(False, "--json")):
         typer.echo(json.dumps(keys, indent=2))
         return
     if not keys:
-        typer.echo("no keys (auth bypassed)")
+        typer.echo("no keys (create the first key over the local control socket)")
         return
     typer.echo(f"{'ID':<4} {'NAME':<20} {'TIER':<10} {'PREFIX':<14} {'REVOKED':<8}")
     for k in keys:

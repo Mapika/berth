@@ -353,7 +353,8 @@ class LifecycleManager:
                 # takes its requested fraction of the *whole* GPU, so two
                 # co-located deployments fight for memory and the later
                 # one OOMs.
-                assert self._topology is not None
+                if self._topology is None:
+                    raise RuntimeError("local deployment requires GPU topology")
                 per_gpu_mb = self._topology.gpus[gpu_ids[0]].total_mb
                 mem_util = backend.headroom.effective_util(
                     reserved_mb=int(vram_mb / tp),
@@ -381,7 +382,8 @@ class LifecycleManager:
             container_env = backend.container_env(effective_plan)
 
             if is_remote:
-                assert self._registry is not None
+                if self._registry is None:
+                    raise RuntimeError("remote deployment requires an agent registry")
                 link = self._registry.get(target_node_id)
                 if link is None:
                     raise RuntimeError(

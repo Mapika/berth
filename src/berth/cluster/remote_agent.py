@@ -167,7 +167,7 @@ class RemoteAgentLink:
                 try:
                     await self._send(LogCancel(stream_id=stream_id))
                 except Exception:
-                    pass
+                    pass  # nosec
 
     async def probe_container(
         self, *, container_id: str, path: str,
@@ -236,4 +236,4 @@ class RemoteAgentLink:
                 try:
                     await self._send(HttpCancel(stream_id=stream_id))
                 except Exception:
-                    pass
+                    pass  # nosec

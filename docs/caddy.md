@@ -33,7 +33,7 @@ serve.example.com {
 
 ## On the daemon side
 
-Set the corresponding `~/.serve/config.toml`:
+Set the corresponding `~/.berth/config.toml`:
 
 ```toml
 [public]

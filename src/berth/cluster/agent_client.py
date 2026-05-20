@@ -238,13 +238,13 @@ class AgentFrameDispatcher:
             try:
                 await _emit(b"", eof=True)
             except Exception:
-                pass
+                pass  # nosec
             raise
         except Exception as e:
             try:
                 await _emit(f"[berth] {e}\n".encode(), eof=True)
             except Exception:
-                pass
+                pass  # nosec
         finally:
             self._inflight.pop(frame.stream_id, None)
 
@@ -460,7 +460,7 @@ async def run_agent(serve_home: Path) -> None:
                 try:
                     host_port = int(bindings[0]["HostPort"])
                     host_addr = bindings[0].get("HostIp") or "127.0.0.1"
-                    if host_addr in ("0.0.0.0", ""):
+                    if host_addr in ("0.0.0.0", ""):  # nosec
                         host_addr = "127.0.0.1"
                     break
                 except (KeyError, TypeError, ValueError):

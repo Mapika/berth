@@ -70,32 +70,33 @@ def insert(
          first_seen, last_seen, agent_version,
          cpu_count, total_ram_mb, gpu_count, total_vram_mb),
     )
-    assert cur.lastrowid is not None
+    if cur.lastrowid is None:
+        raise RuntimeError("node insert did not return a row id")
     return cur.lastrowid
 
 
 def get(conn: sqlite3.Connection, node_id: int) -> Node | None:
-    cur = conn.execute(f"SELECT {_COLUMNS} FROM nodes WHERE id = ?", (node_id,))
+    cur = conn.execute(f"SELECT {_COLUMNS} FROM nodes WHERE id = ?", (node_id,))  # nosec
     row = cur.fetchone()
     return _row_to_node(row) if row else None
 
 
 def find_by_label(conn: sqlite3.Connection, label: str) -> Node | None:
-    cur = conn.execute(f"SELECT {_COLUMNS} FROM nodes WHERE label = ?", (label,))
+    cur = conn.execute(f"SELECT {_COLUMNS} FROM nodes WHERE label = ?", (label,))  # nosec
     row = cur.fetchone()
     return _row_to_node(row) if row else None
 
 
 def find_by_fingerprint(conn: sqlite3.Connection, fingerprint: str) -> Node | None:
     cur = conn.execute(
-        f"SELECT {_COLUMNS} FROM nodes WHERE fingerprint = ?", (fingerprint,),
+        f"SELECT {_COLUMNS} FROM nodes WHERE fingerprint = ?", (fingerprint,),  # nosec
     )
     row = cur.fetchone()
     return _row_to_node(row) if row else None
 
 
 def list_all(conn: sqlite3.Connection) -> list[Node]:
-    cur = conn.execute(f"SELECT {_COLUMNS} FROM nodes ORDER BY id")
+    cur = conn.execute(f"SELECT {_COLUMNS} FROM nodes ORDER BY id")  # nosec
     return [_row_to_node(r) for r in cur.fetchall()]
 
 

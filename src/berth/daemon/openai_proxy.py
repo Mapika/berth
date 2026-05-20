@@ -15,6 +15,7 @@ from berth.cluster.agent_link import ENGINE_TIMEOUT
 from berth.cluster.agent_registry import AgentRegistry
 from berth.daemon.dispatch import open_upstream_stream
 from berth.daemon.dispatch_errors import NodeUnreachableError
+from berth.daemon.metrics_aggregator import safe_metric_int
 from berth.daemon.retry_dispatcher import dispatch_with_retry
 from berth.lifecycle.adapter_router import (
     UnknownModel,
@@ -49,6 +50,18 @@ _FORWARDABLE_RESPONSE_HEADERS = {
     "x-request-id",
     "x-trace-id",
     "x-served-by",
+}
+
+# Request headers sent to a model engine are allowlisted too. The public
+# listener authenticates with berth API keys, but the engine does not need
+# caller cookies, proxy credentials, API-key aliases, or browser metadata.
+_FORWARDABLE_REQUEST_HEADERS = {
+    "accept",
+    "content-type",
+    "traceparent",
+    "tracestate",
+    "x-request-id",
+    "x-trace-id",
 }
 
 
@@ -115,14 +128,19 @@ def _build_signals_by_node(aggregator) -> dict[int, NodeSignals]:
     for node_id, sample in aggregator.snapshot().items():
         gpus = sample.get("gpus", [])
         mem_free = sum(
-            max(0, int(g.get("mem_total_mb", 0)) - int(g.get("mem_used_mb", 0)))
+            max(
+                0,
+                safe_metric_int(g.get("mem_total_mb", 0))
+                - safe_metric_int(g.get("mem_used_mb", 0)),
+            )
             for g in gpus
         )
         in_flight = sum(
-            int(d.get("in_flight", 0)) for d in sample.get("deployments", [])
+            safe_metric_int(d.get("in_flight", 0))
+            for d in sample.get("deployments", [])
         )
         p95 = max(
-            (int(d.get("latency_p95_ms", 0))
+            (safe_metric_int(d.get("latency_p95_ms", 0))
              for d in sample.get("deployments", [])),
             default=0,
         )
@@ -197,7 +215,9 @@ async def _proxy(
     try:
         parsed = json.loads(body) if body else {}
         if isinstance(parsed, dict):
-            model_name = parsed.get("model")
+            raw_model = parsed.get("model")
+            if isinstance(raw_model, str) and raw_model:
+                model_name = raw_model
     except json.JSONDecodeError:
         pass
 
@@ -207,7 +227,7 @@ async def _proxy(
     tracer.update(trace, model_requested=model_name)
 
     # Optional per-key model allowlist (migration 013).
-    # - key is None: UDS request or no-keys-registered bypass; skip the check.
+    # - key is None: local control request without keys; skip the check.
     # - key.allowed_models is None: unrestricted key; skip the check.
     # - key.allowed_models == []: deny-all; the loop below rejects every model.
     # - key.allowed_models == [...]: restrict to listed names.
@@ -369,13 +389,11 @@ async def _proxy(
         except (TypeError, json.JSONDecodeError):
             pass  # body already validated as JSON above; should not happen
 
-    _HOP_BY_HOP = {"host", "content-length", "transfer-encoding", "connection"}
     headers = {
-        k: v for k, v in request.headers.items() if k.lower() not in _HOP_BY_HOP
+        k: v
+        for k, v in request.headers.items()
+        if k.lower() in _FORWARDABLE_REQUEST_HEADERS
     }
-    # Strip the user's Authorization (don't leak the API key to the engine).
-    headers.pop("authorization", None)
-    headers.pop("Authorization", None)
 
     # Determine the ranked candidate list and the dispatch budget.
     # Adapter requests stay single-shot: only the head deployment has
@@ -568,7 +586,9 @@ class _UsageTracker:
                     try:
                         obj = json.loads(body)
                         u = obj.get("usage") or {}
-                        return int(u.get("prompt_tokens", 0)), int(u.get("completion_tokens", 0))
+                        return _safe_usage_int(u.get("prompt_tokens", 0)), _safe_usage_int(
+                            u.get("completion_tokens", 0),
+                        )
                     except (json.JSONDecodeError, AttributeError):
                         continue
             return 0, 0
@@ -578,9 +598,26 @@ class _UsageTracker:
         try:
             obj = json.loads(bytes(self._json_buf))
             u = obj.get("usage") or {}
-            return int(u.get("prompt_tokens", 0)), int(u.get("completion_tokens", 0))
+            return _safe_usage_int(u.get("prompt_tokens", 0)), _safe_usage_int(
+                u.get("completion_tokens", 0),
+            )
         except (json.JSONDecodeError, AttributeError):
             return 0, 0
+
+
+def _safe_usage_int(value: object) -> int:
+    if isinstance(value, bool):
+        return 0
+    if isinstance(value, int):
+        parsed = value
+    elif isinstance(value, str):
+        try:
+            parsed = int(value)
+        except ValueError:
+            return 0
+    else:
+        return 0
+    return max(0, parsed)
 
 
 @router.post("/v1/chat/completions")
@@ -610,9 +647,14 @@ async def embeddings(
 @router.get("/v1/models")
 def models(
     request: Request,
-    _key: _api_keys_store.ApiKey | None = Depends(require_auth_dep),
+    key: _api_keys_store.ApiKey | None = Depends(require_auth_dep),
 ):
     conn: sqlite3.Connection = request.app.state.conn
+    allowed_models = key.allowed_models if key is not None else None
+
+    def visible(model_name: str) -> bool:
+        return allowed_models is None or model_name in allowed_models
+
     ready_by_model: dict[int, dep_store.Deployment] = {}
     for d in dep_store.list_ready(conn):
         ready_by_model[d.model_id] = d
@@ -626,6 +668,7 @@ def models(
             "pinned": ready_by_model[m.id].pinned if m.id in ready_by_model else False,
         }
         for m in rows
+        if visible(m.name)
     ]
     # Adapters appear alongside base models - clients can `model=<adapter>`
     # directly. `base` field disambiguates for clients that want the parent.
@@ -639,5 +682,6 @@ def models(
             "downloaded": a.local_path is not None,
         }
         for a in ad_store.list_all(conn)
+        if visible(a.name)
     ]
     return {"object": "list", "data": base_entries + adapter_entries}

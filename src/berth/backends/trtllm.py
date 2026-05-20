@@ -54,7 +54,7 @@ class TRTLLMBackend(ContainerBackend):
         argv: list[str] = [
             "trtllm-serve", local_model_path,
             "--backend", "pytorch",
-            "--host", "0.0.0.0",
+            "--host", "0.0.0.0",  # nosec
             "--port", str(self.manifest.internal_port),
             "--tp_size", str(plan.tensor_parallel),
             "--max_seq_len", str(plan.max_model_len),

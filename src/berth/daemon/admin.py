@@ -4,6 +4,8 @@ import logging as _audit_logging
 import sqlite3
 import time as _rl_time
 from collections import OrderedDict, deque
+from dataclasses import dataclass
+from ipaddress import ip_address, ip_network
 from typing import Any, cast
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
@@ -29,17 +31,24 @@ def _is_uds_request(request: Request) -> bool:
     on UDS (e.g. ('', 0)).
     """
     client = request.scope.get("client")
-    return client is None
+    return client is None or bool(
+        getattr(request.app.state, "local_control_surface", False)
+    )
+
+
+def _is_stream_ticket_path(path: str) -> bool:
+    if path in ("/admin/events", "/admin/requests/stream"):
+        return True
+    prefix = "/admin/deployments/"
+    suffix = "/logs/stream"
+    if not path.startswith(prefix) or not path.endswith(suffix):
+        return False
+    dep_id = path[len(prefix):-len(suffix)]
+    return dep_id.isdecimal()
 
 
 def _is_stream_ticket_request(request: Request) -> bool:
-    if request.method != "GET":
-        return False
-    path = request.url.path
-    return path in ("/admin/events", "/admin/requests/stream") or (
-        path.startswith("/admin/deployments/")
-        and path.endswith("/logs/stream")
-    )
+    return request.method == "GET" and _is_stream_ticket_path(request.url.path)
 
 
 def require_admin_key(
@@ -52,16 +61,19 @@ def require_admin_key(
       filesystem; presence on the socket is sufficient. This is also the
       bootstrap path: `berth key create web --tier admin` over UDS works
       even after other tier=admin keys exist.
-    - TCP requests fall through to require_auth_dep. If no keys exist at
-      all, that dep also bypasses (homelab UX). Otherwise it requires a
-      valid Bearer; we then further require tier=admin here.
+    - TCP requests fall through to require_auth_dep. That always requires
+      a valid Bearer on TCP, even before the first key exists; we then
+      further require tier=admin here.
     """
     if _is_uds_request(request):
         return None
     stream_token = request.query_params.get("stream_token")
     if stream_token and _is_stream_ticket_request(request):
         store = getattr(request.app.state, "stream_tokens", None)
-        if store is not None and store.validate(stream_token):
+        if store is not None and store.validate(
+            stream_token,
+            path=request.url.path,
+        ):
             return None
     key = require_auth_dep(request)
     if key is None:
@@ -126,7 +138,7 @@ def get_backends(request: Request) -> dict[str, Backend]:
 #
 # This is the bootstrap path for a new agent: the enrollment token IS the
 # auth, so the endpoint cannot live under the admin router (which requires
-# an admin Bearer key once any key has been registered). The agent will be
+# an admin Bearer key on TCP requests). The agent will be
 # unable to present an admin key until *after* this endpoint hands it a
 # durable client certificate.
 # ---------------------------------------------------------------------------
@@ -150,27 +162,53 @@ _RL_MAX_BUCKETS = 10_000
 _rl_buckets: OrderedDict[str, deque[float]] = OrderedDict()
 
 
+def _allowed_proxy(host: str, allowlist: str) -> bool:
+    for raw in allowlist.split(","):
+        entry = raw.strip()
+        if not entry:
+            continue
+        if entry == "*":
+            return True
+        try:
+            if ip_address(host) in ip_network(entry, strict=False):
+                return True
+        except ValueError:
+            if host == entry:
+                return True
+    return False
+
+
+def _rightmost_untrusted_xff(xff: str, allowlist: str) -> str | None:
+    for hop in reversed([p.strip() for p in xff.split(",") if p.strip()]):
+        if not _allowed_proxy(hop, allowlist):
+            return hop
+    return None
+
+
 def _client_ip(request: Request) -> str:
     """Return the request's apparent client IP.
 
     When the daemon trusts proxy headers (reverse-proxy mode set in
-    config), the rightmost untrusted IP in X-Forwarded-For wins —
-    otherwise every request looks like the reverse proxy's loopback
+    config), X-Forwarded-For is honoured only if the direct TCP peer is
+    in `forwarded_allow_ips`. The rightmost untrusted XFF hop wins.
+    Otherwise every request looks like the reverse proxy's loopback
     address and the rate limiter collapses to one global bucket.
     """
+    if bool(getattr(request.app.state, "local_control_surface", False)):
+        return "uds"
     client = request.scope.get("client")
     if client is None:
         return "uds"
+    client_ip = client[0] if isinstance(client, tuple) else str(client)
     trust = bool(getattr(request.app.state, "trust_proxy_headers", False))
     if trust:
         xff = request.headers.get("x-forwarded-for")
-        if xff:
-            # rightmost untrusted — for our use case the immediate
-            # client is the value we want for per-IP bucketing.
-            return xff.split(",")[-1].strip() or (
-                client[0] if isinstance(client, tuple) else str(client)
-            )
-    return client[0] if isinstance(client, tuple) else str(client)
+        allowlist = str(
+            getattr(request.app.state, "forwarded_allow_ips", "127.0.0.1")
+        )
+        if xff and _allowed_proxy(client_ip, allowlist):
+            return _rightmost_untrusted_xff(xff, allowlist) or client_ip
+    return client_ip
 
 
 def _rate_limit(
@@ -235,6 +273,116 @@ class RegisterBody(BaseModel):
     host_info: dict
 
 
+@dataclass(frozen=True)
+class _RegisterGpuInfo:
+    index: int
+    name: str
+    total_vram_mb: int
+    driver_version: str | None
+
+
+@dataclass(frozen=True)
+class _RegisterHostInfo:
+    agent_version: str
+    cpu_count: int
+    total_ram_mb: int
+    gpu_count: int
+    total_vram_mb: int
+    gpus: list[_RegisterGpuInfo]
+
+
+_MAX_INVENTORY_INT = 1_000_000_000
+_MAX_GPUS = 256
+_MAX_TEXT_FIELD_LEN = 256
+
+
+def _coerce_inventory_int(value: object, field: str) -> int:
+    if isinstance(value, bool):
+        raise HTTPException(400, f"host_info.{field} must be a non-negative integer")
+    if isinstance(value, int):
+        parsed = value
+    elif isinstance(value, str):
+        try:
+            parsed = int(value)
+        except ValueError as e:
+            raise HTTPException(
+                400,
+                f"host_info.{field} must be a non-negative integer",
+            ) from e
+    else:
+        raise HTTPException(
+            400,
+            f"host_info.{field} must be a non-negative integer",
+        )
+    if parsed < 0 or parsed > _MAX_INVENTORY_INT:
+        raise HTTPException(
+            400,
+            f"host_info.{field} must be between 0 and {_MAX_INVENTORY_INT}",
+        )
+    return parsed
+
+
+def _coerce_short_text(value: object, field: str, *, default: str | None = None) -> str:
+    if value is None:
+        if default is not None:
+            return default
+        raise HTTPException(400, f"host_info.{field} is required")
+    text = str(value)
+    if not text or len(text) > _MAX_TEXT_FIELD_LEN:
+        raise HTTPException(
+            400,
+            f"host_info.{field} must be 1-{_MAX_TEXT_FIELD_LEN} characters",
+        )
+    return text
+
+
+def _parse_register_host_info(info: dict) -> _RegisterHostInfo:
+    gpus_raw = info.get("gpus", [])
+    if not isinstance(gpus_raw, list):
+        raise HTTPException(400, "host_info.gpus must be a list")
+    if len(gpus_raw) > _MAX_GPUS:
+        raise HTTPException(400, f"host_info.gpus may include at most {_MAX_GPUS} GPUs")
+
+    gpus: list[_RegisterGpuInfo] = []
+    for idx, gpu_raw in enumerate(gpus_raw):
+        if not isinstance(gpu_raw, dict):
+            raise HTTPException(400, f"host_info.gpus[{idx}] must be an object")
+        gpus.append(
+            _RegisterGpuInfo(
+                index=_coerce_inventory_int(gpu_raw.get("index"), f"gpus[{idx}].index"),
+                name=_coerce_short_text(gpu_raw.get("name"), f"gpus[{idx}].name"),
+                total_vram_mb=_coerce_inventory_int(
+                    gpu_raw.get("total_vram_mb"),
+                    f"gpus[{idx}].total_vram_mb",
+                ),
+                driver_version=(
+                    _coerce_short_text(
+                        gpu_raw.get("driver_version"),
+                        f"gpus[{idx}].driver_version",
+                    )
+                    if gpu_raw.get("driver_version") is not None
+                    else None
+                ),
+            )
+        )
+
+    return _RegisterHostInfo(
+        agent_version=_coerce_short_text(
+            info.get("agent_version"),
+            "agent_version",
+            default="unknown",
+        ),
+        cpu_count=_coerce_inventory_int(info.get("cpu_count", 0), "cpu_count"),
+        total_ram_mb=_coerce_inventory_int(info.get("total_ram_mb", 0), "total_ram_mb"),
+        gpu_count=_coerce_inventory_int(info.get("gpu_count", 0), "gpu_count"),
+        total_vram_mb=_coerce_inventory_int(
+            info.get("total_vram_mb", 0),
+            "total_vram_mb",
+        ),
+        gpus=gpus,
+    )
+
+
 @unauthed_router.post("/nodes/register")
 def admin_nodes_register(body: RegisterBody, request: Request):
     import time as _time
@@ -242,6 +390,7 @@ def admin_nodes_register(body: RegisterBody, request: Request):
     from berth.cluster.ca import fingerprint_sha256, issue_agent_cert
 
     _rate_limit(request, route="register", limit=10, window_s=60.0)
+    info = _parse_register_host_info(body.host_info)
 
     tokens = request.app.state.enrollment_tokens
     ip = _client_ip(request)
@@ -263,18 +412,17 @@ def admin_nodes_register(body: RegisterBody, request: Request):
     fp = fingerprint_sha256(bundle.cert_pem)
     now = _time.time()
     conn: sqlite3.Connection = request.app.state.conn
-    info = body.host_info
 
     existing = nodes_store.find_by_label(conn, label)
     if existing is not None:
         node_id = existing.id
         nodes_store.update_inventory(
             conn, node_id,
-            agent_version=info.get("agent_version", "unknown"),
-            cpu_count=int(info.get("cpu_count", 0)),
-            total_ram_mb=int(info.get("total_ram_mb", 0)),
-            gpu_count=int(info.get("gpu_count", 0)),
-            total_vram_mb=int(info.get("total_vram_mb", 0)),
+            agent_version=info.agent_version,
+            cpu_count=info.cpu_count,
+            total_ram_mb=info.total_ram_mb,
+            gpu_count=info.gpu_count,
+            total_vram_mb=info.total_vram_mb,
         )
         conn.execute(
             "UPDATE nodes SET fingerprint = ? WHERE id = ?",
@@ -286,20 +434,20 @@ def admin_nodes_register(body: RegisterBody, request: Request):
             label=label, fingerprint=fp,
             reachable_as=None,
             first_seen=now, last_seen=now,
-            agent_version=info.get("agent_version", "unknown"),
-            cpu_count=int(info.get("cpu_count", 0)),
-            total_ram_mb=int(info.get("total_ram_mb", 0)),
-            gpu_count=int(info.get("gpu_count", 0)),
-            total_vram_mb=int(info.get("total_vram_mb", 0)),
+            agent_version=info.agent_version,
+            cpu_count=info.cpu_count,
+            total_ram_mb=info.total_ram_mb,
+            gpu_count=info.gpu_count,
+            total_vram_mb=info.total_vram_mb,
         )
     node_gpus_store.delete_for_node(conn, node_id)
-    for g in info.get("gpus", []):
+    for g in info.gpus:
         node_gpus_store.upsert(
             conn,
-            node_id=node_id, gpu_index=int(g["index"]),
-            name=str(g["name"]),
-            total_vram_mb=int(g["total_vram_mb"]),
-            driver_version=g.get("driver_version"),
+            node_id=node_id, gpu_index=g.index,
+            name=g.name,
+            total_vram_mb=g.total_vram_mb,
+            driver_version=g.driver_version,
         )
     return {
         "node_id": node_id,

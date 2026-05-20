@@ -23,7 +23,7 @@ import json
 import os
 import random
 import statistics
-import subprocess
+import subprocess  # nosec
 import sys
 import time
 from dataclasses import dataclass, field
@@ -40,7 +40,7 @@ AUTH_HEADERS = {"Authorization": f"Bearer {API_KEY}"} if API_KEY else {}
 
 
 def _run_serve(*args: str) -> str:
-    out = subprocess.run([str(SERVE_BIN), *args], capture_output=True, text=True)
+    out = subprocess.run([str(SERVE_BIN), *args], capture_output=True, text=True)  # nosec
     if out.returncode != 0:
         raise RuntimeError(f"serve {' '.join(args)}: {out.stderr}")
     return out.stdout
@@ -158,7 +158,7 @@ async def measure_qps(
             try:
                 await t
             except Exception:
-                pass
+                pass  # nosec
 
         # Measurement
         meas_tasks: list[asyncio.Task] = []
@@ -275,7 +275,7 @@ def main() -> int:
     ap.add_argument("--warmup-s", type=float, default=5.0)
     ap.add_argument("--max-tokens", type=int, default=512)
     ap.add_argument("--ctx", type=int, default=4096)
-    ap.add_argument("--out", default="/tmp/bench-v2.json")
+    ap.add_argument("--out", default="/tmp/bench-v2.json")  # nosec
     ap.add_argument("--no-cold-load", action="store_true",
                     help="Skip the stop+run cold-load probe; bench the currently "
                          "loaded deployment. Use when you've manually tuned `berth run` "

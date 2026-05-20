@@ -11,6 +11,8 @@ from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import rsa
 from cryptography.x509.oid import NameOID
 
+from berth.config import write_private_file
+
 _ONE_YEAR = _dt.timedelta(days=365)
 _TEN_YEARS = _dt.timedelta(days=365 * 10)
 
@@ -76,14 +78,14 @@ def generate_ca(ca_dir: Path, *, common_name: str) -> None:
     )
     (ca_dir / "ca.crt").write_bytes(cert.public_bytes(serialization.Encoding.PEM))
     key_path = ca_dir / "ca.key"
-    key_path.write_bytes(
+    write_private_file(
+        key_path,
         key.private_bytes(
             encoding=serialization.Encoding.PEM,
             format=serialization.PrivateFormat.PKCS8,
             encryption_algorithm=serialization.NoEncryption(),
-        )
+        ),
     )
-    key_path.chmod(0o600)
 
 
 def load_ca(ca_dir: Path) -> CA:
@@ -218,8 +220,7 @@ def write_cert_bundle(
     crt_path.parent.mkdir(parents=True, exist_ok=True)
     key_path.parent.mkdir(parents=True, exist_ok=True)
     crt_path.write_bytes(bundle.cert_pem)
-    key_path.write_bytes(bundle.key_pem)
-    key_path.chmod(0o600)
+    write_private_file(key_path, bundle.key_pem)
 
 
 def server_cert_san_hosts(cert_pem: bytes) -> set[str]:

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 import sqlite3
 from dataclasses import asdict
 
@@ -11,13 +12,27 @@ from berth.daemon.admin import get_conn, render_metrics_snapshot, router
 from berth.store import node_gpus as node_gpus_store
 from berth.store import nodes as nodes_store
 
+_NODE_LABEL_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,62}")
+
 
 class EnrollBody(BaseModel):
     label: str
 
 
+def _validate_enrollment_label(label: str) -> None:
+    if label == "local":
+        raise HTTPException(400, "label 'local' is reserved for the leader node")
+    if not _NODE_LABEL_RE.fullmatch(label):
+        raise HTTPException(
+            400,
+            "label must be 1-63 chars: letters, digits, dot, underscore, or dash; "
+            "it must start with a letter or digit",
+        )
+
+
 @router.post("/nodes/enroll")
 def admin_nodes_enroll(body: EnrollBody, request: Request):
+    _validate_enrollment_label(body.label)
     token = request.app.state.enrollment_tokens.mint(label=body.label)
     return {
         "token": token,

@@ -100,7 +100,10 @@ def create(
         except sqlite3.IntegrityError as e:
             raise AlreadyExists(f"service route {name!r} already exists") from e
     result = get_by_id(conn, int(cur.lastrowid or 0))
-    assert result is not None
+    if result is None:
+        raise RuntimeError(
+            f"service route insert returned missing row id={cur.lastrowid}"
+        )
     return result
 
 

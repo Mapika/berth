@@ -21,6 +21,7 @@ from berth.daemon.admin import router as admin_router
 from berth.daemon.admin import unauthed_router as admin_unauthed_router
 from berth.daemon.metrics_router import router as metrics_router
 from berth.daemon.openai_proxy import router as openai_router
+from berth.daemon.security_headers import SecurityHeadersMiddleware
 from berth.daemon.ui_router import install_ui
 from berth.lifecycle.docker_client import DockerClient
 from berth.lifecycle.manager import LifecycleManager
@@ -42,6 +43,7 @@ def _attach_state(
     request_tracer: Any,
     in_flight: Any = None,
     latency: Any = None,
+    local_control_surface: bool = False,
 ) -> None:
     from berth.cluster.metrics_collector import (
         InFlightCounter,
@@ -56,6 +58,7 @@ def _attach_state(
     app.state.tier_cfg = load_tiers()
     app.state.request_count = 0
     app.state.request_tracer = request_tracer
+    app.state.local_control_surface = local_control_surface
     # Collectors default to fresh instances for callers that build a
     # single app (build_app / legacy tests). The multi-app build_apps
     # path passes one shared pair so any of the three listeners feeds
@@ -121,18 +124,15 @@ def build_apps(
     from berth.store import api_keys as _ak_setup
     _ak_setup.configure_pepper(_cfg.BERTH_DIR / "key_pepper")
 
-    # Startup warning: the daemon bypasses auth entirely when no API
-    # keys exist (a convenience for first-run via the local UDS). If the
-    # daemon also exposes a public listener, an operator who walked
-    # away after `berth daemon start` has an open inference endpoint
-    # until they mint a key. `berth deploy bootstrap` mints a starter
-    # key as part of provisioning so the window closes immediately;
-    # operators bring it up by hand need to know.
+    # Startup warning: local control can create the first key without a
+    # bearer when no API keys exist. TCP listeners still require auth, so
+    # an explicitly exposed daemon does not become an open endpoint.
     from berth.store import api_keys as _ak_store
     if _ak_store.count_active(conn) == 0:
         log.warning(
-            "auth bypass active: no API keys exist; /v1/* and /admin/* "
-            "are unauthenticated until you run `berth keys create`",
+            "no API keys exist; create the first key over the local control "
+            "socket with `berth key create`; TCP /v1/*, /admin/*, and "
+            "/metrics require bearer auth",
         )
 
     # Wire up the AgentLink registry. Local node first; remote agents join
@@ -318,10 +318,13 @@ def build_apps(
         app.state.agent_registry = agent_registry
         app.state.metrics_aggregator = metrics_aggregator
         app.state.routing_affinity = routing_affinity
-        # The rate limiter checks this flag to decide whether to honour
+        # The rate limiter checks these flags to decide whether to honour
         # X-Forwarded-For. Defaults to False (legacy direct-TLS mode).
         app.state.trust_proxy_headers = bool(
             getattr(resolved_cfg, "trust_proxy_headers", False)
+        )
+        app.state.forwarded_allow_ips = str(
+            getattr(resolved_cfg, "forwarded_allow_ips", "127.0.0.1")
         )
         app.state.ca = ca
         app.state.ca_cert_pem = ca.cert_pem.decode("ascii")
@@ -336,7 +339,12 @@ def build_apps(
 
     # public_app: external client surface. Owns the lifespan.
     public_app = FastAPI(
-        title="berth (public)", version=_berth_version, lifespan=lifespan,
+        title="berth (public)",
+        version=_berth_version,
+        lifespan=lifespan,
+        openapi_url=None,
+        docs_url=None,
+        redoc_url=None,
     )
     _attach_state(
         public_app,
@@ -350,10 +358,14 @@ def build_apps(
     # POST to /v1/* will OOM a small VPS. uds_app deliberately omits the
     # cap — operator endpoints upload adapter weights and such.
     from berth.daemon.body_size_limit import BodySizeLimitMiddleware
+    public_max_body_size = getattr(
+        resolved_cfg, "max_body_size_bytes", 10 * 1024 * 1024,
+    )
     public_app.add_middleware(
         BodySizeLimitMiddleware,
-        max_bytes=getattr(resolved_cfg, "max_body_size_bytes", 10 * 1024 * 1024),
+        max_bytes=public_max_body_size,
     )
+    public_app.add_middleware(SecurityHeadersMiddleware)
     public_app.include_router(openai_router)
     public_app.include_router(metrics_router)
     public_app.include_router(admin_router)
@@ -361,7 +373,13 @@ def build_apps(
 
     # cluster_app: agent transport. Hosts the WS hub, registration, and
     # CA endpoint. Does NOT host /v1/* or general admin routes.
-    cluster_app = FastAPI(title="berth (cluster)", version=_berth_version)
+    cluster_app = FastAPI(
+        title="berth (cluster)",
+        version=_berth_version,
+        openapi_url=None,
+        docs_url=None,
+        redoc_url=None,
+    )
     _attach_state(
         cluster_app,
         conn=conn, backends=backends, manager=manager,
@@ -370,6 +388,15 @@ def build_apps(
         in_flight=shared_in_flight, latency=shared_latency,
     )
     _wire_common_state(cluster_app)
+    cluster_app.add_middleware(
+        BodySizeLimitMiddleware,
+        max_bytes=getattr(
+            resolved_cfg,
+            "cluster_max_body_size_bytes",
+            min(public_max_body_size, 1024 * 1024),
+        ),
+    )
+    cluster_app.add_middleware(SecurityHeadersMiddleware)
     cluster_app.include_router(admin_unauthed_router)
     cluster_app.include_router(admin_cluster_router)
     cluster_app.include_router(
@@ -387,6 +414,7 @@ def build_apps(
         event_bus=event_bus, stream_tokens=stream_tokens,
         request_tracer=request_tracer,
         in_flight=shared_in_flight, latency=shared_latency,
+        local_control_surface=True,
     )
     _wire_common_state(uds_app)
     uds_app.include_router(openai_router)

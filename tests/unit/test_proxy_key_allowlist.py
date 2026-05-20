@@ -116,7 +116,7 @@ async def test_proxy_allows_model_when_key_has_no_allowlist(app, monkeypatch):
     _seed_deployment(app, name="qwen3-test")
     _patch_engine(monkeypatch)
 
-    # Two keys so the auth bypass (no-keys-registered) doesn't activate.
+    # Two keys so the request authenticates as a real standard-tier key.
     ak_store.create(app.state.conn, name="root", tier="admin")
     secret, _ = ak_store.create(
         app.state.conn, name="user", tier="standard", allowed_models=None,
@@ -219,10 +219,34 @@ async def test_proxy_empty_allowlist_denies_all(app, monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_proxy_bypasses_check_when_no_keys_registered(app, monkeypatch):
-    """No keys exist at all -> the auth dep returns None and we hit the
-    proxy with key=None. The allowlist check must not fire (there is no
-    key to read allowed_models off of)."""
+async def test_models_endpoint_hides_models_outside_key_allowlist(app):
+    """The model inventory endpoint must not reveal model names a scoped
+    API key cannot use through the proxy."""
+    model_store.add(app.state.conn, name="visible-model", hf_repo="o/visible-model")
+    model_store.add(app.state.conn, name="hidden-model", hf_repo="o/hidden-model")
+
+    ak_store.create(app.state.conn, name="root", tier="admin")
+    secret, _ = ak_store.create(
+        app.state.conn,
+        name="scoped",
+        tier="standard",
+        allowed_models=["visible-model"],
+    )
+
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as c:
+        r = await c.get("/v1/models", headers={"Authorization": f"Bearer {secret}"})
+
+    assert r.status_code == 200, r.text
+    model_ids = {entry["id"] for entry in r.json()["data"]}
+    assert model_ids == {"visible-model"}
+
+
+@pytest.mark.asyncio
+async def test_proxy_bypasses_check_for_local_control_without_keys(app, monkeypatch):
+    """Local control without keys reaches the proxy with key=None. The
+    allowlist check must not fire because there is no key to read
+    allowed_models from."""
     _seed_deployment(app, name="qwen3-test")
     _patch_engine(monkeypatch)
 

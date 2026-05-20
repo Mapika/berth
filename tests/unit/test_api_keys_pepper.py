@@ -8,6 +8,9 @@ from __future__ import annotations
 
 import hashlib
 import hmac
+import os
+import stat
+from pathlib import Path
 
 import pytest
 
@@ -49,6 +52,46 @@ def test_pepper_file_has_mode_0600(reset_pepper, tmp_path):
     _ = api_keys._hash("anything")  # triggers pepper file creation
     mode = pepper_path.stat().st_mode & 0o777
     assert mode == 0o600
+
+
+def test_pepper_parent_directory_is_owner_only(reset_pepper, tmp_path):
+    pepper_path = tmp_path / "home" / "key_pepper"
+    old_umask = os.umask(0o022)
+    try:
+        api_keys.configure_pepper(pepper_path)
+        _ = api_keys._hash("anything")
+    finally:
+        os.umask(old_umask)
+
+    mode = stat.S_IMODE(pepper_path.parent.stat().st_mode)
+    assert mode == 0o700
+
+
+def test_pepper_file_owner_only_if_creation_stops_before_chmod(
+    reset_pepper,
+    tmp_path,
+    monkeypatch,
+):
+    pepper_path = tmp_path / "home" / "key_pepper"
+    real_chmod = Path.chmod
+
+    def fail_pepper_chmod(self, mode):
+        if self == pepper_path and mode == 0o600:
+            raise RuntimeError("simulated interruption")
+        return real_chmod(self, mode)
+
+    monkeypatch.setattr(Path, "chmod", fail_pepper_chmod)
+    old_umask = os.umask(0)
+    try:
+        api_keys.configure_pepper(pepper_path)
+        try:
+            _ = api_keys._hash("anything")
+        except RuntimeError:
+            pass
+    finally:
+        os.umask(old_umask)
+
+    assert stat.S_IMODE(pepper_path.stat().st_mode) == 0o600
 
 
 def test_hash_differs_under_different_peppers(reset_pepper, tmp_path):

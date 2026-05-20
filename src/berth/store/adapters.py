@@ -102,10 +102,12 @@ def add(
             )
         except sqlite3.IntegrityError as e:
             raise AlreadyExists(f"adapter {name!r} already exists") from e
-        assert cur.lastrowid is not None
+        if cur.lastrowid is None:
+            raise RuntimeError("adapter insert did not return a row id")
         new_id = cur.lastrowid
     fetched = get_by_id(conn, new_id)
-    assert fetched is not None
+    if fetched is None:
+        raise RuntimeError(f"adapter insert returned missing row id={new_id}")
     return fetched
 
 

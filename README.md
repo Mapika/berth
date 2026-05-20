@@ -92,7 +92,7 @@ This is the test surface I actively care about right now:
 | Container runtime | Docker 24+ with NVIDIA GPU access |
 | Python | 3.11+ |
 | Engines | vLLM and SGLang tested end to end; TensorRT-LLM adapter present |
-| State | SQLite under `~/.serve` |
+| State | SQLite under `~/.berth` |
 | Multi-node | Leader plus mTLS WebSocket agents; tunneled data plane |
 | UI | Bundled Vite/React build served by the daemon |
 
@@ -137,7 +137,7 @@ cd berth
 docker build -f docker/daemon.Dockerfile -t berth:dev .
 docker run -d --name serve \
   --network host \
-  -v ~/.serve:/root/.serve \
+  -v ~/.berth:/root/.berth \
   -v /var/run/docker.sock:/var/run/docker.sock \
   berth:dev
 ```
@@ -158,10 +158,10 @@ berth daemon start
 berth daemon status
 ```
 
-By default the public listener binds to `0.0.0.0:11500` and serves HTTPS with a
-generated berth CA. For local-only testing, set
-`SERVE_PUBLIC_BIND=127.0.0.1`. For internet-facing use, I prefer putting
-Caddy/Nginx in front with `berth deploy bootstrap --behind-proxy`.
+By default the public and cluster listeners bind to localhost only and the
+public listener serves HTTPS with a generated berth CA. For internet-facing
+use, make exposure explicit with `berth deploy bootstrap`, preferably behind
+Caddy/Nginx.
 
 Create an admin key:
 
@@ -187,7 +187,8 @@ CA unless you trust it locally or configure `[public_tls]`. The curl examples
 below use `-k` for first-run testing against that generated certificate.
 
 Local CLI commands use the daemon Unix socket and do not need the HTTP bearer
-token. TCP admin and `/v1/*` requests need a bearer token once any key exists.
+token. TCP admin, `/v1/*`, and `/metrics` requests need a bearer token even
+before the first key exists; create the first key locally with `berth key create`.
 
 ## Quick Start
 
@@ -410,7 +411,7 @@ SDK / browser / Prometheus
 
 local CLI
         |
-        | Unix socket ~/.serve/sock
+        | Unix socket ~/.berth/sock
         v
   uds_app, same manager and state
 
@@ -437,16 +438,16 @@ Runtime choices:
 - The proxy resolves routes and adapters, ranks ready deployments with node
   signals and affinity, retries pre-first-byte failures for bare-base requests,
   and records usage/token counters.
-- State lives in SQLite under `~/.serve`.
+- State lives in SQLite under `~/.berth`.
 - Engine defaults come from `src/berth/backends/backends.yaml`.
-- Per-host engine overrides live in `~/.serve/backends.override.yaml`.
+- Per-host engine overrides live in `~/.berth/backends.override.yaml`.
 
 ## Files
 
-By default, berth owns `~/.serve`. Override it with `SERVE_HOME`.
+By default, berth owns `~/.berth`. Override it with `BERTH_HOME`.
 
 ```text
-~/.serve/
+~/.berth/
 |-- db.sqlite               models, deployments, profiles, routes, keys, usage
 |-- sock                    local CLI control socket
 |-- config.toml             listener, TLS, and proxy-header config
@@ -544,7 +545,7 @@ npm run build
 - Built-in ACME/certificate management
 - A Kubernetes replacement
 
-For internet-facing use, prefer `berth deploy bootstrap --behind-proxy` with a
+For internet-facing use, prefer `berth deploy bootstrap` with a
 TLS-terminating reverse proxy, or configure `[public_tls]` with an
 operator-managed certificate.
 

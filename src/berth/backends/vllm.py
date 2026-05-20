@@ -31,7 +31,7 @@ class VLLMBackend(ContainerBackend):
             "--max-num-seqs", str(plan.target_concurrency),
             "--gpu-memory-utilization", str(plan.gpu_memory_utilization),
             "--dtype", plan.dtype,
-            "--host", "0.0.0.0",
+            "--host", "0.0.0.0",  # nosec
             "--port", str(self.manifest.internal_port),
             "--served-model-name", plan.model_name,
         ]

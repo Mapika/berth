@@ -63,7 +63,8 @@ def test_load_default_path_uses_package_resource():
 def test_packaged_rules_route_nvfp4_and_nvidia_to_trtllm():
     """Packaged selection.yaml ships sane defaults for TRT-LLM checkpoints."""
     cfg = load_selection()
-    assert pick_backend(cfg, "nvidia/Llama-4-Maverick-17B-128E-Instruct-FP8") == "trtllm"
+    llama4 = "nvidia/Llama-4-Maverick-17B-128E-Instruct-FP8"  # pragma: allowlist secret
+    assert pick_backend(cfg, llama4) == "trtllm"
     assert pick_backend(cfg, "meta-llama/Llama-3.1-70B-NVFP4") == "trtllm"
     assert pick_backend(cfg, "qwen3-235b-fp4") == "trtllm"
 

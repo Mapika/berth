@@ -46,7 +46,7 @@ event), pre-warm its `top_k_per_key` most-used `(base, adapter)` pairs
 from the past 7 days. Score is normalized per-key against that key's own
 max.
 
-## `~/.serve/predictor.yaml`
+## `~/.berth/predictor.yaml`
 
 Fields and defaults, from `PredictorConfig` in
 `src/berth/lifecycle/predictor.py`:
@@ -99,7 +99,7 @@ Write:
 enabled: false
 ```
 
-to `~/.serve/predictor.yaml`, then restart the daemon:
+to `~/.berth/predictor.yaml`, then restart the daemon:
 
 ```bash
 berth daemon stop
@@ -113,7 +113,7 @@ highly, the next predictor tick may re-launch it from its recorded plan.
 
 Workarounds:
 
-- Set `max_base_prewarm_per_tick: 0` in `~/.serve/predictor.yaml`. The
+- Set `max_base_prewarm_per_tick: 0` in `~/.berth/predictor.yaml`. The
   predictor will still hot-load LoRA adapters onto bases you started, but
   it will not bring a base back up on its own.
 - Or disable the predictor entirely (`enabled: false`).

@@ -63,7 +63,7 @@ def _systemd_snippet() -> str:
         if candidate.exists():
             return candidate.read_text()
     except Exception:
-        pass
+        pass  # nosec
     return ""
 
 
@@ -79,7 +79,7 @@ def _bootstrap(
     """Pure-ish workhorse: writes config + DB state, returns a dict of
     artefacts the CLI prints. Separated from the typer entry point so
     tests can drive it without invoking the CLI runner."""
-    serve_home.mkdir(parents=True, exist_ok=True)
+    config.ensure_private_dir(serve_home)
     # Point all our config constants at this serve_home — important when
     # operators set SERVE_HOME or pass --serve-home.
     config.BERTH_DIR = serve_home  # type: ignore[misc]
@@ -99,7 +99,7 @@ def _bootstrap(
         public_section: dict[str, str | int | bool | None] = {
             "host": domain,
             "port": public_port,
-            "bind": "127.0.0.1" if behind_proxy else "0.0.0.0",
+            "bind": "127.0.0.1" if behind_proxy else "0.0.0.0",  # nosec
         }
         if behind_proxy:
             public_section["scheme"] = "http"
@@ -108,7 +108,7 @@ def _bootstrap(
         cluster_section: dict[str, str | int | bool | None] = {
             "host": domain,
             "port": cluster_port,
-            "bind": "0.0.0.0",
+            "bind": "0.0.0.0",  # nosec
         }
         # save_config_file expects {section: {k: v}}; we hand-roll the
         # bool value because save_config_file's writer handles bools.

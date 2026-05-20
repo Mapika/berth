@@ -1,6 +1,8 @@
 """`berth backup create` produces a tarball of the DR set."""
 from __future__ import annotations
 
+import os
+import stat
 import tarfile
 
 from typer.testing import CliRunner
@@ -36,3 +38,25 @@ def test_backup_create_writes_tarball_with_dr_set(tmp_path, monkeypatch):
     assert "ca/ca.crt" in names
     assert "key_pepper" in names
     assert "config.toml" in names
+
+
+def test_backup_archive_is_owner_only(tmp_path, monkeypatch):
+    monkeypatch.setattr(config, "BERTH_DIR", tmp_path)
+    monkeypatch.setattr(config, "DB_PATH", tmp_path / "db.sqlite")
+    monkeypatch.setattr(config, "CONFIG_FILE", tmp_path / "config.toml")
+
+    (tmp_path / "ca").mkdir()
+    (tmp_path / "ca" / "ca.key").write_text("FAKE KEY")
+    (tmp_path / "key_pepper").write_bytes(b"\x00" * 32)
+    conn = db.connect(tmp_path / "db.sqlite")
+    db.init_schema(conn)
+
+    dest = tmp_path / "snap.tar.gz"
+    old_umask = os.umask(0o022)
+    try:
+        res = CliRunner().invoke(cli.app, ["backup", "create", str(dest)])
+    finally:
+        os.umask(old_umask)
+
+    assert res.exit_code == 0, res.output
+    assert stat.S_IMODE(dest.stat().st_mode) == 0o600

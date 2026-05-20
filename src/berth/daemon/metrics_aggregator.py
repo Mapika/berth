@@ -77,7 +77,7 @@ class MetricsAggregator:
             latest = buf[-1].sample
         for d in latest.get("deployments", []):
             if d.get("deployment_id") == deployment_id:
-                return int(d.get("in_flight", 0))
+                return safe_metric_int(d.get("in_flight", 0))
         return 0
 
     def all_nodes(self) -> list[int]:
@@ -89,16 +89,31 @@ def _extract(sample: dict[str, Any], *, key: str, gpu: int | None) -> int:
     if key == "gpu_util_pct":
         for g in sample.get("gpus", []):
             if g.get("index") == gpu:
-                return int(g.get("util_pct", 0))
+                return safe_metric_int(g.get("util_pct", 0))
         return 0
     if key == "gpu_mem_used_mb":
         for g in sample.get("gpus", []):
             if g.get("index") == gpu:
-                return int(g.get("mem_used_mb", 0))
+                return safe_metric_int(g.get("mem_used_mb", 0))
         return 0
     if key == "request_rate":
         return sum(
-            int(d.get("requests_last_window", 0))
+            safe_metric_int(d.get("requests_last_window", 0))
             for d in sample.get("deployments", [])
         )
     return 0
+
+
+def safe_metric_int(value: object) -> int:
+    if isinstance(value, bool):
+        return 0
+    if isinstance(value, int):
+        parsed = value
+    elif isinstance(value, str):
+        try:
+            parsed = int(value)
+        except ValueError:
+            return 0
+    else:
+        return 0
+    return max(0, parsed)

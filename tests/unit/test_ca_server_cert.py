@@ -1,7 +1,10 @@
 from __future__ import annotations
 
 import hashlib
+import os
 import ssl
+import stat
+from pathlib import Path
 
 from cryptography import x509
 
@@ -89,3 +92,31 @@ def test_server_cert_loads_into_ssl_context(tmp_path):
     ctx.load_cert_chain(certfile=str(crt), keyfile=str(key))
     # File mode check.
     assert oct(key.stat().st_mode & 0o777) == "0o600"
+
+
+def test_server_key_is_owner_only_if_write_stops_before_chmod(
+    tmp_path,
+    monkeypatch,
+):
+    ca = _make_ca(tmp_path)
+    b = generate_server_cert(ca, hosts=["localhost"])
+    crt = tmp_path / "s.crt"
+    key = tmp_path / "s.key"
+    real_chmod = Path.chmod
+
+    def fail_key_chmod(self, mode):
+        if self == key and mode == 0o600:
+            raise RuntimeError("simulated interruption")
+        return real_chmod(self, mode)
+
+    monkeypatch.setattr(Path, "chmod", fail_key_chmod)
+    old_umask = os.umask(0)
+    try:
+        try:
+            write_cert_bundle(b, crt_path=crt, key_path=key)
+        except RuntimeError:
+            pass
+    finally:
+        os.umask(old_umask)
+
+    assert stat.S_IMODE(key.stat().st_mode) == 0o600

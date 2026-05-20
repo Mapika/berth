@@ -22,7 +22,8 @@ def _env_get(env_map: Mapping[str, str], legacy_serve_key: str) -> str | None:
     using the legacy name — the helper rewrites it to the BERTH_ prefix
     for the primary lookup.
     """
-    assert legacy_serve_key.startswith("SERVE_"), legacy_serve_key
+    if not legacy_serve_key.startswith("SERVE_"):
+        raise ValueError(f"expected SERVE_* key, got {legacy_serve_key!r}")
     berth_key = "BERTH_" + legacy_serve_key[len("SERVE_"):]
     v = env_map.get(berth_key)
     if v:
@@ -42,6 +43,8 @@ def _env_get(env_map: Mapping[str, str], legacy_serve_key: str) -> str | None:
 
 
 BERTH_DIR = Path(_env_get(os.environ, "SERVE_HOME") or Path.home() / ".berth")
+PRIVATE_DIR_MODE = 0o700
+PRIVATE_FILE_MODE = 0o600
 
 
 def _maybe_migrate_legacy_serve_dir() -> None:
@@ -83,7 +86,7 @@ SOCK_PATH = BERTH_DIR / "sock"
 DEFAULT_PUBLIC_HOST = "127.0.0.1"
 DEFAULT_PUBLIC_PORT = 11500
 DEFAULT_CLUSTER_PORT = 11501
-DEFAULT_BIND = "0.0.0.0"
+DEFAULT_BIND = "127.0.0.1"
 
 CONFIG_FILE = BERTH_DIR / "config.toml"
 LEADER_DIR = BERTH_DIR / "leader"
@@ -141,6 +144,34 @@ def load_config_file() -> dict[str, Any]:
         return {}
 
 
+def ensure_private_dir(path: Path) -> None:
+    """Create `path` as an owner-only directory and tighten existing modes."""
+    path.mkdir(parents=True, exist_ok=True, mode=PRIVATE_DIR_MODE)
+    path.chmod(PRIVATE_DIR_MODE)
+
+
+def write_private_file(
+    path: Path,
+    data: bytes,
+    *,
+    mode: int = PRIVATE_FILE_MODE,
+) -> None:
+    """Write secret bytes without a write-then-chmod exposure window."""
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    flags = os.O_WRONLY | os.O_CREAT | os.O_TRUNC
+    flags |= getattr(os, "O_NOFOLLOW", 0)
+    fd = os.open(path, flags, mode)
+    try:
+        os.fchmod(fd, mode)
+        with os.fdopen(fd, "wb") as f:
+            fd = -1
+            f.write(data)
+    finally:
+        if fd != -1:
+            os.close(fd)
+
+
 def save_config_file(updates: dict[str, dict[str, str | int | bool | None]]) -> None:
     """Deep-merge `updates` into ~/.berth/config.toml and write it back.
 
@@ -159,7 +190,7 @@ def save_config_file(updates: dict[str, dict[str, str | int | bool | None]]) -> 
             current[section] = sec
         else:
             current.pop(section, None)
-    CONFIG_FILE.parent.mkdir(parents=True, exist_ok=True)
+    ensure_private_dir(CONFIG_FILE.parent)
     CONFIG_FILE.write_text(_dump_toml(current))
 
 

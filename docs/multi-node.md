@@ -26,7 +26,7 @@ agent hosts. It sticks to setup, verification, and troubleshooting.
   `/admin/nodes/register` (token-gated), `/admin/ca.pem`
   (fingerprint-pinned). This is the only port agents ever touch.
 - **Cluster CA.** A self-signed root that lives only on the leader at
-  `~/.serve/ca/`. Used to mint both the leader's cluster-listener
+  `~/.berth/ca/`. Used to mint both the leader's cluster-listener
   server cert and each agent's mTLS client cert. Agents pin its
   SHA-256 fingerprint at enrollment.
 - **Node.** A row in the leader's `nodes` table. The leader's own host
@@ -84,10 +84,10 @@ Mint an enrollment URI for the new GPU host:
 $ berth nodes enroll gpu-rig-2
 Enrollment URI (single-use, expires in 10 min):
 
-  serve://enroll?leader=https%3A%2F%2F192.168.0.164%3A11501&token=…&ca_fp=sha256%3A7f3a…
+  berth://enroll?leader=https%3A%2F%2F192.168.0.164%3A11501&token=…&ca_fp=sha256%3A7f3a…
 
 On the agent host, run:
-  berth agent register --uri 'serve://enroll?leader=…&token=…&ca_fp=…'
+  berth agent register --uri 'berth://enroll?leader=…&token=…&ca_fp=…'
 ```
 
 Copy the entire `berth agent register --uri '…'` line.
@@ -103,7 +103,7 @@ cd berth
 uv tool install --editable .
 
 # Paste the line you copied.
-berth agent register --uri 'serve://enroll?leader=…&token=…&ca_fp=…'
+berth agent register --uri 'berth://enroll?leader=…&token=…&ca_fp=…'
 berth agent start
 ```
 
@@ -115,7 +115,7 @@ What `--uri` does under the hood:
 3. Verifies `sha256(downloaded ca.pem)` equals the pinned fingerprint.
    This closes the standard MITM-during-CA-bootstrap hole — an
    attacker who substitutes their own CA fails this check.
-4. Writes the verified CA to `~/.serve/ca.crt`.
+4. Writes the verified CA to `~/.berth/ca.crt`.
 5. POSTs the token to `/admin/nodes/register`, gets back a per-host
    mTLS client cert, writes `agent.crt`, `agent.key`, and
    `agent.yaml`.
@@ -150,16 +150,17 @@ then file, then autodetect, then literal default):
 1. `--public-host` / `--public-port` / `--public-bind` /
    `--cluster-host` / `--cluster-port` / `--cluster-bind` on
    `berth daemon start`.
-2. `SERVE_PUBLIC_HOST`, `SERVE_PUBLIC_PORT`, `SERVE_PUBLIC_BIND`,
-   `SERVE_CLUSTER_HOST`, `SERVE_CLUSTER_PORT`, `SERVE_CLUSTER_BIND`
-   env vars.
-3. `~/.serve/config.toml`.
+2. `BERTH_PUBLIC_HOST`, `BERTH_PUBLIC_PORT`, `BERTH_PUBLIC_BIND`,
+   `BERTH_CLUSTER_HOST`, `BERTH_CLUSTER_PORT`, `BERTH_CLUSTER_BIND`
+   env vars. The legacy `SERVE_*` names still work for one release.
+3. `~/.berth/config.toml`.
 4. Autodetect (UDP-connect trick + `gethostbyname`) for the host;
-   `0.0.0.0` for the bind; `11500` / `11501` for ports.
+   `127.0.0.1` for the bind; `11500` / `11501` for ports.
 
-`SERVE_LEADER_URL` continues to work as an explicit override of the
+`BERTH_LEADER_URL` is an explicit override of the
 **advertised** cluster URL only (i.e. what enrollment URIs contain).
-It does not change bind addresses.
+It does not change bind addresses. The legacy `SERVE_LEADER_URL`
+continues to work for one release.
 
 Inspect:
 
@@ -170,7 +171,7 @@ berth config show
 ```
 public.host          api.example.com                   (file)
 public.port          11500                             (default)
-public.bind          0.0.0.0                           (default)
+public.bind          127.0.0.1                         (default)
 public_tls.cert      /etc/le/.../fullchain.pem         (file)
 public_tls.key       /etc/le/.../privkey.pem           (file)
 cluster.host         cluster.example.com               (file)
@@ -190,7 +191,7 @@ berth config set-public-tls cert=/etc/le/.../fullchain.pem \
                             key=/etc/le/.../privkey.pem
 ```
 
-The config file is `~/.serve/config.toml`:
+The config file is `~/.berth/config.toml`:
 
 ```toml
 [public]
@@ -248,7 +249,7 @@ cluster URL, so the agent ends up dialing the right port automatically:
 berth nodes enroll home-rig
 
 # On the agent (anywhere with outbound HTTPS to the cluster port):
-berth agent register --uri 'serve://enroll?…'
+berth agent register --uri 'berth://enroll?…'
 berth agent start
 ```
 
@@ -267,8 +268,8 @@ reach each other.
 
 ## Public-internet exposure
 
-The defaults (`0.0.0.0` bind on both listeners) work on the open
-internet, but you should harden:
+The defaults bind both listeners to localhost. For open-internet exposure,
+make the bind explicit with `berth deploy bootstrap`, then harden:
 
 ### Public listener cert
 
@@ -311,7 +312,7 @@ cluster port to known agent source IPs.
 ### What this design does *not* protect against
 
 - **Root on the leader.** Anyone with root can mint agent certs from
-  `~/.serve/ca/ca.key`. Protect that file.
+  `~/.berth/ca/ca.key`. Protect that file.
 - **Stolen public-cert key.** If your `[public_tls]` key leaks, an
   attacker can MITM your public listener. Standard cert-management
   hygiene applies; this design doesn't help or hurt.
@@ -330,13 +331,15 @@ supported as an opt-in for operators who already run TLS termination
 upstream:
 
 ```bash
-SERVE_TRUST_FORWARDED_FP=1 berth daemon start
+BERTH_TRUST_FORWARDED_FP=1 berth daemon start
 ```
 
 With that flag set, `LeaderHub` will accept the proxy-forwarded
-fingerprint header when no TLS peer cert is present. **Do not set
-this on an internet-exposed leader without an upstream proxy doing
-real mTLS verification** — the header is unauthenticated by itself.
+fingerprint header when no TLS peer cert is present, but only from
+direct peers in `BERTH_FORWARDED_ALLOW_IPS` (default: `127.0.0.1`;
+legacy `SERVE_*` names still work for one release). **Do not set this
+on an internet-exposed leader without an upstream proxy doing real mTLS
+verification** — the header is unauthenticated by itself.
 
 ## Status — what works today
 
@@ -381,7 +384,7 @@ plane, not a full scheduler.
 
 Either the URI was tampered with in transit, or you're talking to a
 different leader than the one that minted it (e.g., the leader's CA
-was regenerated by deleting `~/.serve/ca/`). Re-mint:
+was regenerated by deleting `~/.berth/ca/`). Re-mint:
 
 ```bash
 berth nodes enroll <label>
@@ -397,7 +400,7 @@ The leader rejected the peer cert. Possible causes:
 - The leader's CA was rotated since enrollment. Re-register.
 - The node was removed from the DB. Check `berth nodes ls` on the
   leader.
-- Logs on the leader (`~/.serve/logs/daemon.log`) should show
+- Logs on the leader (`~/.berth/logs/daemon.log`) should show
   `cluster ws reject:` with the cause.
 
 **`berth nodes ls` shows the node as `unreachable` even though

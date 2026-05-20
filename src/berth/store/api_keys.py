@@ -56,12 +56,10 @@ def _get_pepper() -> bytes:
     if _PEPPER_PATH is None:
         return b""
     if not _PEPPER_PATH.exists():
-        _PEPPER_PATH.parent.mkdir(parents=True, exist_ok=True)
-        _PEPPER_PATH.write_bytes(secrets.token_bytes(32))
-        try:
-            _PEPPER_PATH.chmod(0o600)
-        except OSError:
-            pass  # best-effort on platforms without POSIX modes
+        from berth.config import ensure_private_dir, write_private_file
+
+        ensure_private_dir(_PEPPER_PATH.parent)
+        write_private_file(_PEPPER_PATH, secrets.token_bytes(32))
     _PEPPER_CACHED = _PEPPER_PATH.read_bytes()
     return _PEPPER_CACHED
 
@@ -77,18 +75,17 @@ def _decode_allowed_models(raw: object) -> list[str] | None:
     """NULL and empty string both map to None (unrestricted).
 
     Empty JSON list `[]` decodes to [] and is preserved as "restrict-all"
-    (no model is allowed). Malformed JSON is treated as None defensively;
-    the column is operator-managed and a bad value shouldn't lock the key
-    out entirely, but we still log nothing here - the proxy will allow.
+    (no model is allowed). Malformed or wrong-shaped JSON fails closed to
+    [] so corrupted scope metadata does not silently become unrestricted.
     """
     if raw is None or raw == "":
         return None
     try:
         decoded = json.loads(str(raw))
     except (TypeError, json.JSONDecodeError):
-        return None
+        return []
     if not isinstance(decoded, list):
-        return None
+        return []
     return [str(x) for x in decoded]
 
 
@@ -151,9 +148,11 @@ def create(
             allowed_json,
         ),
     )
-    assert cur.lastrowid is not None
+    if cur.lastrowid is None:
+        raise RuntimeError("api key insert did not return a row id")
     fetched = get_by_id(conn, cur.lastrowid)
-    assert fetched is not None
+    if fetched is None:
+        raise RuntimeError(f"api key insert returned missing row id={cur.lastrowid}")
     return secret, fetched
 
 

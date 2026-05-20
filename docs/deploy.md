@@ -51,9 +51,9 @@ you can run it manually or audit what the bootstrap does.
 
    ```bash
    # System prep
-   sudo useradd -r -m -d /var/lib/serve serve
+   sudo useradd -r -m -d /var/lib/berth berth
    sudo apt-get install -y python3.13-venv docker.io
-   sudo usermod -aG docker serve
+   sudo usermod -aG docker berth
    ```
 
 2. **Install Caddy**:
@@ -72,12 +72,12 @@ you can run it manually or audit what the bootstrap does.
 4. **Install berth**:
 
    ```bash
-   sudo -u serve mkdir -p /opt/serve
-   sudo -u serve python3 -m venv /opt/serve/venv
-   sudo -u serve /opt/serve/venv/bin/pip install /path/to/berth
+   sudo -u berth mkdir -p /opt/berth
+   sudo -u berth python3 -m venv /opt/berth/venv
+   sudo -u berth /opt/berth/venv/bin/pip install /path/to/berth
    ```
 
-5. **Configure** `/var/lib/serve/.serve/config.toml`:
+5. **Configure** `/var/lib/berth/config.toml`:
 
    ```toml
    [public]
@@ -107,7 +107,7 @@ you can run it manually or audit what the bootstrap does.
    first key only):
 
    ```bash
-   sudo -u serve /opt/serve/venv/bin/berth keys create --tier admin --name root
+   sudo -u berth /opt/berth/venv/bin/berth key create root --tier admin
    # ← prints sk-… once. Save it somewhere safe.
    ```
 
@@ -115,8 +115,8 @@ you can run it manually or audit what the bootstrap does.
 
    ```bash
    # On the leader:
-   sudo -u serve /opt/serve/venv/bin/berth nodes enroll gpu-host-1
-   # → emits a serve://enroll?leader=…&token=…&ca_fp=… URI
+   sudo -u berth /opt/berth/venv/bin/berth nodes enroll gpu-host-1
+   # → emits a berth://enroll?leader=…&token=…&ca_fp=… URI
 
    # On the GPU host:
    berth agent register --uri '<paste>'
@@ -134,7 +134,7 @@ already exist.
 Typical first-run on the VPS:
 
 ```bash
-sudo -u serve /opt/serve/venv/bin/berth deploy bootstrap \
+sudo -u berth /opt/berth/venv/bin/berth deploy bootstrap \
     --domain serve.example.com
 ```
 
@@ -156,7 +156,7 @@ package managers.
 
 ## Backup and DR
 
-`berth backup create /var/backups/serve-$(date +%F).tar.gz` snapshots
+`berth backup create /var/backups/berth-$(date +%F).tar.gz` snapshots
 the recoverable state:
 
 - `db.sqlite` (consistent via SQLite `.backup`)
@@ -177,7 +177,8 @@ keys-to-the-kingdom — treat the tarball like a credential.
 - Use `/readyz` (not `/healthz`) for load-balancer health probes —
   `/healthz` returns 200 unconditionally; `/readyz` blocks until
   startup is complete and the DB is reachable.
-- `/metrics` requires a non-revoked API key (any tier) when keys exist.
+- `/metrics` requires a non-revoked API key (any tier), including during
+  first-run bootstrap before any key exists.
 - Per-IP rate limiting respects `X-Forwarded-For` when
   `trust_proxy_headers = true` — make sure Caddy strips spoofed
   inbound XFF headers before forwarding (`request_header -X-Forwarded-For`

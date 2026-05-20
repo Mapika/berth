@@ -11,7 +11,7 @@ import yaml
 
 from berth.cli import app
 from berth.cluster.host_info import collect_host_info
-from berth.config import _env_get
+from berth.config import _env_get, ensure_private_dir, write_private_file
 
 agent_app = typer.Typer(help="Manage the local agent on this host.")
 app.add_typer(agent_app, name="agent")
@@ -56,7 +56,7 @@ def _fetch_ca_pinned(leader: str, expected_fp: str) -> str:
     — we use the operator-supplied fingerprint instead (trust-on-first-
     use-with-pin). Once written, all subsequent calls verify normally."""
     url = leader.rstrip("/") + "/admin/ca.pem"
-    r = httpx.get(url, verify=False, timeout=15.0)
+    r = httpx.get(url, verify=False, timeout=15.0)  # nosec B501
     r.raise_for_status()
     pem = r.text
     actual = "sha256:" + hashlib.sha256(pem.encode("utf-8")).hexdigest()
@@ -74,7 +74,7 @@ def _do_register(
     *, leader: str, token: str, ca_pem: str | None, reachable_as: str | None,
 ) -> None:
     home = _serve_home()
-    home.mkdir(parents=True, exist_ok=True)
+    ensure_private_dir(home)
 
     info = collect_host_info()
     payload = {
@@ -113,8 +113,7 @@ def _do_register(
 
     (home / "agent.crt").write_text(data["agent_cert"])
     key_path = home / "agent.key"
-    key_path.write_text(data["agent_key"])
-    os.chmod(key_path, 0o600)
+    write_private_file(key_path, data["agent_key"].encode("utf-8"))
     # If the server returned a CA too (legacy), persist it.
     if "ca_cert" in data and ca_pem is None:
         (home / "ca.crt").write_text(data["ca_cert"])
@@ -175,7 +174,10 @@ def register(
             ca_pem=ca_pem, reachable_as=reachable_as,
         )
     else:
-        assert leader is not None and token is not None  # narrow for type
+        if leader is None or token is None:
+            raise typer.BadParameter(
+                "provide --uri, or both --leader and --token"
+            )
         _do_register(
             leader=leader, token=token,
             ca_pem=None, reachable_as=reachable_as,

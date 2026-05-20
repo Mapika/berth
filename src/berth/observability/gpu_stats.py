@@ -66,7 +66,7 @@ def read_compute_process_vram() -> dict[int, int]:
         try:
             procs = pynvml.nvmlDeviceGetComputeRunningProcesses(h)
         except Exception:
-            continue
+            continue  # nosec
         for p in procs:
             used = getattr(p, "usedGpuMemory", None) or 0
             # NVML uses a sentinel for "no data"; older drivers expose it

@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import logging
+import socket
 import ssl
 import sys
 from pathlib import Path
@@ -24,6 +25,8 @@ from berth.cluster.ca import (
 from berth.daemon.app import build_apps
 from berth.lifecycle.docker_client import DockerClient
 from berth.store import db
+
+CONTROL_SOCKET_MODE = 0o600
 
 
 def configure_logging() -> None:
@@ -58,9 +61,26 @@ def _ensure_cluster_server_cert(
     return crt_path, key_path, fingerprint_ca_pem(ca.cert_pem)
 
 
+def _bind_control_socket(sock_path: Path) -> socket.socket:
+    sock_path.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        sock_path.unlink()
+    except FileNotFoundError:
+        pass
+
+    sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    try:
+        sock.bind(str(sock_path))
+        sock_path.chmod(CONTROL_SOCKET_MODE)
+    except OSError:
+        sock.close()
+        raise
+    return sock
+
+
 async def serve(cfg: config.ResolvedConfig, sock_path: Path) -> None:
     log_ = logging.getLogger(__name__)
-    config.BERTH_DIR.mkdir(parents=True, exist_ok=True)
+    config.ensure_private_dir(config.BERTH_DIR)
     config.MODELS_DIR.mkdir(parents=True, exist_ok=True)
     config.LOGS_DIR.mkdir(parents=True, exist_ok=True)
 
@@ -70,7 +90,7 @@ async def serve(cfg: config.ResolvedConfig, sock_path: Path) -> None:
     # Operator footgun guard: binding globally but advertising loopback
     # produces enrollment URIs that nobody can reach. Warn loudly so
     # the operator notices before they paste the URI into a remote box.
-    if cfg.public_bind in ("0.0.0.0", "::") and cfg.public_host.startswith("127."):
+    if cfg.public_bind in ("0.0.0.0", "::") and cfg.public_host.startswith("127."):  # nosec
         log_.warning(
             "advertising loopback host %s while binding globally on %s — "
             "enrollment URIs and the public_url will not be reachable from "
@@ -144,8 +164,7 @@ async def serve(cfg: config.ResolvedConfig, sock_path: Path) -> None:
         resolved_cfg=cfg,
     )
 
-    if sock_path.exists():
-        sock_path.unlink()
+    uds_socket = _bind_control_socket(sock_path)
 
     public_uvicorn_kwargs: dict = {
         "app": public_app,
@@ -176,13 +195,15 @@ async def serve(cfg: config.ResolvedConfig, sock_path: Path) -> None:
         ws=TLSAwareWebSocketProtocol,
         log_level="info",
     )
-    uds_cfg = uvicorn.Config(app=uds_app, uds=str(sock_path), log_level="info")
-    servers = [
-        uvicorn.Server(public_cfg),
-        uvicorn.Server(cluster_cfg),
-        uvicorn.Server(uds_cfg),
-    ]
-    await asyncio.gather(*(s.serve() for s in servers))
+    uds_cfg = uvicorn.Config(app=uds_app, log_level="info")
+    public_server = uvicorn.Server(public_cfg)
+    cluster_server = uvicorn.Server(cluster_cfg)
+    uds_server = uvicorn.Server(uds_cfg)
+    await asyncio.gather(
+        public_server.serve(),
+        cluster_server.serve(),
+        uds_server.serve(sockets=[uds_socket]),
+    )
 
 
 def main(argv: list[str] | None = None) -> int:

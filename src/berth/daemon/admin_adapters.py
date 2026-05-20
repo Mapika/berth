@@ -1,13 +1,14 @@
 from __future__ import annotations
 
 import asyncio
+import re
 import shutil
 import sqlite3
 from pathlib import Path
 
 import httpx
 from fastapi import Depends, HTTPException, status
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 
 from berth.backends.base import Backend
 from berth.daemon.admin import get_backends, get_conn, get_manager, router
@@ -16,6 +17,14 @@ from berth.store import adapters as ad_store
 from berth.store import deployment_adapters as da_store
 from berth.store import deployments as dep_store
 
+_ADAPTER_NAME_RE = re.compile(r"[a-zA-Z0-9_-]+")
+
+
+def _validate_adapter_name(v: str) -> str:
+    if not _ADAPTER_NAME_RE.fullmatch(v):
+        raise ValueError("name must be alphanumeric, underscores, or dashes only")
+    return v
+
 
 class CreateAdapterRequest(BaseModel):
     name: str
@@ -23,12 +32,21 @@ class CreateAdapterRequest(BaseModel):
     hf_repo: str
     revision: str = "main"
 
+    @field_validator("name")
+    @classmethod
+    def validate_name(cls, v: str) -> str:
+        return _validate_adapter_name(v)
+
 
 class AddLocalAdapterRequest(BaseModel):
     name: str
     base_model_name: str
     local_path: str
 
+    @field_validator("name")
+    @classmethod
+    def validate_name(cls, v: str) -> str:
+        return _validate_adapter_name(v)
 
 @router.get("/adapters")
 def list_adapters(conn: sqlite3.Connection = Depends(get_conn)):
@@ -170,7 +188,9 @@ def add_local_adapter(
         )
 
     dest_root = manager.models_dir.resolve() / "local-adapters"
-    dest = dest_root / body.name
+    dest = (dest_root / body.name).resolve()
+    if not dest.is_relative_to(dest_root.resolve()):
+        raise HTTPException(400, "Invalid adapter name or path traversal detected")
     if dest.exists():
         raise HTTPException(
             409,

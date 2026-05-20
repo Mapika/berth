@@ -133,7 +133,7 @@ async def test_proxy_retries_when_first_candidate_node_is_unreachable(
     # first so retry kicks in. Force it via the affinity map.
     app.state.routing_affinity.set("key:0", node_id=ghost_id)
     # The proxy uses affinity_key fallback "key:<api_key_id>" but in
-    # the no-keys-registered bypass path key is None and falls through
+    # the local-control-without-keys path key is None and falls through
     # to None — so the affinity hint won't apply. Instead we add a
     # request header in the call below.
 

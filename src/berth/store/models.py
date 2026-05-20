@@ -58,8 +58,15 @@ def add(
             )
         except sqlite3.IntegrityError as e:
             raise AlreadyExists(f"model {name!r} already exists") from e
-    assert cur.lastrowid is not None
-    return Model(id=cur.lastrowid, name=name, hf_repo=hf_repo, revision=revision, local_path=None)
+    if cur.lastrowid is None:
+        raise RuntimeError("model insert did not return a row id")
+    return Model(
+        id=cur.lastrowid,
+        name=name,
+        hf_repo=hf_repo,
+        revision=revision,
+        local_path=None,
+    )
 
 
 def get_by_name(conn: sqlite3.Connection, name: str) -> Model | None:

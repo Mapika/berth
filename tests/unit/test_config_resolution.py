@@ -21,10 +21,13 @@ def test_resolve_defaults_when_nothing_set(monkeypatch):
     r = config.resolve_config(env={})
     assert r.public_host == config.DEFAULT_PUBLIC_HOST
     assert r.public_port == config.DEFAULT_PUBLIC_PORT
-    assert r.public_bind == config.DEFAULT_BIND
+    assert r.public_bind == "127.0.0.1"
     assert r.cluster_port == config.DEFAULT_CLUSTER_PORT
+    assert r.cluster_bind == "127.0.0.1"
     assert r.source["public_host"] == "default"
+    assert r.source["public_bind"] == "default"
     assert r.source["cluster_port"] == "default"
+    assert r.source["cluster_bind"] == "default"
 
 
 def test_flag_beats_env_beats_file_beats_autodetect(_isolated_serve_home, monkeypatch):

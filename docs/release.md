@@ -21,13 +21,47 @@ uv lock --check
 uv run --frozen ruff check src tests
 uv run --frozen mypy src
 uv run --frozen pytest tests/unit tests/integration -q
+uvx bandit -q -r src -x src/berth/ui/assets
+uvx detect-secrets scan --all-files \
+  --exclude-files '(^\.venv/|^ui/node_modules/|^src/berth/ui/assets/|^\.mypy_cache/|^\.pytest_cache/|^\.ruff_cache/|^uv\.lock$|^ui/package-lock\.json$)'
 cd ui
 npm ci
+npm audit
 npm run build
 cd ..
 rm -rf dist
 uv build
 ```
+
+## Security Probe
+
+Before tagging, run the black-box listener probe against the exact staging
+deployment shape you plan to publish:
+
+```bash
+python scripts/security_probe.py \
+  --public-url https://api.example.com:11500 \
+  --cluster-url https://cluster.example.com:11501 \
+  --token "$BERTH_API_KEY"
+```
+
+For local daemon smoke tests or generated staging certificates, add
+`--insecure`:
+
+```bash
+python scripts/security_probe.py \
+  --public-url https://127.0.0.1:11500 \
+  --cluster-url https://127.0.0.1:11501 \
+  --insecure
+```
+
+The probe fails closed if public/cluster listeners expose generated FastAPI
+docs, omit baseline browser security headers, omit `no-store` cache headers
+on sensitive routes, drop public auth, or let cluster-only/public-only routes
+bleed across listeners. When `--token` is supplied it also verifies an
+authenticated `/v1/models` call and the browser stream-ticket boundary:
+non-stream paths must be rejected, and a ticket minted for one stream route
+must not authorize another stream route.
 
 Inspect the wheel for packaged runtime data:
 
@@ -64,5 +98,5 @@ uv tool install \
 tmp=$(mktemp -d)
 uv venv "$tmp/.venv"
 "$tmp/.venv/bin/python" -m pip install dist/serve_engine-0.3.0-py3-none-any.whl
-"$tmp/.venv/bin/serve" --help
+"$tmp/.venv/bin/berth" --help
 ```

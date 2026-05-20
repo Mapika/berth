@@ -7,6 +7,15 @@ __pycache__/
 dist/
 *.egg-info/
 .serve/
+.berth/
+.env
+.env.*
+*.sqlite
+*.sqlite3
+*.db
+*.pem
+*.key
+*.crt
 ui/node_modules/
 ui/dist/
 ui/tsconfig.tsbuildinfo

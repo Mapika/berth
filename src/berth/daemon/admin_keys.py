@@ -28,13 +28,19 @@ class UpdateKeyRequest(BaseModel):
     allowed_models: list[str] | None = None
 
 
+class StreamTokenRequest(BaseModel):
+    path: str
+
+
 @router.post("/stream-token")
-def create_stream_token(request: Request):
-    from berth.daemon.admin import _rate_limit
+def create_stream_token(body: StreamTokenRequest, request: Request):
+    from berth.daemon.admin import _is_stream_ticket_path, _rate_limit
 
     _rate_limit(request, route="stream-token", limit=60, window_s=60.0)
-    token, expires_at = request.app.state.stream_tokens.issue()
-    return {"token": token, "expires_at": expires_at}
+    if not _is_stream_ticket_path(body.path):
+        raise HTTPException(400, "stream token path must be an admin stream route")
+    token, expires_at = request.app.state.stream_tokens.issue(path=body.path)
+    return {"token": token, "expires_at": expires_at, "path": body.path}
 
 
 @router.get("/keys")

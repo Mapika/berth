@@ -9,6 +9,7 @@ import pytest
 
 from berth.backends.vllm import VLLMBackend
 from berth.daemon.app import build_app
+from berth.daemon.openai_proxy import _UsageTracker
 from berth.lifecycle.docker_client import ContainerHandle
 from berth.store import adapters as ad_store
 from berth.store import db
@@ -59,6 +60,25 @@ def _seed(app, *, max_loras: int = 4):
     )
     dep_store.update_status(conn, dep.id, "ready")
     return base, dep
+
+
+def test_usage_tracker_ignores_malformed_json_usage_numbers():
+    tracker = _UsageTracker(is_sse=False)
+    tracker.feed(
+        b'{"id":"x","usage":{"prompt_tokens":"many","completion_tokens":{}}}',
+    )
+
+    assert tracker.extract() == (0, 0)
+
+
+def test_usage_tracker_ignores_malformed_sse_usage_numbers():
+    tracker = _UsageTracker(is_sse=True)
+    tracker.feed(
+        b'data: {"id":"x","choices":[],"usage":'
+        b'{"prompt_tokens":"many","completion_tokens":{}}}\n\n'
+    )
+
+    assert tracker.extract() == (0, 0)
 
 
 def _make_engine_intercept(monkeypatch, app):

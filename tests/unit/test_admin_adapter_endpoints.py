@@ -212,6 +212,55 @@ async def test_add_local_adapter_unknown_base_404(app, tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_add_local_adapter_rejects_path_traversal(app, tmp_path):
+    _seed_base_and_deployment(app)
+    src = _write_local_adapter_dir(tmp_path)
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as c:
+        r = await c.post(
+            "/admin/adapters/local",
+            json={
+                "name": "../traversal", "base_model_name": "qwen3-test",
+                "local_path": src,
+            },
+        )
+    assert r.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_add_local_adapter_rejects_invalid_characters(app, tmp_path):
+    _seed_base_and_deployment(app)
+    src = _write_local_adapter_dir(tmp_path)
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as c:
+        r = await c.post(
+            "/admin/adapters/local",
+            json={
+                "name": "invalid@name", "base_model_name": "qwen3-test",
+                "local_path": src,
+            },
+        )
+    assert r.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_add_local_adapter_rejects_trailing_newline(app, tmp_path):
+    _seed_base_and_deployment(app)
+    src = _write_local_adapter_dir(tmp_path)
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as c:
+        r = await c.post(
+            "/admin/adapters/local",
+            json={
+                "name": "newline\n",
+                "base_model_name": "qwen3-test",
+                "local_path": src,
+            },
+        )
+    assert r.status_code == 422
+
+
+@pytest.mark.asyncio
 async def test_add_local_adapter_rolls_back_on_copy_failure(app, tmp_path, monkeypatch):
     """If shutil.copytree fails after the registry row is inserted, the row
     must be deleted so a retry isn't blocked by a name collision."""
@@ -283,6 +332,22 @@ async def test_create_adapter_unknown_base_returns_404(app):
             },
         )
     assert r.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_create_adapter_rejects_trailing_newline(app):
+    _seed_base_and_deployment(app)
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as c:
+        r = await c.post(
+            "/admin/adapters",
+            json={
+                "name": "newline\n",
+                "base_model_name": "qwen3-test",
+                "hf_repo": "o/lora",
+            },
+        )
+    assert r.status_code == 422
 
 
 @pytest.mark.asyncio

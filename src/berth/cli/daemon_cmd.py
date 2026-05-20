@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 import os
 import signal
-import subprocess
+import subprocess  # nosec
 import sys
 import time
 
@@ -26,7 +26,7 @@ def spawn_daemon(
 ) -> int:
     """Spawn the daemon process, write its PID, poll the UDS /healthz
     until it answers. Returns the spawned PID."""
-    config.BERTH_DIR.mkdir(parents=True, exist_ok=True)
+    config.ensure_private_dir(config.BERTH_DIR)
     log_path = config.LOGS_DIR / "daemon.log"
     log_path.parent.mkdir(parents=True, exist_ok=True)
     cmd = [
@@ -42,7 +42,7 @@ def spawn_daemon(
         cmd.extend(["--public-cert", str(cfg.public_cert_path)])
     if cfg.public_key_path:
         cmd.extend(["--public-key", str(cfg.public_key_path)])
-    proc = subprocess.Popen(
+    proc = subprocess.Popen(  # nosec
         cmd,
         stdout=open(log_path, "ab"),  # file must outlive this Popen call
         stderr=subprocess.STDOUT,
@@ -101,7 +101,7 @@ def _print_startup_banner(cfg: config.ResolvedConfig, pid: int) -> None:
         f"cluster : {cfg.cluster_url}  (cert: serve cluster CA)"
     )
     typer.echo(f"            ca fingerprint: {ca_fp}")
-    if cfg.cluster_bind == "0.0.0.0":
+    if cfg.cluster_bind == "0.0.0.0":  # nosec
         typer.echo("")
         typer.echo(
             f"cluster listener on {cfg.cluster_bind}:{cfg.cluster_port} "

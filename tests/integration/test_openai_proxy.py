@@ -18,9 +18,14 @@ class FakeEngineApp:
         self.chunks = response_chunks
         self.status_code = status_code
         self.last_request_body: bytes | None = None
+        self.last_request_headers: dict[str, str] = {}
 
     async def __call__(self, scope, receive, send):
         assert scope["type"] == "http"
+        self.last_request_headers = {
+            name.decode("latin-1").lower(): value.decode("latin-1")
+            for name, value in scope["headers"]
+        }
         body = b""
         while True:
             event = await receive()
@@ -132,6 +137,42 @@ async def test_proxy_streams_response(app_with_active_deployment):
 
 
 @pytest.mark.asyncio
+async def test_proxy_does_not_forward_sensitive_client_headers(
+    app_with_active_deployment,
+):
+    app, fake = app_with_active_deployment
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(
+        transport=transport, base_url="http://test", timeout=30,
+    ) as c:
+        async with c.stream(
+            "POST",
+            "/v1/chat/completions",
+            headers={
+                "Authorization": "Bearer sk-public",
+                "Cookie": "session=secret",
+                "Proxy-Authorization": "Basic secret",
+                "X-Api-Key": "upstream-secret",
+                "X-Request-Id": "req-123",
+            },
+            json={
+                "model": "llama-1b",
+                "messages": [{"role": "user", "content": "hi"}],
+                "stream": True,
+            },
+        ) as r:
+            _ = [chunk async for chunk in r.aiter_bytes()]
+
+    assert r.status_code == 200
+    assert "authorization" not in fake.last_request_headers
+    assert "cookie" not in fake.last_request_headers
+    assert "proxy-authorization" not in fake.last_request_headers
+    assert "x-api-key" not in fake.last_request_headers
+    assert fake.last_request_headers["x-request-id"] == "req-123"
+    assert fake.last_request_headers["content-type"].startswith("application/json")
+
+
+@pytest.mark.asyncio
 async def test_proxy_503_when_no_active(tmp_path, monkeypatch):
     docker_client = MagicMock()
     conn = db.connect(tmp_path / "t.db")
@@ -179,6 +220,23 @@ async def test_proxy_400_when_no_model_field(app_with_active_deployment):
             json={"messages": []},
         )
     assert r.status_code == 400
+
+
+@pytest.mark.asyncio
+async def test_proxy_400_when_model_field_is_not_string(app_with_active_deployment):
+    app, fake = app_with_active_deployment
+    transport = httpx.ASGITransport(app=app, raise_app_exceptions=False)
+    async with httpx.AsyncClient(
+        transport=transport, base_url="http://test", timeout=30,
+    ) as c:
+        r = await c.post(
+            "/v1/chat/completions",
+            json={"model": ["llama-1b"], "messages": []},
+        )
+
+    assert r.status_code == 400
+    assert "model" in r.json()["detail"]
+    assert fake.last_request_body is None
 
 
 @pytest.mark.asyncio

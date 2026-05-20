@@ -10,6 +10,12 @@ from berth.auth.tiers import Limits
 from berth.store import api_keys, db, key_usage
 
 
+def _is_local_control_request(request: Request) -> bool:
+    return request.scope.get("client") is None or bool(
+        getattr(request.app.state, "local_control_surface", False)
+    )
+
+
 def _extract_bearer(authorization: str | None) -> str | None:
     if not authorization:
         return None
@@ -25,14 +31,12 @@ def require_auth_dep(request: Request) -> api_keys.ApiKey | None:
     Auth source: `Authorization: Bearer sk-...` header.
 
     Bootstrap exemption: when no keys exist in the table, auth is
-    bypassed for any caller (including TCP). This is the operator
-    bring-up window. The deploy bootstrap mints the first admin key
-    automatically so the window is closed before the public listener
-    sees external traffic; a startup warning fires for operators who
-    bring the daemon up by hand.
+    bypassed only for the local control surface. TCP listeners require a
+    bearer even before the first key exists, so an explicitly exposed
+    daemon never starts as an open inference/admin endpoint.
     """
     conn: sqlite3.Connection = request.app.state.conn
-    if api_keys.count_active(conn) == 0:
+    if api_keys.count_active(conn) == 0 and _is_local_control_request(request):
         return None
 
     auth_header = request.headers.get("authorization")
@@ -79,11 +83,9 @@ def require_metrics_key(request: Request) -> api_keys.ApiKey | None:
     public scrapers. UDS callers bypass (so `serve metrics` over the
     local socket still works).
     """
-    if request.scope.get("client") is None:
+    if _is_local_control_request(request):
         return None  # UDS — operator surface
     conn: sqlite3.Connection = request.app.state.conn
-    if api_keys.count_active(conn) == 0:
-        return None  # bootstrap window — operator hasn't minted a key yet
     secret = _extract_bearer(request.headers.get("authorization"))
     if not secret:
         raise HTTPException(

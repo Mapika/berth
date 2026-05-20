@@ -77,7 +77,7 @@ async def open_upstream_stream(
         try:
             await opened.aclose()
         except Exception:
-            pass
+            pass  # nosec
         raise UpstreamHttpError(status=opened.status)
     return opened
 

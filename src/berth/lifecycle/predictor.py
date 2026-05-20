@@ -161,7 +161,7 @@ class Predictor:
             except Exception:
                 # One bad rule must not poison the queue - log and skip.
                 # Caller (tick loop) emits the predictor.error event.
-                continue
+                continue  # nosec
         return sorted(seen.values(), key=lambda c: -c.score)
 
     # ---- Rule 1: time-of-day ----
@@ -263,8 +263,9 @@ class Predictor:
 
         # For each historical X event, count distinct Y events within window.
         # Use a self-join keyed on X's ts and a sqlite-friendly time delta.
+        window_modifier = f"+{int(cfg.window_s)} seconds"
         rows = self._conn.execute(
-            f"""
+            """
             SELECT
                 y.base_name AS base_name,
                 y.adapter_name AS adapter_name,
@@ -273,7 +274,7 @@ class Predictor:
             JOIN usage_events y
               ON y.id != x.id
              AND y.ts >  x.ts
-             AND y.ts <= datetime(x.ts, '+{cfg.window_s} seconds')
+             AND y.ts <= datetime(x.ts, ?)
             WHERE x.base_name = ?
               AND x.adapter_name IS ?
               AND x.ts >= ?
@@ -281,7 +282,7 @@ class Predictor:
                        AND y.adapter_name IS x.adapter_name)
             GROUP BY y.base_name, y.adapter_name
             """,
-            (x_base, x_adapter, retention_since),
+            (window_modifier, x_base, x_adapter, retention_since),
         ).fetchall()
         out: list[Candidate] = []
         x_label = x_adapter or x_base

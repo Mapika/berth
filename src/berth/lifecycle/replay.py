@@ -73,7 +73,8 @@ def simulate_lru(
     recorded_cold = 0
 
     for e in sorted_events:
-        assert e.adapter is not None  # filtered above; reassure the type checker
+        if e.adapter is None:
+            continue
         if e.cold_loaded:
             recorded_cold += 1
         cache = caches.setdefault(e.base, OrderedDict())

@@ -4,7 +4,7 @@ import asyncio
 
 import httpx
 
-from berth.daemon.metrics_aggregator import MetricsAggregator
+from berth.daemon.metrics_aggregator import MetricsAggregator, safe_metric_int
 from berth.observability.trtllm_metrics import translate_many
 
 _CLUSTER_HELP_BLOCK = """\
@@ -25,6 +25,16 @@ _CLUSTER_HELP_BLOCK = """\
 """
 
 
+def _label_value(value: object) -> str:
+    """Escape a Prometheus text-format label value."""
+    return (
+        str(value)
+        .replace("\\", "\\\\")
+        .replace("\n", "\\n")
+        .replace('"', '\\"')
+    )
+
+
 def format_cluster_metrics(
     aggregator: MetricsAggregator,
     *,
@@ -41,39 +51,40 @@ def format_cluster_metrics(
         return ""
     lines: list[str] = [_CLUSTER_HELP_BLOCK.rstrip()]
     for node_id, sample in sorted(snap.items()):
-        node = node_labels.get(node_id, str(node_id))
+        node = _label_value(node_labels.get(node_id, str(node_id)))
         for g in sample.get("gpus", []):
-            gpu = str(g.get("index", -1))
+            gpu = _label_value(g.get("index", -1))
             lines.append(
                 f'serve_node_gpu_util_pct{{node="{node}",gpu="{gpu}"}} '
-                f'{int(g.get("util_pct", 0))}'
+                f'{safe_metric_int(g.get("util_pct", 0))}'
             )
             lines.append(
                 f'serve_node_gpu_mem_used_bytes{{node="{node}",gpu="{gpu}"}} '
-                f'{int(g.get("mem_used_mb", 0)) * 1024 * 1024}'
+                f'{safe_metric_int(g.get("mem_used_mb", 0)) * 1024 * 1024}'
             )
         for d in sample.get("deployments", []):
-            dep = str(d.get("deployment_id", -1))
-            model = str(d.get("model_id", ""))
+            dep = _label_value(d.get("deployment_id", -1))
+            model = _label_value(d.get("model_id", ""))
             tail = f'{{node="{node}",deployment="{dep}",model="{model}"}}'
             lines.append(
-                f'serve_deployment_in_flight{tail} {int(d.get("in_flight", 0))}'
+                f'serve_deployment_in_flight{tail} '
+                f'{safe_metric_int(d.get("in_flight", 0))}'
             )
             lines.append(
                 f'serve_deployment_requests_total{tail} '
-                f'{int(d.get("requests_last_window", 0))}'
+                f'{safe_metric_int(d.get("requests_last_window", 0))}'
             )
             lines.append(
                 f'serve_deployment_latency_p50_ms{tail} '
-                f'{int(d.get("latency_p50_ms", 0))}'
+                f'{safe_metric_int(d.get("latency_p50_ms", 0))}'
             )
             lines.append(
                 f'serve_deployment_latency_p95_ms{tail} '
-                f'{int(d.get("latency_p95_ms", 0))}'
+                f'{safe_metric_int(d.get("latency_p95_ms", 0))}'
             )
             lines.append(
                 f'serve_deployment_errors_total{tail} '
-                f'{int(d.get("errors_last_window", 0))}'
+                f'{safe_metric_int(d.get("errors_last_window", 0))}'
             )
     return "\n".join(lines) + "\n"
 
@@ -89,7 +100,7 @@ def format_daemon_metrics(
     lines.append("# HELP serve_deployments Count of deployments by status.")
     lines.append("# TYPE serve_deployments gauge")
     for status, n in sorted(deployments_by_status.items()):
-        lines.append(f'serve_deployments{{status="{status}"}} {n}')
+        lines.append(f'serve_deployments{{status="{_label_value(status)}"}} {n}')
     lines.append("# HELP serve_models_total Number of registered models.")
     lines.append("# TYPE serve_models_total gauge")
     lines.append(f"serve_models_total {models_total}")

@@ -67,7 +67,7 @@ async def test_register_with_valid_token_issues_cert(app):
     data = r.json()
     assert "node_id" in data
     assert "BEGIN CERTIFICATE" in data["agent_cert"]
-    assert "BEGIN PRIVATE KEY" in data["agent_key"]
+    assert "BEGIN PRIVATE KEY" in data["agent_key"]  # pragma: allowlist secret
     assert "BEGIN CERTIFICATE" in data["ca_cert"]
 
 
@@ -115,6 +115,38 @@ async def test_register_token_is_single_use(app):
         second = await c.post("/admin/nodes/register", json=body)
     assert first.status_code == 200
     assert second.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_register_rejects_bad_host_info_without_consuming_token(app):
+    transport = httpx.ASGITransport(app=app, raise_app_exceptions=False)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as c:
+        enroll = (await c.post("/admin/nodes/enroll",
+                               json={"label": "agent-retry"})).json()
+        bad = await c.post("/admin/nodes/register", json={
+            "token": enroll["token"],
+            "host_info": {
+                "cpu_count": "many",
+                "total_ram_mb": 1,
+                "gpu_count": 0,
+                "total_vram_mb": 0,
+                "gpus": [],
+            },
+        })
+        retry = await c.post("/admin/nodes/register", json={
+            "token": enroll["token"],
+            "host_info": {
+                "cpu_count": 1,
+                "total_ram_mb": 1,
+                "gpu_count": 0,
+                "total_vram_mb": 0,
+                "gpus": [],
+            },
+        })
+
+    assert bad.status_code == 400
+    assert "host_info" in bad.json()["detail"]
+    assert retry.status_code == 200, retry.text
 
 
 @pytest.mark.asyncio

@@ -56,5 +56,6 @@ async def dispatch_with_retry(
             last_err = exc
             continue
 
-    assert last_err is not None
+    if last_err is None:
+        raise RuntimeError("dispatch_with_retry exhausted candidates without an error")
     raise last_err

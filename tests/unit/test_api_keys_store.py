@@ -117,6 +117,29 @@ def test_allowed_models_roundtrip(tmp_path):
     assert verified.allowed_models == ["a", "b"]
 
 
+def test_malformed_allowed_models_fails_closed(tmp_path):
+    """Corrupt allowlist metadata must not turn a scoped key unrestricted."""
+    conn = _fresh(tmp_path)
+    secret, key = api_keys.create(
+        conn, name="scoped", tier="standard", allowed_models=["only-this"],
+    )
+
+    conn.execute(
+        "UPDATE api_keys SET allowed_models=? WHERE id=?",
+        ("not-json", key.id),
+    )
+    assert api_keys.get_by_id(conn, key.id).allowed_models == []
+    verified = api_keys.verify(conn, secret)
+    assert verified is not None
+    assert verified.allowed_models == []
+
+    conn.execute(
+        "UPDATE api_keys SET allowed_models=? WHERE id=?",
+        ('{"not": "a list"}', key.id),
+    )
+    assert api_keys.get_by_id(conn, key.id).allowed_models == []
+
+
 def test_concurrent_verify_and_count_does_not_corrupt_cursor(tmp_path):
     """Regression: dashboard 500s on stop/restart were caused by concurrent
     sqlite3 access from FastAPI's worker-thread pool. With the LockedConnection

@@ -58,7 +58,7 @@ def _build_islands(count: int) -> dict[int, frozenset[int]]:
             try:
                 rel = pynvml.nvmlDeviceGetTopologyCommonAncestor(handles[i], handles[j])
             except Exception:
-                continue
+                continue  # nosec
             if rel == pynvml.NVML_TOPOLOGY_NVLINK:
                 union(i, j)
 

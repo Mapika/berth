@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from berth.daemon.metrics_aggregator import MetricsAggregator
+from berth.daemon.openai_proxy import _build_signals_by_node
 
 
 def _sample(util=10, in_flight=0, p95=100):
@@ -56,6 +57,59 @@ def test_aggregator_query_in_flight_for_deployment():
     a.ingest(node_id=1, sample=_sample(in_flight=3), ts=100.0)
     assert a.deployment_in_flight(node_id=1, deployment_id=7) == 3
     assert a.deployment_in_flight(node_id=1, deployment_id=99) == 0
+
+
+def test_aggregator_treats_malformed_agent_numbers_as_zero():
+    a = MetricsAggregator()
+    a.ingest(
+        node_id=1,
+        sample={
+            "gpus": [{"index": 0, "util_pct": "busy", "mem_used_mb": "-10"}],
+            "deployments": [
+                {
+                    "deployment_id": 7,
+                    "in_flight": "many",
+                    "requests_last_window": None,
+                },
+            ],
+        },
+        ts=100.0,
+    )
+
+    assert a.series(node_id=1, key="gpu_util_pct", gpu=0) == [0]
+    assert a.series(node_id=1, key="gpu_mem_used_mb", gpu=0) == [0]
+    assert a.series(node_id=1, key="request_rate") == [0]
+    assert a.deployment_in_flight(node_id=1, deployment_id=7) == 0
+
+
+def test_routing_signals_treat_malformed_agent_numbers_as_zero():
+    a = MetricsAggregator()
+    a.ingest(
+        node_id=1,
+        sample={
+            "gpus": [
+                {
+                    "index": 0,
+                    "mem_total_mb": "large",
+                    "mem_used_mb": 10,
+                },
+            ],
+            "deployments": [
+                {
+                    "deployment_id": 7,
+                    "in_flight": "many",
+                    "latency_p95_ms": {},
+                },
+            ],
+        },
+        ts=100.0,
+    )
+
+    signals = _build_signals_by_node(a)
+
+    assert signals[1].mem_free_mb == 0
+    assert signals[1].in_flight == 0
+    assert signals[1].latency_p95_ms == 0
 
 
 def test_aggregator_thread_safety_under_concurrent_ingest():

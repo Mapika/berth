@@ -22,8 +22,9 @@ def top(refresh_s: float = typer.Option(1.0, "--refresh", "-r")):
 
 async def _run(console: Console, refresh_s: float) -> None:
     transport = httpx.AsyncHTTPTransport(uds=str(config.SOCK_PATH))
+    timeout = httpx.Timeout(connect=5.0, read=None, write=5.0, pool=5.0)
     async with httpx.AsyncClient(
-        transport=transport, base_url="http://daemon", timeout=None,
+        transport=transport, base_url="http://daemon", timeout=timeout,
     ) as c:
         last_events: list[dict] = []
 
@@ -40,7 +41,7 @@ async def _run(console: Console, refresh_s: float) -> None:
                             except json.JSONDecodeError:
                                 pass
             except Exception:
-                pass
+                pass  # nosec
 
         events_task = asyncio.create_task(consume_events())
         try:

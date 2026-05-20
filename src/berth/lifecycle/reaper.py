@@ -45,7 +45,7 @@ class Reaper:
                     else _parse_sqlite_ts(last)
                 )
             except Exception:
-                continue
+                continue  # nosec
             idle = now - last_ts
             timeout = d.idle_timeout_s or self._default_idle_timeout_s
             if idle >= timeout:

@@ -22,7 +22,7 @@ def test_setup_passes_resolved_config_to_spawn_daemon(monkeypatch, tmp_path):
         raise RuntimeError("not running")
 
     async def create_key(*args, **kwargs):
-        return {"id": 1, "secret": "sk-test"}
+        return {"id": 1, "secret": "sk-test"}  # pragma: allowlist secret
 
     seen = {}
 

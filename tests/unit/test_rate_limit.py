@@ -11,6 +11,8 @@ def _make_request(
     *,
     xff: str | None = None,
     trust_proxy_headers: bool = False,
+    forwarded_allow_ips: str = "127.0.0.1",
+    local_control_surface: bool = False,
 ) -> Request:
     """Build a minimal ASGI scope so `_client_ip` and `_rate_limit`
     can run without spinning up a real server."""
@@ -21,6 +23,8 @@ def _make_request(
     from types import SimpleNamespace
     app = SimpleNamespace(state=SimpleNamespace(
         trust_proxy_headers=trust_proxy_headers,
+        forwarded_allow_ips=forwarded_allow_ips,
+        local_control_surface=local_control_surface,
     ))
     scope = {
         "type": "http",
@@ -68,6 +72,13 @@ def test_rate_limit_uds_exempt():
         admin_mod._rate_limit(req, route="t", limit=2, window_s=60.0)
 
 
+def test_rate_limit_local_control_surface_exempt():
+    admin_mod._rl_buckets.clear()
+    req = _make_request("127.0.0.1", local_control_surface=True)
+    for _ in range(1000):
+        admin_mod._rate_limit(req, route="t", limit=2, window_s=60.0)
+
+
 def test_rate_limit_window_resets(monkeypatch):
     admin_mod._rl_buckets.clear()
     now = [1000.0]
@@ -89,6 +100,36 @@ def test_client_ip_uses_xff_when_proxy_trusted():
     XFF hop, not the TCP peer (which would be the reverse proxy)."""
     req = _make_request(
         "127.0.0.1", xff="203.0.113.5", trust_proxy_headers=True,
+    )
+    assert admin_mod._client_ip(req) == "203.0.113.5"
+
+
+def test_client_ip_ignores_xff_from_untrusted_direct_peer():
+    """A client must not evade the limiter by sending X-Forwarded-For
+    directly when it is not one of our trusted proxies."""
+    req = _make_request(
+        "198.51.100.10",
+        xff="203.0.113.5",
+        trust_proxy_headers=True,
+    )
+    assert admin_mod._client_ip(req) == "198.51.100.10"
+
+
+def test_client_ip_uses_xff_from_configured_proxy_network():
+    req = _make_request(
+        "198.51.100.10",
+        xff="203.0.113.5",
+        trust_proxy_headers=True,
+        forwarded_allow_ips="198.51.100.0/24",
+    )
+    assert admin_mod._client_ip(req) == "203.0.113.5"
+
+
+def test_client_ip_uses_rightmost_untrusted_xff_hop():
+    req = _make_request(
+        "127.0.0.1",
+        xff="203.0.113.5, 127.0.0.1",
+        trust_proxy_headers=True,
     )
     assert admin_mod._client_ip(req) == "203.0.113.5"
 

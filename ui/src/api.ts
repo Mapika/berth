@@ -36,7 +36,9 @@ export const queryKeys = {
 
 export async function eventSourceUrl(path: string): Promise<string> {
   if (!getToken()) return path
-  const ticket = await api.createStreamToken()
+  const ticket = await api.createStreamToken(
+    new URL(path, window.location.origin).pathname,
+  )
   const sep = path.includes('?') ? '&' : '?'
   return `${path}${sep}stream_token=${encodeURIComponent(ticket.token)}`
 }
@@ -213,6 +215,7 @@ export type PredictorStats = {
 export type StreamToken = {
   token: string
   expires_at: number
+  path: string
 }
 
 export type ServiceProfile = {
@@ -302,7 +305,8 @@ export const api = {
   listGpus: () => jfetch<GpuSnapshot[]>('GET', '/admin/gpus'),
   listBackends: () => jfetch<BackendInfo[]>('GET', '/admin/backends'),
   loadModel: (b: LoadDeploymentBody) => jfetch<Deployment>('POST', '/admin/deployments', b),
-  createStreamToken: () => jfetch<StreamToken>('POST', '/admin/stream-token'),
+  createStreamToken: (path: string) =>
+    jfetch<StreamToken>('POST', '/admin/stream-token', { path }),
 
   listAdapters: () => jfetch<Adapter[]>('GET', '/admin/adapters'),
   createAdapter: (b: CreateAdapterBody) => jfetch<CreatedAdapter>('POST', '/admin/adapters', b),
