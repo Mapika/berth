@@ -73,6 +73,51 @@ async def test_start_deployment_roundtrip():
 
 
 @pytest.mark.asyncio
+async def test_start_deployment_times_out_when_agent_is_silent(monkeypatch):
+    """A registered agent that goes silent (zombie WS, half-open TCP, crashed
+    agent process between sending Welcome and the StartDeployment reply) must
+    not pin LifecycleManager._lock indefinitely. We saw this in production:
+    ``DELETE /admin/deployments/<id>`` queues behind a load() that holds the
+    lock while it awaits an OpResult that will never arrive. Per-call RPC
+    timeouts bound the worst case so the lock can be released."""
+    monkeypatch.setattr(RemoteAgentLink, "START_DEPLOYMENT_TIMEOUT_S", 0.05)
+    ws = _FakeWS()
+    link = RemoteAgentLink(node_id=7, ws=ws)
+    run_task = asyncio.create_task(link.run())
+
+    with pytest.raises(RuntimeError, match=r"did not respond.*'start_deployment'"):
+        # Outer wait_for is just a sanity-cap — the inner per-call timeout
+        # should fire well before we reach this 2s upper bound.
+        await asyncio.wait_for(
+            link.start_deployment({"image": "x", "name": "d"}),
+            timeout=2.0,
+        )
+    # The pending-op entry must be cleaned up; a stale future hanging around
+    # would also leak a coroutine waiting on it.
+    assert link._pending_ops == {}
+
+    link.shutdown()
+    await ws.push_from_agent(None)
+    await asyncio.gather(run_task, return_exceptions=True)
+
+
+@pytest.mark.asyncio
+async def test_stop_deployment_times_out_when_agent_is_silent(monkeypatch):
+    monkeypatch.setattr(RemoteAgentLink, "STOP_DEPLOYMENT_TIMEOUT_S", 0.05)
+    ws = _FakeWS()
+    link = RemoteAgentLink(node_id=7, ws=ws)
+    run_task = asyncio.create_task(link.run())
+
+    with pytest.raises(RuntimeError, match=r"did not respond.*'stop_deployment'"):
+        await asyncio.wait_for(link.stop_deployment("cid-1"), timeout=2.0)
+    assert link._pending_ops == {}
+
+    link.shutdown()
+    await ws.push_from_agent(None)
+    await asyncio.gather(run_task, return_exceptions=True)
+
+
+@pytest.mark.asyncio
 async def test_start_deployment_ignores_agent_supplied_address():
     """Adversarial-agent SSRF guard: even if the agent returns a real address
     (e.g. 127.0.0.1:65430 to redirect the leader's metrics/adapter dial path),

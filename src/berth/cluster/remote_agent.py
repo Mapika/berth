@@ -126,17 +126,39 @@ class RemoteAgentLink:
         finally:
             self.shutdown()
 
-    async def _request_op(self, frame: Frame, request_id: str) -> OpResult:
+    # Per-call RPC timeouts. The leader holds LifecycleManager._lock across
+    # load() and stop(); a silent or zombie agent that never replies must not
+    # be allowed to pin that lock indefinitely (this is what made
+    # ``DELETE /admin/deployments/<id>`` hang for minutes against an agent
+    # whose host vanished mid-load). start needs more slack — the agent has
+    # to image-pull and start the container; stop should be quick.
+    START_DEPLOYMENT_TIMEOUT_S = 120.0
+    STOP_DEPLOYMENT_TIMEOUT_S = 20.0
+
+    async def _request_op(
+        self, frame: Frame, request_id: str, *, timeout_s: float,
+    ) -> OpResult:
         loop = asyncio.get_running_loop()
         fut: asyncio.Future[OpResult] = loop.create_future()
         self._pending_ops[request_id] = fut
-        await self._send(frame)
-        return await fut
+        try:
+            await self._send(frame)
+            return await asyncio.wait_for(fut, timeout=timeout_s)
+        except TimeoutError as e:
+            raise RuntimeError(
+                f"agent did not respond to {frame.type!r} within {timeout_s}s"
+            ) from e
+        finally:
+            # Whether we returned, raised, or were cancelled, drop the entry
+            # so a late OpResult arriving after a timeout doesn't leak memory
+            # and a future request_id collision can't trip over a dead future.
+            self._pending_ops.pop(request_id, None)
 
     async def start_deployment(self, plan: dict[str, Any]) -> StartedContainer:
         rid = secrets.token_hex(8)
         res = await self._request_op(
             StartDeployment(request_id=rid, plan=plan), rid,
+            timeout_s=self.START_DEPLOYMENT_TIMEOUT_S,
         )
         if not res.ok or res.data is None:
             raise RuntimeError(res.error or "start_deployment failed")
@@ -160,6 +182,7 @@ class RemoteAgentLink:
         rid = secrets.token_hex(8)
         res = await self._request_op(
             StopDeployment(request_id=rid, container_id=container_id), rid,
+            timeout_s=self.STOP_DEPLOYMENT_TIMEOUT_S,
         )
         if not res.ok:
             raise RuntimeError(res.error or "stop_deployment failed")
