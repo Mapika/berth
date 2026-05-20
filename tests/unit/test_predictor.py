@@ -374,7 +374,7 @@ def test_candidate_key_property_round_trips():
 
 def test_predictor_config_load_returns_defaults_when_file_absent(tmp_path):
     cfg = PredictorConfig.load(tmp_path / "missing.yaml")
-    assert cfg.enabled is True
+    assert cfg.enabled is False
     assert cfg.tick_interval_s == 30
     assert cfg.max_prewarm_per_tick == 2
     assert cfg.retention_days == 30

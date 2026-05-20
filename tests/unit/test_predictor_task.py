@@ -88,6 +88,7 @@ def _only_seq() -> PredictorConfig:
     """Config with only the sequencing rule on - the easiest rule to
     trigger with a single seed event."""
     return PredictorConfig(
+        enabled=True,
         time_of_day=RuleConfig(enabled=False),
         sequencing=SequencingConfig(window_s=30, min_p=0.30),
         key_affinity=KeyAffinityConfig(enabled=False),
@@ -292,6 +293,7 @@ async def test_tick_respects_max_prewarm_per_tick(tmp_path, monkeypatch):
     cap = _intercept_engine_loads(monkeypatch)
     cfg = _only_seq()
     cfg = PredictorConfig(
+        enabled=cfg.enabled,
         max_prewarm_per_tick=2,
         time_of_day=cfg.time_of_day,
         sequencing=SequencingConfig(window_s=30, min_p=0.2),
@@ -341,6 +343,20 @@ async def test_tick_disabled_predictor_is_noop(tmp_path, monkeypatch):
     )
     assert await task.tick_once() == 0
     assert cap == []
+
+
+def test_start_disabled_predictor_does_not_create_task(tmp_path):
+    conn = _fresh(tmp_path)
+    task = PredictorTask(
+        conn=conn,
+        backends={},
+        models_dir=tmp_path,
+        config=PredictorConfig(enabled=False),
+    )
+
+    task.start()
+
+    assert task._task is None
 
 
 # ---- Base pre-warming (Workstream C follow-up) ----------------------------

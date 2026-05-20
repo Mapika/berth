@@ -59,7 +59,7 @@ class KeyAffinityConfig(RuleConfig):
 
 @dataclass(frozen=True)
 class PredictorConfig:
-    enabled: bool = True
+    enabled: bool = False
     tick_interval_s: int = 30
     max_prewarm_per_tick: int = 2
     retention_days: int = 30

@@ -53,7 +53,7 @@ Fields and defaults, from `PredictorConfig` in
 
 | Field | Default | Meaning |
 |---|---|---|
-| `enabled` | `true` | Master switch. `false` skips the tick loop entirely. |
+| `enabled` | `false` | Master switch. `false` skips the tick loop entirely. |
 | `tick_interval_s` | `30` | Seconds between predictor ticks. |
 | `max_prewarm_per_tick` | `2` | Total pre-warm actions (base + adapter) per tick. |
 | `max_base_prewarm_per_tick` | `1` | Subset of the above that may start a base deployment. `0` disables base pre-warming. |
@@ -69,8 +69,9 @@ Fields and defaults, from `PredictorConfig` in
 | `rules.key_affinity.top_k_per_key` | `5` | Models pulled per active key. |
 | `rules.key_affinity.idle_seconds` | `300` | A key counts as "active" if it fired within this window. |
 
-Missing keys, missing file, or malformed YAML all fall back to defaults —
-ship a partial file and only override what you care about.
+Missing keys, missing file, or malformed YAML all fall back to defaults.
+By default the predictor is off; create this file with `enabled: true`
+to opt in.
 
 Minimal example:
 
@@ -93,7 +94,8 @@ rules:
 
 ## How to disable
 
-Write:
+The predictor is disabled by default. If you previously enabled it,
+write:
 
 ```yaml
 enabled: false

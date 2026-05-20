@@ -215,6 +215,9 @@ class PredictorTask:
                 pass
 
     def start(self) -> None:
+        if not self._config.enabled:
+            log.info("predictor disabled")
+            return
         if self._task is None:
             self._task = asyncio.create_task(self.run())
 
