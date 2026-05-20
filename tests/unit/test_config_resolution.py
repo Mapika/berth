@@ -92,6 +92,26 @@ def test_reverse_proxy_mode_from_env(monkeypatch):
     assert r.public_url == f"http://{r.public_host}:{r.public_port}"
 
 
+def test_leader_only_resolution_flag_env_file(_isolated_serve_home, monkeypatch):
+    monkeypatch.setattr(config, "autodetect_outbound_ip", lambda: None)
+    config.save_config_file({"server": {"leader_only": True}})
+
+    r = config.resolve_config(env={})
+    assert r.leader_only is True
+    assert r.source["leader_only"] == "file"
+
+    r = config.resolve_config(env={"BERTH_LEADER_ONLY": "false"})
+    assert r.leader_only is False
+    assert r.source["leader_only"] == "env"
+
+    r = config.resolve_config(
+        env={"BERTH_LEADER_ONLY": "false"},
+        cli_leader_only=True,
+    )
+    assert r.leader_only is True
+    assert r.source["leader_only"] == "flag"
+
+
 def test_save_config_file_round_trip(_isolated_serve_home):
     config.save_config_file({
         "public": {"host": "a.com", "port": 8443},

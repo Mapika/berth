@@ -120,7 +120,7 @@ class LifecycleManager:
         self,
         *,
         conn: sqlite3.Connection,
-        docker_client: DockerClient,
+        docker_client: DockerClient | None,
         backends: dict[str, Backend],
         models_dir: Path,
         topology: Topology | None = None,
@@ -207,10 +207,26 @@ class LifecycleManager:
             )
         return node.id
 
+    def _ensure_local_runtime(self) -> None:
+        if self._docker is None:
+            raise RuntimeError(
+                "this leader is running in control-plane only mode "
+                "(no local Docker); deploy to an enrolled agent by "
+                "passing --node <label> or setting node_label on the "
+                "service profile"
+            )
+        if self._topology is None:
+            raise RuntimeError(
+                "topology not initialized; "
+                "pass topology=read_topology() to LifecycleManager"
+            )
+
     async def load(self, plan: DeploymentPlan):
         async with self._lock:
             target_node_id = self._resolve_target_node_id(plan)
             is_remote = (plan.node_label or "local") not in ("", "local")
+            if not is_remote:
+                self._ensure_local_runtime()
 
             model = model_store.get_by_name(self._conn, plan.model_name)
             if model is None:
@@ -269,11 +285,7 @@ class LifecycleManager:
                         "(target node's GPU indices)"
                     )
             else:
-                if self._topology is None:
-                    raise RuntimeError(
-                        "topology not initialized; "
-                        "pass topology=read_topology() to LifecycleManager"
-                    )
+                assert self._topology is not None  # guarded before model download
                 ready = dep_store.list_ready(self._conn)
                 lru_rank = {
                     d.id: idx
@@ -469,6 +481,7 @@ class LifecycleManager:
                 await self._emit("deployment.ready", dep_id=dep.id)
                 return dep_store.get_by_id(self._conn, dep.id)
 
+            assert self._docker is not None  # guarded above for the local path
             container_model_path = "/cache/" + str(
                 Path(local_path).resolve().relative_to(self._models_dir.resolve())
             )
@@ -573,6 +586,21 @@ class LifecycleManager:
                         d.id, d.node_id,
                     )
                     continue
+                if self._docker is None:
+                    # Leader-only mode came online with a pre-existing local
+                    # deployment row in the DB (e.g., the box was demoted from
+                    # full leader). We can't see the container without Docker,
+                    # so mark it failed and let the operator clean up.
+                    log.warning(
+                        "reconcile: deployment %s is local but this leader has "
+                        "no Docker; marking failed", d.id,
+                    )
+                    dep_store.update_status(
+                        self._conn, d.id, "failed",
+                        last_error="leader is in control-plane only mode; "
+                        "local container is unreachable",
+                    )
+                    continue
                 if d.container_id is None:
                     dep_store.update_status(
                         self._conn, d.id, "failed",
@@ -668,8 +696,14 @@ class LifecycleManager:
                         "row will still be marked stopped",
                         dep.node_id, dep.container_id,
                     )
-            else:
+            elif self._docker is not None:
                 self._docker.stop(dep.container_id, timeout=30)
+            else:
+                log.warning(
+                    "stop: deployment %s is local but this leader has no "
+                    "Docker; marking stopped without touching the container",
+                    dep.id,
+                )
         da_store.detach_all(self._conn, dep.id)
         # Remove the per-deployment engine config file if one was written
         # locally (remote configs live on the agent host, never here).

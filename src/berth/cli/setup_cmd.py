@@ -13,10 +13,11 @@ from berth.doctor.runner import run_all, summarise
 @app.command("setup")
 def setup():
     """First-run wizard: doctor, start daemon, create admin key, print URL."""
+    cfg = config.resolve_config()
     typer.echo("=== berth setup ===")
     typer.echo()
     typer.echo("Step 1: environment diagnostic")
-    results = run_all()
+    results = run_all(leader_only=cfg.leader_only)
     _, _, fail = summarise(results)
     labels = {"ok": "OK", "warn": "WARN", "fail": "FAIL"}
     for r in results:
@@ -30,7 +31,6 @@ def setup():
 
     typer.echo()
     typer.echo("Step 2: starting daemon")
-    cfg = config.resolve_config()
     try:
         asyncio.run(ipc.get(config.SOCK_PATH, "/healthz"))
         typer.echo("  daemon already running")

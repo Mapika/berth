@@ -1,9 +1,11 @@
+from berth.doctor import runner
 from berth.doctor.checks import (
     check_docker,
     check_gpus,
     check_paths,
     check_ports,
 )
+from berth.doctor.runner import CheckResult
 
 
 def test_check_paths_writable(tmp_path, monkeypatch):
@@ -44,3 +46,28 @@ def test_check_gpus_no_pynvml(monkeypatch):
     r = check_gpus()
     assert r.status == "fail"
     assert "pynvml" in r.detail.lower() or "no" in r.detail.lower()
+
+
+def test_run_all_leader_only_skips_local_runtime_checks(monkeypatch):
+    calls: list[str] = []
+
+    def ok(name: str):
+        def _check():
+            calls.append(name)
+            return CheckResult(name=name, status="ok", detail="ok")
+        return _check
+
+    def forbidden():
+        raise AssertionError("local runtime check should be skipped")
+
+    monkeypatch.setattr(runner, "check_paths", ok("paths"))
+    monkeypatch.setattr(runner, "check_ports", ok("ports"))
+    monkeypatch.setattr(runner, "check_hf_token", ok("hf"))
+    monkeypatch.setattr(runner, "check_docker", forbidden)
+    monkeypatch.setattr(runner, "check_gpus", forbidden)
+    monkeypatch.setattr(runner, "check_engine_images", forbidden)
+
+    results = runner.run_all(leader_only=True)
+
+    assert calls == ["paths", "ports", "hf"]
+    assert [r.name for r in results] == ["paths", "ports", "hf"]

@@ -119,6 +119,12 @@ class ResolvedConfig:
     trust_proxy_headers: bool = False
     forwarded_allow_ips: str = "127.0.0.1"
     leader_url_override: str | None = None  # BERTH_LEADER_URL (legacy: SERVE_LEADER_URL)
+    # Control-plane only mode. When True the daemon does not require local
+    # Docker or NVIDIA: it serves /v1/*, /admin/*, /metrics, the UI, and the
+    # cluster listener, but all deployments must target a remote agent
+    # (`--node <label>` or service-profile node_label). Useful for hosting
+    # the leader on a small VPS while GPU work runs on enrolled agents.
+    leader_only: bool = False
     source: dict[str, str] = field(default_factory=dict)
 
     @property
@@ -250,6 +256,7 @@ def resolve_config(
     cli_cluster_bind: str | None = None,
     cli_public_cert: str | None = None,
     cli_public_key: str | None = None,
+    cli_leader_only: bool | None = None,
     env: Mapping[str, str] | None = None,
 ) -> ResolvedConfig:
     """Resolve effective config from flags → env → file → autodetect/default.
@@ -261,11 +268,12 @@ def resolve_config(
     public_file = file_cfg.get("public", {})
     cluster_file = file_cfg.get("cluster", {})
     tls_file = file_cfg.get("public_tls", {})
+    server_file = file_cfg.get("server", {})
     source: dict[str, str] = {}
 
     def _pick(
         field_name: str,
-        cli_val: str | int | None,
+        cli_val: str | int | bool | None,
         env_key: str | None,
         file_section: Mapping[str, Any],
         file_key: str,
@@ -353,6 +361,15 @@ def resolve_config(
         "forwarded_allow_ips", None, "SERVE_FORWARDED_ALLOW_IPS",
         public_file, "forwarded_allow_ips", "127.0.0.1",
     )
+    leader_only_raw = _pick(
+        "leader_only", cli_leader_only, "SERVE_LEADER_ONLY",
+        server_file, "leader_only", False,
+    )
+    leader_only = (
+        str(leader_only_raw).lower() in {"1", "true", "yes"}
+        if not isinstance(leader_only_raw, bool)
+        else leader_only_raw
+    )
     leader_override = _env_get(env_map, "SERVE_LEADER_URL")
     if leader_override:
         # Tag with whichever name the operator actually set.
@@ -383,5 +400,6 @@ def resolve_config(
         trust_proxy_headers=bool(trust_proxy_headers),
         forwarded_allow_ips=str(forwarded_allow_ips),
         leader_url_override=leader_override,
+        leader_only=bool(leader_only),
         source=source,
     )

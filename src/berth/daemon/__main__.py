@@ -99,8 +99,16 @@ async def serve(cfg: config.ResolvedConfig, sock_path: Path) -> None:
             cfg.public_host, cfg.public_bind,
         )
 
-    docker_client = DockerClient(network_name=config.DOCKER_NETWORK_NAME)
-    docker_client.ensure_network()
+    docker_client: DockerClient | None
+    if cfg.leader_only:
+        docker_client = None
+        log_.info(
+            "leader-only mode: skipping local Docker init; "
+            "deployments must target a remote agent via --node <label>"
+        )
+    else:
+        docker_client = DockerClient(network_name=config.DOCKER_NETWORK_NAME)
+        docker_client.ensure_network()
 
     from berth.lifecycle.topology import read_topology
     topology = read_topology()
@@ -162,6 +170,7 @@ async def serve(cfg: config.ResolvedConfig, sock_path: Path) -> None:
         configs_dir=config.CONFIGS_DIR,
         leader_url=cfg.cluster_url,
         resolved_cfg=cfg,
+        leader_only=cfg.leader_only,
     )
 
     uds_socket = _bind_control_socket(sock_path)
@@ -216,6 +225,13 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--cluster-host")
     p.add_argument("--cluster-port", type=int)
     p.add_argument("--cluster-bind")
+    p.add_argument(
+        "--leader-only",
+        action="store_true",
+        default=None,
+        help="Run as a control plane only. Skip local Docker init; all "
+        "deployments must target an enrolled agent.",
+    )
     p.add_argument("--sock", default=str(config.SOCK_PATH))
     # Back-compat aliases: --host/--port map to --public-host/--public-port.
     p.add_argument("--host", dest="public_host_alias")
@@ -232,6 +248,7 @@ def main(argv: list[str] | None = None) -> int:
         cli_cluster_bind=args.cluster_bind,
         cli_public_cert=args.public_cert,
         cli_public_key=args.public_key,
+        cli_leader_only=args.leader_only,
     )
     asyncio.run(serve(cfg, Path(args.sock)))
     return 0

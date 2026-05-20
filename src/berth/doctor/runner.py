@@ -11,7 +11,18 @@ from berth.doctor.checks import (
 )
 
 
-def run_all() -> list[CheckResult]:
+def run_all(*, leader_only: bool = False) -> list[CheckResult]:
+    if leader_only:
+        # A control-plane-only host has neither Docker nor an NVIDIA stack;
+        # the Docker/GPU/engine-image checks would always fail and drown out
+        # the real signal. Keep the boundary checks that still matter (a
+        # writable BERTH_DIR, a free public port, and the HF token used by
+        # adapter downloads orchestrated from the leader).
+        return [
+            check_paths(),
+            check_ports(),
+            check_hf_token(),
+        ]
     return [
         check_paths(),
         check_ports(),

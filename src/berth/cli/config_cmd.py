@@ -97,6 +97,7 @@ def show():
         ("cluster.host", cfg.cluster_host, cfg.source.get("cluster_host", "?")),
         ("cluster.port", cfg.cluster_port, cfg.source.get("cluster_port", "?")),
         ("cluster.bind", cfg.cluster_bind, cfg.source.get("cluster_bind", "?")),
+        ("server.leader_only", cfg.leader_only, cfg.source.get("leader_only", "?")),
         ("leader_url_override", cfg.leader_url_override or "-",
          cfg.source.get("leader_url", "default")),
     ]

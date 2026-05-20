@@ -90,7 +90,7 @@ def _attach_state(
 def build_apps(
     *,
     conn: sqlite3.Connection,
-    docker_client: DockerClient,
+    docker_client: DockerClient | None,
     backends: dict[str, Backend],
     models_dir: Path,
     topology: Topology | None = None,
@@ -98,6 +98,7 @@ def build_apps(
     serve_home: Path | None = None,
     leader_url: str | None = None,
     resolved_cfg: object | None = None,
+    leader_only: bool = False,
 ) -> tuple[FastAPI, FastAPI, FastAPI]:
     """Returns (public_app, cluster_app, uds_app) sharing one LifecycleManager.
 
@@ -153,9 +154,18 @@ def build_apps(
     local_node = nodes_store.find_by_label(conn, "local")
     if local_node is None:
         raise RuntimeError("local node row missing after ensure_local_node")
-    agent_registry.register(LocalAgentLink(
-        node_id=local_node.id, docker_client=docker_client,
-    ))
+    if docker_client is not None:
+        agent_registry.register(LocalAgentLink(
+            node_id=local_node.id, docker_client=docker_client,
+        ))
+    elif not leader_only:
+        # Defensive: callers can pass docker_client=None today (e.g. tests
+        # that mock the whole manager), so don't force leader_only on every
+        # such path — but flag it loudly when it isn't intentional.
+        log.warning(
+            "build_apps called without a docker_client and leader_only=False; "
+            "local deployments will fail until an agent enrolls"
+        )
 
     # CA + enrollment-token store for agent enrollment.
     from berth import config as _cfg
@@ -429,7 +439,7 @@ def build_apps(
 def build_app(
     *,
     conn: sqlite3.Connection,
-    docker_client: DockerClient,
+    docker_client: DockerClient | None,
     backends: dict[str, Backend],
     models_dir: Path,
     topology: Topology | None = None,

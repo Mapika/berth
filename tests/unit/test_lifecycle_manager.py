@@ -159,6 +159,27 @@ def test_pin_prevents_eviction(conn, monkeypatch, tmp_path, topo_one_gpu):
         asyncio.run(mgr.load(plan2))
 
 
+def test_leader_only_refuses_default_local_deployment(
+    conn, monkeypatch, tmp_path, topo_one_gpu,
+):
+    download_model = AsyncMock()
+    monkeypatch.setattr(
+        "berth.lifecycle.manager.download_model_async",
+        download_model,
+    )
+    mgr = LifecycleManager(
+        conn=conn,
+        docker_client=None,
+        backends={"vllm": VLLMBackend()},
+        models_dir=tmp_path,
+        topology=topo_one_gpu,
+    )
+
+    with pytest.raises(RuntimeError, match="control-plane only mode"):
+        asyncio.run(mgr.load(_make_plan()))
+    download_model.assert_not_awaited()
+
+
 def test_load_refuses_to_replace_pinned_same_name(conn, monkeypatch, tmp_path, topo_one_gpu):
     """`berth run X` on a pinned X errors with a clear message instead of
     silently replacing - pin is the operator's commitment that the

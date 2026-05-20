@@ -42,6 +42,8 @@ def spawn_daemon(
         cmd.extend(["--public-cert", str(cfg.public_cert_path)])
     if cfg.public_key_path:
         cmd.extend(["--public-key", str(cfg.public_key_path)])
+    if cfg.leader_only:
+        cmd.append("--leader-only")
     proc = subprocess.Popen(  # nosec
         cmd,
         stdout=open(log_path, "ab"),  # file must outlive this Popen call
@@ -83,6 +85,9 @@ def _print_startup_banner(cfg: config.ResolvedConfig, pid: int) -> None:
     using_public_cert = bool(cfg.public_cert_path and cfg.public_key_path)
 
     typer.echo(f"daemon started (pid {pid})")
+    if cfg.leader_only:
+        typer.echo("mode    : leader-only (no local Docker; "
+                   "deploy to enrolled agents)")
     typer.echo("")
     if using_public_cert:
         typer.echo(
@@ -123,6 +128,11 @@ def daemon_start(
     cluster_host: str = typer.Option(None, "--cluster-host"),
     cluster_port: int = typer.Option(None, "--cluster-port"),
     cluster_bind: str = typer.Option(None, "--cluster-bind"),
+    leader_only: bool | None = typer.Option(
+        None, "--leader-only/--no-leader-only",
+        help="Run as a control plane only. Skip local Docker init; "
+        "all deployments must target an enrolled agent.",
+    ),
     foreground: bool = typer.Option(
         False, "--foreground",
         help="Run in the current process (don't spawn a background "
@@ -147,6 +157,7 @@ def daemon_start(
         cli_cluster_bind=cluster_bind,
         cli_public_cert=public_cert,
         cli_public_key=public_key,
+        cli_leader_only=leader_only,
     )
     if foreground:
         # Run the daemon in-process. Stdout/stderr go to the parent

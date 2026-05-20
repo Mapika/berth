@@ -79,6 +79,12 @@ def stream_current_logs(request: Request):
     active = dep_store.find_active(conn)
     if active is None or active.container_id is None:
         raise HTTPException(404, "no active deployment with a running container")
+    if docker_client is None:
+        raise HTTPException(
+            503,
+            "this leader runs in control-plane only mode; use the per-deployment "
+            "logs endpoint (which routes through the agent tunnel) instead",
+        )
 
     def gen():
         for chunk in docker_client.stream_logs(active.container_id, follow=True):
@@ -133,6 +139,12 @@ async def stream_engine_logs_sse(dep_id: int, request: Request) -> StreamingResp
         return StreamingResponse(gen_remote(), media_type="text/event-stream")
 
     docker_client = request.app.state.manager._docker
+    if docker_client is None:
+        raise HTTPException(
+            503,
+            f"deployment {dep_id} is local but this leader is in "
+            "control-plane only mode; cannot stream its logs",
+        )
 
     async def gen():
         yield ":ok\n\n"

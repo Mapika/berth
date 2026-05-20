@@ -4,6 +4,7 @@ import json
 
 import typer
 
+from berth import config as berth_config
 from berth.cli import app
 from berth.doctor.runner import run_all, summarise
 
@@ -12,9 +13,18 @@ _COLOR = {"ok": typer.colors.GREEN, "warn": typer.colors.YELLOW, "fail": typer.c
 
 
 @app.command("doctor")
-def doctor(json_out: bool = typer.Option(False, "--json")):
+def doctor(
+    json_out: bool = typer.Option(False, "--json"),
+    leader_only: bool | None = typer.Option(
+        None, "--leader-only/--no-leader-only",
+        help="Skip Docker/GPU/engine-image checks. Defaults to the value "
+        "of leader_only in the resolved config.",
+    ),
+):
     """Diagnose the local environment (Docker, GPUs, paths, ports, images)."""
-    results = run_all()
+    if leader_only is None:
+        leader_only = berth_config.resolve_config().leader_only
+    results = run_all(leader_only=leader_only)
     if json_out:
         typer.echo(json.dumps([{
             "name": r.name, "status": r.status, "detail": r.detail, "fix": r.fix

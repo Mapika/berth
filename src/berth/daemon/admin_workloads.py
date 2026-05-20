@@ -165,7 +165,12 @@ def list_deployments(
     out = []
     for dep in dep_store.list_all(conn):
         used_mb: int | None = None
-        if pid_vram and dep.container_id and dep.status in ("loading", "ready"):
+        if (
+            pid_vram
+            and manager._docker is not None
+            and dep.container_id
+            and dep.status in ("loading", "ready")
+        ):
             try:
                 pids = manager._docker.container_pids(dep.container_id)
                 used_mb = sum(pid_vram.get(pid, 0) for pid in pids) or None
