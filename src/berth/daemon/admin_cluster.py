@@ -159,6 +159,7 @@ def admin_config(request: Request):
                 str(cfg.public_key_path) if cfg.public_key_path else None
             ),
             "leader_url_override": cfg.leader_url_override,
+            "leader_only": cfg.leader_only,
         },
         "sources": cfg.source,
         "config_file": str(_cfg.CONFIG_FILE),

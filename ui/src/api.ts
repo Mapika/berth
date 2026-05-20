@@ -469,6 +469,7 @@ export type DaemonConfig = {
     public_cert_path: string | null
     public_key_path: string | null
     leader_url_override: string | null
+    leader_only: boolean
   }
   sources: Record<string, ConfigSource>
   config_file: string

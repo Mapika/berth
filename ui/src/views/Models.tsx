@@ -51,11 +51,17 @@ export default function Models() {
   const backends = useQuery({ queryKey: queryKeys.backends, queryFn: api.listBackends })
   const gpus = useQuery({ queryKey: queryKeys.gpus, queryFn: api.listGpus })
   const nodes = useQuery({ queryKey: queryKeys.nodes, queryFn: api.listNodes })
+  const config = useQuery({ queryKey: queryKeys.config, queryFn: api.getConfig })
   const [repo, setRepo] = useState('')
   const [name, setName] = useState('')
   const [openLauncher, setOpenLauncher] = useState<string | null>(null)
   const [form, setForm] = useState<LauncherForm>(DEFAULT_FORM)
   const [launchError, setLaunchError] = useState('')
+  const leaderOnly = config.data?.values.leader_only === true
+  const remoteNodes = (nodes.data?.nodes ?? []).filter(n => n.label !== 'local')
+  const readyRemoteNodes = remoteNodes.filter(n => n.status === 'ready')
+  const selectedNodeLabel = form.nodeLabel || (leaderOnly ? (readyRemoteNodes[0]?.label ?? '') : '')
+  const missingDeployTarget = leaderOnly && !selectedNodeLabel
 
   const addModel = useMutation({
     mutationFn: () => api.createModel({
@@ -80,7 +86,7 @@ export default function Models() {
         pinned: form.pinned,
       }
       if (form.backend) payload.backend = form.backend
-      payload.node_label = remoteNodeLabel(form.nodeLabel)
+      payload.node_label = remoteNodeLabel(selectedNodeLabel)
       const before = await api.listDeployments()
       const beforeMaxId = before.reduce((max, d) => Math.max(max, d.id), 0)
       try {
@@ -207,21 +213,27 @@ export default function Models() {
                               <div className="label">node</div>
                               <select
                                 className="field font-mono w-full text-[12px]"
-                                value={form.nodeLabel}
+                                value={selectedNodeLabel}
                                 onChange={e => setForm(f => ({ ...f, nodeLabel: e.target.value }))}
                               >
-                                <option value="">leader (local)</option>
-                                {(nodes.data?.nodes ?? [])
-                                  .filter(n => n.label !== 'local' && n.status === 'ready')
-                                  .map(n => (
+                                {!leaderOnly && <option value="">leader (local)</option>}
+                                {readyRemoteNodes.map(n => (
                                     <option key={n.id} value={n.label}>
                                       {n.label} · {n.gpu_count} gpu
                                     </option>
                                   ))}
+                                {leaderOnly && readyRemoteNodes.length === 0 && (
+                                  <option value="" disabled>no ready agents</option>
+                                )}
                               </select>
-                              {(nodes.data?.nodes ?? []).filter(n => n.label !== 'local').length === 0 && (
+                              {remoteNodes.length === 0 && (
                                 <div className="text-mute text-[10px] tracking-wider">
                                   no agents enrolled
+                                </div>
+                              )}
+                              {remoteNodes.length > 0 && readyRemoteNodes.length === 0 && (
+                                <div className="text-mute text-[10px] tracking-wider">
+                                  no ready agents online
                                 </div>
                               )}
                             </div>
@@ -273,7 +285,7 @@ export default function Models() {
                           <div className="flex items-center gap-3">
                             <button
                               className="btn-primary"
-                              disabled={pending}
+                              disabled={pending || missingDeployTarget}
                               onClick={() => launchModel.mutate(m)}
                             >
                               {pending ? 'launching...' : 'deploy'}
