@@ -462,7 +462,10 @@ class LifecycleManager:
                 # image / instant crash silently routes traffic until
                 # HealthMonitor catches it (~90 s window).
                 healthy = await self._remote_probe_until_healthy(
-                    link, started.container_id, backend.health_path,
+                    link,
+                    started.container_id,
+                    backend.health_path,
+                    timeout_s=self._load_timeout_s,
                 )
                 if not healthy:
                     msg = (

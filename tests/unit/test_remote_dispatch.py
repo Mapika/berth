@@ -122,7 +122,18 @@ async def test_remote_dispatch_routes_via_agentlink(tmp_path, monkeypatch):
         models_dir=tmp_path,
         topology=topology,
         agent_registry=registry,
+        load_timeout_s=123.0,
     )
+    captured_probe: dict[str, float | str] = {}
+
+    async def _capture_probe(_link, container_id, path, *, timeout_s=30.0, interval_s=2.0):
+        captured_probe["container_id"] = container_id
+        captured_probe["path"] = path
+        captured_probe["timeout_s"] = timeout_s
+        captured_probe["interval_s"] = interval_s
+        return True
+
+    monkeypatch.setattr(mgr, "_remote_probe_until_healthy", _capture_probe)
 
     plan = DeploymentPlan(
         model_name="qwen-test",
@@ -156,6 +167,9 @@ async def test_remote_dispatch_routes_via_agentlink(tmp_path, monkeypatch):
     assert final.status == "ready"
     assert final.node_id == remote.id
     assert final.container_id == "cid-remote"
+    assert captured_probe["container_id"] == "cid-remote"
+    assert captured_probe["path"] == VLLMBackend().health_path
+    assert captured_probe["timeout_s"] == 123.0
 
 
 @pytest.mark.asyncio
@@ -283,7 +297,7 @@ async def test_remote_dispatch_marks_failed_when_probe_never_succeeds(
     # Trim the probe timeout so the test stays fast — patch the bound
     # method to use 0.5 s instead of the 30 s default.
     real_probe = mgr._remote_probe_until_healthy
-    async def quick_probe(link_, cid, path):
+    async def quick_probe(link_, cid, path, **_kwargs):
         return await real_probe(
             link_, cid, path, timeout_s=0.5, interval_s=0.1,
         )
