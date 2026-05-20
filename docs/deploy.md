@@ -62,8 +62,18 @@ cluster.example.com  agent enrollment + mTLS WebSocket
 The script installs Caddy + HAProxy, creates the `berth` system user,
 installs berth into `/opt/berth/venv`, writes a leader-only
 `/var/lib/berth/config.toml`, bootstraps the DB/CA/key pepper/admin key,
-writes systemd/Caddy/HAProxy configs, opens only `80/tcp` and `443/tcp`
-in UFW, and starts the services.
+writes systemd/Caddy/HAProxy configs, installs `/usr/local/bin/berth` as the
+operator command, opens only `80/tcp` and `443/tcp` in UFW, and starts the
+services.
+
+After setup, use short commands:
+
+```bash
+berth status
+berth nodes enroll gpu-host-1
+berth key create teammate --tier admin
+berth wipe   # reset local berth state and start over
+```
 
 ## Bring-up (manual)
 
@@ -89,12 +99,20 @@ in UFW, and starts the services.
    `leader.example.com`; berth handles `cluster.example.com` directly
    on loopback so agent client certificates are preserved.
 
-4. **Install berth**:
+4. **Install berth and the operator command**:
 
    ```bash
-   sudo -u berth mkdir -p /opt/berth
+   sudo install -d -o berth -g berth -m 0755 /opt/berth
    sudo -u berth python3 -m venv /opt/berth/venv
    sudo -u berth /opt/berth/venv/bin/pip install /path/to/berth
+   sudo install -d -m 0755 /etc/berth
+   sudo tee /etc/berth/operator.env >/dev/null <<'EOF'
+   BERTH_REAL=/opt/berth/venv/bin/berth
+   BERTH_HOME=/var/lib/berth
+   BERTH_USER=berth
+   BERTH_LEADER_URL_DEFAULT=https://cluster.example.com
+   EOF
+   sudo install -m 0755 packaging/berth-wrapper /usr/local/bin/berth
    ```
 
 5. **Configure** `/var/lib/berth/config.toml`:
@@ -137,8 +155,7 @@ in UFW, and starts the services.
    first key only):
 
    ```bash
-   sudo -u berth env BERTH_HOME=/var/lib/berth \
-       /opt/berth/venv/bin/berth key create root --tier admin
+   berth key create root --tier admin
    # ← prints sk-… once. Save it somewhere safe.
    ```
 
@@ -146,8 +163,7 @@ in UFW, and starts the services.
 
    ```bash
    # On the leader:
-   sudo -u berth env BERTH_HOME=/var/lib/berth \
-       /opt/berth/venv/bin/berth nodes enroll gpu-host-1
+   berth nodes enroll gpu-host-1
    # → emits a berth://enroll?leader=…&token=…&ca_fp=… URI
 
    # On the GPU host:
@@ -167,9 +183,7 @@ already exist.
 Typical first-run on the VPS:
 
 ```bash
-sudo -u berth env BERTH_HOME=/var/lib/berth \
-    /opt/berth/venv/bin/berth deploy bootstrap \
-    --berth-home /var/lib/berth \
+berth deploy bootstrap \
     --domain leader.example.com \
     --cluster-domain cluster.example.com \
     --sni-443 \
@@ -186,6 +200,16 @@ For a direct-TLS deployment (no Caddy in front), pass `--direct-tls`.
 The daemon's TLS will use the cluster-CA-signed server cert by default;
 override with `[public_tls]` in `config.toml` if you want a custom
 chain (Let's Encrypt minted out-of-band, an internal CA, etc.).
+
+To reset a local leader and start over without uninstalling packages or proxy
+configs:
+
+```bash
+berth wipe
+```
+
+`berth wipe` prompts before deleting state. Use `berth wipe --yes` only for
+automation.
 
 Operator-controlled sudo steps (install systemd unit, install Caddy and
 HAProxy) stay manual on purpose — bootstrap doesn't write to /etc or run

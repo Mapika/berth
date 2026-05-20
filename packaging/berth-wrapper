@@ -1,0 +1,45 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+if [[ -f /etc/berth/operator.env ]]; then
+  # shellcheck disable=SC1091
+  source /etc/berth/operator.env
+fi
+
+BERTH_REAL="${BERTH_REAL:-/opt/berth/venv/bin/berth}"
+BERTH_HOME="${BERTH_HOME:-/var/lib/berth}"
+BERTH_USER="${BERTH_USER:-berth}"
+
+ENV_ARGS=(BERTH_HOME="$BERTH_HOME")
+if [[ -n "${BERTH_LEADER_URL:-${BERTH_LEADER_URL_DEFAULT:-}}" ]]; then
+  ENV_ARGS+=(BERTH_LEADER_URL="${BERTH_LEADER_URL:-$BERTH_LEADER_URL_DEFAULT}")
+fi
+
+if [[ ! -x "$BERTH_REAL" ]]; then
+  echo "error: berth CLI not found at $BERTH_REAL" >&2
+  exit 127
+fi
+
+if [[ "${1:-}" == "wipe" ]]; then
+  if [[ "$(id -u)" == "0" ]]; then
+    exec env "${ENV_ARGS[@]}" "$BERTH_REAL" "$@"
+  fi
+  if command -v sudo >/dev/null 2>&1; then
+    exec sudo env "${ENV_ARGS[@]}" "$BERTH_REAL" "$@"
+  fi
+  echo "error: berth wipe must run as root" >&2
+  exit 1
+fi
+
+if [[ "$(id -un)" == "$BERTH_USER" ]]; then
+  exec env "${ENV_ARGS[@]}" "$BERTH_REAL" "$@"
+fi
+if [[ "$(id -u)" == "0" ]]; then
+  exec runuser -u "$BERTH_USER" -- env "${ENV_ARGS[@]}" "$BERTH_REAL" "$@"
+fi
+if command -v sudo >/dev/null 2>&1; then
+  exec sudo -u "$BERTH_USER" env "${ENV_ARGS[@]}" "$BERTH_REAL" "$@"
+fi
+
+echo "error: run as root or install sudo so berth can use the $BERTH_HOME control socket" >&2
+exit 1

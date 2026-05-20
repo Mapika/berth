@@ -422,7 +422,7 @@ enroll <label>` on the leader to mint a fresh URI.
 
 **`berth daemon start` fails with `port already in use` on 11501.**
 
-Either another daemon is running (`berth daemon status`) or another
+Either another daemon is running (`berth status`) or another
 process holds the port. Pick a different cluster port:
 
 ```bash

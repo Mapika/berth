@@ -118,6 +118,23 @@ berth doctor
 The project is not published to PyPI yet. Releases are GitHub artifacts for
 now.
 
+For a public leader VPS, clone the repo on a fresh Ubuntu/Debian host after DNS
+is pointed at it:
+
+```bash
+sudo ./scripts/setup-leader-vps.sh example.com
+```
+
+That installs `/usr/local/bin/berth` as the operator command. After setup, the
+common path is short:
+
+```bash
+berth status
+berth nodes enroll gpu-host-1
+berth key create teammate --tier admin
+berth wipe   # prompts, then resets local berth state
+```
+
 For development:
 
 ```bash
@@ -153,7 +170,7 @@ Start the daemon:
 
 ```bash
 berth daemon start
-berth daemon status
+berth status
 ```
 
 By default the public and cluster listeners bind to localhost only and the
@@ -346,6 +363,7 @@ interface.
 ```text
 berth doctor              check host requirements
 berth setup               first-run wizard
+berth status              show daemon health
 berth daemon start        start the daemon
 berth daemon stop         stop the daemon
 berth daemon status       show daemon status
@@ -368,6 +386,7 @@ berth config ...          inspect and edit listener/TLS config
 berth backup create       snapshot db, CA, key pepper, and config
 berth predict             inspect predictor candidates and usage history
 berth update-engines      check for newer pinned engine tags
+berth wipe                reset local berth state
 ```
 
 Useful `berth run` options:
@@ -543,9 +562,9 @@ npm run build
 - Built-in ACME/certificate management
 - A Kubernetes replacement
 
-For internet-facing use, prefer `berth deploy bootstrap` with a
-TLS-terminating reverse proxy, or configure `[public_tls]` with an
-operator-managed certificate.
+For internet-facing use, prefer `scripts/setup-leader-vps.sh` or
+`berth deploy bootstrap` with a TLS-terminating reverse proxy, or configure
+`[public_tls]` with an operator-managed certificate.
 
 ## Multi-Node (Secure-by-Default)
 

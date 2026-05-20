@@ -4,7 +4,7 @@ Start with:
 
 ```bash
 berth doctor
-berth daemon status
+berth status
 berth ps
 berth logs
 ```
@@ -151,12 +151,8 @@ Create a new admin key over the local socket:
 berth key create web --tier admin
 ```
 
-For the packaged systemd layout, use the daemon's home explicitly:
-
-```bash
-sudo -u berth env BERTH_HOME=/var/lib/berth \
-    /opt/berth/venv/bin/berth key create web --tier admin
-```
+For the packaged systemd layout, the `/usr/local/bin/berth` wrapper handles
+the service user and `/var/lib/berth` state directory.
 
 Then:
 

@@ -167,6 +167,17 @@ trap 'rm -f "$REQ_LOCK"' EXIT
     "$BERTH_SRC"
 )
 
+echo "==> Installing /usr/local/bin/berth operator wrapper"
+install -d -m 0755 /etc/berth
+cat >/etc/berth/operator.env <<EOF
+BERTH_REAL=${BERTH_VENV}/bin/berth
+BERTH_HOME=${BERTH_HOME}
+BERTH_USER=berth
+BERTH_LEADER_URL_DEFAULT=https://${CLUSTER_HOST}
+EOF
+chmod 0644 /etc/berth/operator.env
+install -m 0755 "${BERTH_SRC}/packaging/berth-wrapper" /usr/local/bin/berth
+
 echo "==> Bootstrapping leader config, DB, CA, key pepper, and first admin key"
 BOOTSTRAP_ARGS=(
   deploy bootstrap
@@ -417,9 +428,13 @@ echo ""
 echo "Verify:"
 echo "  curl https://${PUBLIC_HOST}/healthz"
 echo "  curl -k https://${CLUSTER_HOST}/admin/ca.pem"
+echo "  berth status"
 echo ""
 echo "Enroll an agent from the leader:"
-echo "  sudo -u berth env BERTH_HOME=${BERTH_HOME} ${BERTH_VENV}/bin/berth nodes enroll <label>"
+echo "  berth nodes enroll <label>"
+echo ""
+echo "Reset local state if you need to start over:"
+echo "  berth wipe"
 echo ""
 echo "Check logs:"
 echo "  journalctl -u berth -n 100 --no-pager"
