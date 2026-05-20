@@ -179,8 +179,7 @@ def test_default_target_concurrency_scales_inversely_with_model_size(tmp_path):
     tiny_c = default_target_concurrency(tiny_dir, max_model_len=4096, dtype="bf16")
     big_c = default_target_concurrency(big_dir, max_model_len=4096, dtype="bf16")
     assert tiny_c > big_c
-    # And tiny should be well above the legacy default of 8 - that was the
-    # footgun we're fixing.
+    # Tiny models should be well above the old static default of 8.
     assert tiny_c >= 32
 
 

@@ -54,7 +54,7 @@ def test_flag_beats_env_beats_file_beats_autodetect(_isolated_berth_home, monkey
     assert r.source["public_host"] == "flag"
 
 
-def test_legacy_serve_env_names_are_ignored(monkeypatch):
+def test_removed_serve_env_names_are_ignored(monkeypatch):
     monkeypatch.setattr(config, "autodetect_outbound_ip", lambda: None)
     r = config.resolve_config(env={
         "SERVE_PUBLIC_HOST": "old.example.com",

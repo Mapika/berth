@@ -76,8 +76,8 @@ def test_allowed_models_roundtrip(tmp_path):
     - [] means deny-all - persisted as the literal JSON "[]", decoded as [].
     - [<names>] persisted as JSON, decoded back as a list of strings.
 
-    set_allowed_models toggles between states. Empty string in the DB
-    (legacy/edge) decodes to None like NULL.
+    set_allowed_models toggles between states. Empty strings in the DB decode
+    to None like NULL.
     """
     conn = _fresh(tmp_path)
 

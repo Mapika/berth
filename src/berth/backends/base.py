@@ -46,7 +46,7 @@ class ContainerBackend:
     name: ClassVar[str]
     # True if this backend can hot-load LoRA adapters at runtime via the
     # engine's load/unload HTTP endpoints. vLLM and SGLang inherit True;
-    # TRT-LLM overrides to False (its adapter story is on the legacy
+    # TRT-LLM overrides to False (its adapter story is on the older
     # AOT-engine path, incompatible with our PyTorch-backend deployments).
     supports_adapters: ClassVar[bool] = True
     # Per-engine HTTP paths for dynamic adapter load/unload. vLLM uses

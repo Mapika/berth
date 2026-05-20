@@ -34,7 +34,7 @@ class TRTLLMBackend(ContainerBackend):
     plan's target_concurrency.
 
     LoRA adapter hot-load is NOT supported. TRT-LLM's adapter story lives
-    on the legacy AOT-engine build path (trtllm-build), which is
+    on the older AOT-engine build path (trtllm-build), which is
     incompatible with the PyTorch-backend deployments we use.
     """
 

@@ -1,7 +1,7 @@
 # Upgrade to 0.4.0
 
-`0.4.0` removes the temporary compatibility layer kept during the rename to
-berth. Update scripts and operator docs before upgrading long-running hosts.
+`0.4.0` completes the rename to berth. Update scripts and operator docs before
+upgrading long-running hosts.
 
 ## Rename Checklist
 

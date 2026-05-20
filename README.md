@@ -129,8 +129,7 @@ uv pip install -e ".[dev]"
 berth doctor
 ```
 
-Upgrading from the temporary `serve` compatibility layer is covered in
-[docs/upgrade-0.4.md](docs/upgrade-0.4.md).
+For 0.4 upgrade notes, see [docs/upgrade-0.4.md](docs/upgrade-0.4.md).
 
 Daemon in a container:
 

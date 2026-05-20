@@ -42,8 +42,8 @@ class ApiKey:
 
 # Module-level pepper state. configure_pepper() loads (or mints) a 32-byte
 # secret from disk at daemon startup; from then on _hash uses HMAC-SHA256
-# with that pepper rather than plain SHA-256. Tests that don't configure
-# a pepper stay on legacy SHA-256 — keeps the suite running unchanged.
+# with that pepper rather than plain SHA-256. Tests that don't configure a
+# pepper stay in unpeppered mode.
 _PEPPER_PATH: Path | None = None
 _PEPPER_CACHED: bytes | None = None
 
@@ -58,7 +58,7 @@ def configure_pepper(path: Path) -> None:
 
 def _get_pepper() -> bytes:
     """Returns the pepper bytes, loading or creating the file lazily.
-    Returns empty bytes when no pepper is configured (legacy mode)."""
+    Returns empty bytes when no pepper is configured."""
     global _PEPPER_CACHED
     # Fast path: no lock needed once the pepper has been resolved.
     if _PEPPER_CACHED is not None:

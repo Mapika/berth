@@ -10,7 +10,7 @@
 - Removed automatic `~/.serve` migration; use `~/.berth` or set `BERTH_HOME`.
 - Removed deprecated daemon `--host` / `--port` aliases; use
   `--public-host` / `--public-port` / `--public-bind`.
-- Removed legacy agent enrollment via `--leader` and `--token`; use
+- Removed split-flag agent enrollment via `--leader` and `--token`; use
   `berth agent register --uri ...`.
 - Renamed berth-owned metrics, headers, container names, and config mount paths
   from the old `serve` prefix to `berth`.
@@ -23,7 +23,7 @@ Rebrand: the project is now **berth**. The PyPI distribution name remains
 ### Breaking
 
 - CLI binary renamed: `serve` → `berth`. The old `serve` name is shipped as a
-  legacy alias for this release and will be removed in 0.4.0.
+  transitional alias for this release and will be removed in 0.4.0.
 - Environment variables: `SERVE_*` → `BERTH_*` (e.g. `SERVE_HOME` →
   `BERTH_HOME`). `SERVE_*` continues to work for one release and emits a
   one-shot `DeprecationWarning`.

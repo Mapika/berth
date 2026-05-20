@@ -1,8 +1,7 @@
 -- Service router direction: saved launch definitions for runnable
 -- inference services. The first service family is model-serving
 -- backends, so this table mirrors the DeploymentPlan fields needed to
--- launch vLLM/SGLang/TRT-LLM while keeping existing model/deployment
--- commands as a compatibility layer.
+-- launch vLLM/SGLang/TRT-LLM alongside existing model/deployment commands.
 
 CREATE TABLE IF NOT EXISTS service_profiles (
     id                  INTEGER PRIMARY KEY AUTOINCREMENT,

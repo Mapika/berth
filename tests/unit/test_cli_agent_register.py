@@ -78,7 +78,7 @@ def test_register_writes_config(tmp_path, monkeypatch):
     assert mode == 0o600
 
 
-def test_register_rejects_legacy_leader_token_flags(tmp_path, monkeypatch):
+def test_register_rejects_removed_leader_token_flags(tmp_path, monkeypatch):
     monkeypatch.setenv("BERTH_HOME", str(tmp_path))
     r = CliRunner().invoke(app, [
         "agent", "register",

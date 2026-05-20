@@ -59,10 +59,8 @@ def _attach_state(
     app.state.request_count = 0
     app.state.request_tracer = request_tracer
     app.state.local_control_surface = local_control_surface
-    # Collectors default to fresh instances for callers that build a
-    # single app (build_app / legacy tests). The multi-app build_apps
-    # path passes one shared pair so any of the three listeners feeds
-    # the same metrics aggregator.
+    # build_app callers get fresh collectors. build_apps passes one shared pair
+    # so any listener feeds the same metrics aggregator.
     app.state.in_flight = in_flight if in_flight is not None else InFlightCounter()
     app.state.latency = latency if latency is not None else LatencyRecorder()
     # Readiness flag. Flipped to True by the lifespan after reconcile +

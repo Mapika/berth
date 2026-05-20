@@ -101,13 +101,12 @@ def _filter_by_reachable_nodes(candidates, registry):
     return out
 
 
-def _legacy_find_deployment_for(
+def _find_deployment_without_signals(
     conn: sqlite3.Connection,
     base_model_name: str,
     adapter_name: str | None,
 ) -> dep_store.Deployment | None:
-    """Pre-scorer body of find_deployment_for. Used when no signals are
-    passed (existing call sites that aren't cluster-aware)."""
+    """Pre-scorer body of find_deployment_for for callers without node signals."""
     if adapter_name is None:
         return dep_store.find_ready_by_model_name(conn, base_model_name)
 
@@ -218,15 +217,9 @@ def find_deployment_for(
     signals_by_node: dict[int, NodeSignals] | None = None,
     request: RoutingRequest | None = None,
 ) -> dep_store.Deployment | None:
-    """Head of `rank_deployments_for` when signals are passed; legacy
-    behavior (first-match, ignoring node load) otherwise.
-
-    The legacy fallback exists so existing test fixtures and any caller
-    that hasn't been updated still gets a deployment. New cluster-aware
-    call sites should pass signals + request.
-    """
+    """Return the best ready deployment, using node-aware scoring when available."""
     if signals_by_node is None:
-        return _legacy_find_deployment_for(conn, base_model_name, adapter_name)
+        return _find_deployment_without_signals(conn, base_model_name, adapter_name)
     ranked = rank_deployments_for(
         conn, base_model_name, adapter_name,
         signals_by_node=signals_by_node,

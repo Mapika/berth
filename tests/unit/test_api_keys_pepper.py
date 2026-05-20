@@ -1,8 +1,7 @@
 """API-key hashing with the HMAC pepper.
 
-Tests run a fresh module-level pepper config per test (using monkeypatch
-to reset module state) so they don't leak peppers into the rest of the
-suite — the wider suite expects legacy SHA-256 mode.
+Tests reset module-level pepper state so the rest of the suite stays
+unpeppered.
 """
 from __future__ import annotations
 

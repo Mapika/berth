@@ -259,11 +259,8 @@ async def _proxy(
         target_model=route.target_model_name if route else None,
     )
 
-    # Build per-node signals + affinity hint so the scorer picks the
-    # best candidate (lower in-flight, warmer KV cache). Skipping the
-    # routing setup when the aggregator/affinity aren't wired keeps
-    # legacy single-app builds working with the find_deployment_for
-    # legacy path.
+    # Build per-node signals + affinity hint so the scorer picks the best
+    # candidate. Single-app builds can still route without scorer inputs.
     aggregator = getattr(request.app.state, "metrics_aggregator", None)
     affinity = getattr(request.app.state, "routing_affinity", None)
     signals_by_node: dict[int, NodeSignals] | None = None

@@ -51,7 +51,7 @@ def app(tmp_path, monkeypatch):
         topology=topology,
         berth_home=tmp_path,
     )
-    # Most legacy endpoint tests exercise raw image/extra-arg plumbing.
+    # Most endpoint tests exercise raw image/extra-arg plumbing.
     # Security-default behavior is covered explicitly below.
     app.state.manager.resolved_cfg = SimpleNamespace(allow_unsafe_deploy_options=True)
     app.state.resolved_cfg = app.state.manager.resolved_cfg

@@ -253,8 +253,8 @@ def test_find_deployment_for_is_head_of_rank_deployments_for(tmp_path):
     assert head == ranked[0]
 
 
-def test_find_deployment_for_legacy_path_when_signals_omitted(tmp_path):
-    """Existing callers that don't pass signals must still get a deployment."""
+def test_find_deployment_for_without_signals(tmp_path):
+    """Callers without node signals must still get a deployment."""
     conn = _fresh(tmp_path)
     base = model_store.add(conn, name="test-base", hf_repo="o/x")
     d10 = _seed_dep_on_node(conn, model_id=base.id, node_id=10)

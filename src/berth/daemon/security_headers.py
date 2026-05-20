@@ -42,7 +42,7 @@ class SecurityHeadersMiddleware:
 
     The CSP keeps scripts and API connections on the same origin, permits the
     bundled UI's current inline styles and Google Fonts dependency, and blocks
-    framing, forms, base-tag rewrites, and legacy plugin loads.
+    framing, forms, base-tag rewrites, and old browser plugin loads.
     """
 
     def __init__(self, app: ASGIApp) -> None:
