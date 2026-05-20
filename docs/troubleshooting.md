@@ -151,6 +151,13 @@ Create a new admin key over the local socket:
 berth key create web --tier admin
 ```
 
+For the packaged systemd layout, use the daemon's home explicitly:
+
+```bash
+sudo -u berth env BERTH_HOME=/var/lib/berth \
+    /opt/berth/venv/bin/berth key create web --tier admin
+```
+
 Then:
 
 ```bash

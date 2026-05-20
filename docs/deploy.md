@@ -137,7 +137,8 @@ in UFW, and starts the services.
    first key only):
 
    ```bash
-   sudo -u berth /opt/berth/venv/bin/berth key create root --tier admin
+   sudo -u berth env BERTH_HOME=/var/lib/berth \
+       /opt/berth/venv/bin/berth key create root --tier admin
    # ← prints sk-… once. Save it somewhere safe.
    ```
 
@@ -145,7 +146,8 @@ in UFW, and starts the services.
 
    ```bash
    # On the leader:
-   sudo -u berth /opt/berth/venv/bin/berth nodes enroll gpu-host-1
+   sudo -u berth env BERTH_HOME=/var/lib/berth \
+       /opt/berth/venv/bin/berth nodes enroll gpu-host-1
    # → emits a berth://enroll?leader=…&token=…&ca_fp=… URI
 
    # On the GPU host:
@@ -165,7 +167,9 @@ already exist.
 Typical first-run on the VPS:
 
 ```bash
-sudo -u berth /opt/berth/venv/bin/berth deploy bootstrap \
+sudo -u berth env BERTH_HOME=/var/lib/berth \
+    /opt/berth/venv/bin/berth deploy bootstrap \
+    --berth-home /var/lib/berth \
     --domain leader.example.com \
     --cluster-domain cluster.example.com \
     --sni-443 \

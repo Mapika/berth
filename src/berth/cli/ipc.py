@@ -1,8 +1,9 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any
+from typing import Any, NoReturn
 
+import click
 import httpx
 
 BASE_URL = "http://daemon"
@@ -21,17 +22,33 @@ def _raise_for_status(r: httpx.Response) -> None:
     raise RuntimeError(f"daemon error {r.status_code}: {detail}")
 
 
+def _raise_connect_error(sock: Path) -> NoReturn:
+    raise click.ClickException(
+        f"could not connect to berth daemon control socket at {sock}. "
+        "Start the berth service and make sure this command uses the same "
+        "BERTH_HOME as the daemon."
+    )
+
+
 async def get(sock: Path, path: str) -> Any:
-    async with _client(sock) as c:
-        r = await c.get(path)
+    try:
+        async with _client(sock) as c:
+            r = await c.get(path)
+    except httpx.ConnectError:
+        _raise_connect_error(sock)
+    else:
         if r.status_code >= 400:
             _raise_for_status(r)
         return r.json()
 
 
 async def post(sock: Path, path: str, *, json: dict[str, Any] | None = None) -> Any:
-    async with _client(sock) as c:
-        r = await c.post(path, json=json)
+    try:
+        async with _client(sock) as c:
+            r = await c.post(path, json=json)
+    except httpx.ConnectError:
+        _raise_connect_error(sock)
+    else:
         if r.status_code >= 400:
             _raise_for_status(r)
         if r.status_code == 204:
@@ -40,7 +57,11 @@ async def post(sock: Path, path: str, *, json: dict[str, Any] | None = None) -> 
 
 
 async def delete(sock: Path, path: str) -> None:
-    async with _client(sock) as c:
-        r = await c.delete(path)
+    try:
+        async with _client(sock) as c:
+            r = await c.delete(path)
+    except httpx.ConnectError:
+        _raise_connect_error(sock)
+    else:
         if r.status_code >= 400 and r.status_code != 404:
             _raise_for_status(r)
