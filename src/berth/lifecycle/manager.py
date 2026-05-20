@@ -553,6 +553,7 @@ class LifecycleManager:
                 return dep_store.get_by_id(self._conn, dep.id)
 
             assert self._docker is not None  # guarded above for the local path
+            assert local_path is not None  # local deploys always materialise a model
             container_model_path = "/cache/" + str(
                 Path(local_path).resolve().relative_to(self._models_dir.resolve())
             )
