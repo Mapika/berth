@@ -140,10 +140,18 @@ class RemoteAgentLink:
         )
         if not res.ok or res.data is None:
             raise RuntimeError(res.error or "start_deployment failed")
+        # The leader never dials into the agent's container network directly;
+        # all engine traffic for remote deployments is proxied over this
+        # WebSocket via proxy_request(). The agent's claimed ``address``/
+        # ``port`` in res.data would only be useful for direct-dial paths,
+        # which would constitute an SSRF: a malicious agent could choose any
+        # host and port (e.g. 127.0.0.1:22 on the leader, RFC1918 services)
+        # and the leader's metrics/adapter endpoints would dial that URL.
+        # Force the tunnel sentinel so downstream callers route via this WS.
         return StartedContainer(
             container_id=res.data["container_id"],
-            address=res.data.get("address", "tunnel"),
-            port=int(res.data.get("port", 0)),
+            address="tunnel",
+            port=0,
         )
 
     async def stop_deployment(

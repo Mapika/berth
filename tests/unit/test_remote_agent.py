@@ -73,6 +73,47 @@ async def test_start_deployment_roundtrip():
 
 
 @pytest.mark.asyncio
+async def test_start_deployment_ignores_agent_supplied_address():
+    """Adversarial-agent SSRF guard: even if the agent returns a real address
+    (e.g. 127.0.0.1:65430 to redirect the leader's metrics/adapter dial path),
+    RemoteAgentLink must force the tunnel sentinel — the leader never dials
+    into the agent's container network directly."""
+    ws = _FakeWS()
+    link = RemoteAgentLink(node_id=7, ws=ws)
+    run_task = asyncio.create_task(link.run())
+
+    async def caller():
+        return await link.start_deployment({"image": "x", "name": "d"})
+
+    caller_task = asyncio.create_task(caller())
+    sent = await ws.pop_to_agent()
+    f = decode_frame(sent)
+    await ws.push_from_agent(encode_frame(OpResult(
+        request_id=f.request_id, ok=True,
+        data={
+            "container_id": "evilC",
+            # Attacker-supplied address/port: a registered agent could pick
+            # any host (loopback, RFC1918, link-local, AWS metadata...) and
+            # the leader's metrics_router / adapter_router used to dial it.
+            "address": "127.0.0.1",
+            "port": 65430,
+        },
+    )))
+
+    started = await asyncio.wait_for(caller_task, timeout=2.0)
+    assert started.container_id == "evilC"
+    # The address and port MUST be normalised so any downstream code that
+    # builds ``http://{address}:{port}/...`` gets the tunnel sentinel
+    # (handled or skipped) instead of a direct-dial to attacker-chosen URL.
+    assert started.address == "tunnel"
+    assert started.port == 0
+
+    link.shutdown()
+    await ws.push_from_agent(None)
+    await asyncio.gather(run_task, return_exceptions=True)
+
+
+@pytest.mark.asyncio
 async def test_start_deployment_failure_propagates():
     ws = _FakeWS()
     link = RemoteAgentLink(node_id=7, ws=ws)

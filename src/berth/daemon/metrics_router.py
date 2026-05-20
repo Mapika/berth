@@ -43,6 +43,12 @@ async def metrics(request: Request) -> str:
         backend = backends_dict.get(d.backend)
         if backend is None or d.container_address is None:
             continue
+        if d.container_address == "tunnel":
+            # Remote deployment — its engine isn't directly reachable from
+            # the leader's network. Remote metrics are pushed in by the
+            # agent's Heartbeat.metrics and reported via the cluster_text
+            # block below.
+            continue
         url = f"http://{d.container_address}:{d.container_port}{backend.metrics_path}"
         engine_urls.append((d.id, url))
     engine_text = await gather_engine_metrics(engine_urls)

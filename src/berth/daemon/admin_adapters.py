@@ -286,6 +286,16 @@ async def hot_load_adapter(
                 await _engine_unload_adapter(backend, dep, victim.name)
                 da_store.detach(conn, dep.id, victim.id)
 
+        if dep.container_address == "tunnel":
+            # Remote deployment — adapter file lives on the leader, the
+            # engine HTTP API is only reachable through the agent's WS
+            # tunnel, and neither half of that bridge is implemented yet
+            # for adapter ops. Reject explicitly instead of falling
+            # through to a direct-dial of the (untrusted) container_address.
+            raise HTTPException(
+                501,
+                "adapter hot-load is not supported on remote deployments",
+            )
         container_path = "/cache/" + str(
             Path(adapter.local_path).resolve().relative_to(manager.models_dir.resolve())
         )
@@ -337,6 +347,8 @@ async def hot_unload_adapter(
 
 
 async def _engine_unload_adapter(backend: Backend, dep, adapter_name: str) -> None:
+    if dep.container_address == "tunnel":
+        return  # remote — no direct-dial unload path
     url = (
         f"http://{dep.container_address}:{dep.container_port}"
         f"{backend.adapter_unload_path}"

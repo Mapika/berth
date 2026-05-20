@@ -707,9 +707,15 @@ class LifecycleManager:
                     continue
                 if d.status == "loading":
                     backend = self._backends.get(d.backend)
+                    # Reconcile only handles local deployments here — remote
+                    # deployments are not directly dialable from the leader,
+                    # and the LeaderHub re-attaches their links on next agent
+                    # reconnect. Skip "tunnel" rows so we don't attempt a
+                    # direct dial to an agent-supplied address.
                     if (
                         backend is not None
                         and d.container_address is not None
+                        and d.container_address != "tunnel"
                         and d.container_port is not None
                     ):
                         health_url = (

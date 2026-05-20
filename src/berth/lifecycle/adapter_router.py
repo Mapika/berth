@@ -307,6 +307,16 @@ async def _engine_load(
     adapter_name: str,
     container_path: str,
 ) -> None:
+    if dep.container_address == "tunnel":
+        # Remote deployment — adapter hot-load would need the adapter file
+        # shipped to the agent first (the container_path above is the
+        # leader's mount point) and the load call routed via proxy_request.
+        # That isn't implemented; refuse loudly rather than blind-dialing the
+        # agent-supplied address.
+        raise RuntimeError(
+            "adapter hot-load is not supported on remote deployments "
+            f"(deployment {dep.id} runs on a remote node)"
+        )
     url = (
         f"http://{dep.container_address}:{dep.container_port}"
         f"{backend.adapter_load_path}"
@@ -326,6 +336,8 @@ async def _engine_unload(
     dep: dep_store.Deployment,
     adapter_name: str,
 ) -> None:
+    if dep.container_address == "tunnel":
+        return  # remote — no direct-dial unload path
     url = (
         f"http://{dep.container_address}:{dep.container_port}"
         f"{backend.adapter_unload_path}"
