@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import logging
 import os
 import sqlite3
@@ -27,6 +28,11 @@ log = logging.getLogger(__name__)
 
 FingerprintResolver = Callable[[WebSocket], str | None]
 _MAX_INVENTORY_INT = 1_000_000_000
+# Hard cap on the serialised size of a single heartbeat metrics sample. A
+# registered agent could otherwise store DEFAULT_WINDOW * sizeof(metrics) in
+# the MetricsAggregator per node and trickle attacker-controlled JSON into
+# the admin UI snapshot.
+_MAX_HEARTBEAT_METRICS_BYTES = 32 * 1024
 
 
 def _peer_cert_fingerprint(ws: WebSocket) -> str | None:
@@ -156,6 +162,12 @@ class _WSAdapter:
         except WebSocketDisconnect:
             return None
 
+    async def close(self, *, code: int = 1000) -> None:
+        try:
+            await self._ws.close(code=code)
+        except Exception:  # nosec
+            pass
+
 
 class LeaderHub:
     """FastAPI WebSocket endpoint that accepts agent connections, verifies
@@ -186,10 +198,27 @@ class LeaderHub:
         nodes_store.set_status(
             self._conn, node_id, status="ready", last_seen=time.time(),
         )
-        if frame.metrics is not None and self._aggregator is not None:
-            self._aggregator.ingest(
-                node_id=node_id, sample=frame.metrics, ts=frame.ts,
+        if frame.metrics is None or self._aggregator is None:
+            return
+        try:
+            sample_size = len(
+                json.dumps(frame.metrics, separators=(",", ":")).encode("utf-8")
             )
+        except (TypeError, ValueError) as e:
+            log.warning(
+                "node %s heartbeat metrics not JSON-serialisable; dropping sample (%s)",
+                node_id, e,
+            )
+            return
+        if sample_size > _MAX_HEARTBEAT_METRICS_BYTES:
+            log.warning(
+                "node %s heartbeat metrics %d bytes exceeds %d byte cap; dropping sample",
+                node_id, sample_size, _MAX_HEARTBEAT_METRICS_BYTES,
+            )
+            return
+        self._aggregator.ingest(
+            node_id=node_id, sample=frame.metrics, ts=frame.ts,
+        )
 
     async def _handle_agent(self, ws: WebSocket) -> None:
         fp = self._resolve_fp(ws)
@@ -248,7 +277,20 @@ class LeaderHub:
             return
 
         link = RemoteAgentLink(node_id=node.id, ws=_WSAdapter(ws))
-        self._registry.register(link)
+        displaced = self._registry.register(link)
+        if isinstance(displaced, RemoteAgentLink):
+            # A previous remote WebSocket for this node is still attached. The
+            # new connection wins (operators expect ``berth agent run``
+            # reconnects after a dead-half-open TCP to take over), and we close
+            # the old one cleanly so it can't keep racing on heartbeat state.
+            log.info(
+                "cluster ws: displacing existing link for node %s on reconnect",
+                node.id,
+            )
+            try:
+                await displaced.aclose(code=status.WS_1001_GOING_AWAY)
+            except Exception:  # nosec
+                pass
         try:
             while True:
                 try:
@@ -266,10 +308,14 @@ class LeaderHub:
                 await link.inbound(frame)
         finally:
             link.shutdown()
-            self._registry.unregister(node.id)
-            if self._aggregator is not None:
-                self._aggregator.drop_node(node.id)
-            nodes_store.set_status(
-                self._conn, node.id,
-                status="unreachable", last_seen=time.time(),
-            )
+            # Only mark the node unreachable if we were the active link. If a
+            # newer connection has displaced us, the agent is still online via
+            # that newer link — clobbering status here would create a status
+            # flap and a brief scheduler blackhole.
+            if self._registry.unregister(link):
+                if self._aggregator is not None:
+                    self._aggregator.drop_node(node.id)
+                nodes_store.set_status(
+                    self._conn, node.id,
+                    status="unreachable", last_seen=time.time(),
+                )

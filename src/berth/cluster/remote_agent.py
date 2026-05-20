@@ -67,6 +67,26 @@ class RemoteAgentLink:
         for lq in self._log_streams.values():
             lq.put_nowait(LogChunk(stream_id="", body_b64="", eof=True))
 
+    async def aclose(self, *, code: int = 1000) -> None:
+        """Close the underlying transport (best-effort) and run shutdown.
+
+        Used by LeaderHub when a newer agent WebSocket displaces this one.
+        Some `_WSProto` implementations (e.g. the leader-side FastAPI
+        adapter) expose an async `close(code=…)`; others (e.g. the agent
+        process' websockets client) expose a different shape or none at
+        all. We probe at runtime and never raise — the worst case is the
+        old TCP lingers a bit longer, which we accept.
+        """
+        ws_close = getattr(self._ws, "close", None)
+        if ws_close is not None:
+            try:
+                res = ws_close(code=code)
+                if asyncio.iscoroutine(res):
+                    await res
+            except Exception:  # nosec
+                pass
+        self.shutdown()
+
     async def _send(self, frame: Frame) -> None:
         async with self._send_lock:
             await self._ws.send(encode_frame(frame))

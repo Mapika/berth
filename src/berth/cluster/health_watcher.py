@@ -46,7 +46,12 @@ def sweep(
             nodes_store.set_status(
                 conn, n.id, status="unreachable", last_seen=n.last_seen,
             )
-            registry.unregister(n.id)
+            link = registry.get(n.id)
+            if link is not None:
+                # Identity-safe: if a fresh agent has reconnected between
+                # snapshot and now, registry.unregister(link) returns False
+                # and leaves the new link alone.
+                registry.unregister(link)
             on_node_unreachable(node_id=n.id, label=n.label, affinity=affinity)
 
 
