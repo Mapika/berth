@@ -209,6 +209,43 @@ async def test_proxy_routes_by_model_name(app_with_active_deployment):
 
 
 @pytest.mark.asyncio
+async def test_proxy_routes_ready_deployment_even_when_gpu_free_memory_is_low(
+    app_with_active_deployment,
+):
+    """A ready engine may reserve most GPU memory.
+
+    The request router should not apply placement-time VRAM requirements
+    again, or it will reject the exact deployment that is already serving.
+    """
+    from berth.store import nodes as node_store
+
+    app, _ = app_with_active_deployment
+    local_node = node_store.find_by_label(app.state.conn, "local")
+    assert local_node is not None
+    app.state.metrics_aggregator.ingest(
+        node_id=local_node.id,
+        sample={
+            "gpus": [
+                {"index": 0, "mem_total_mb": 81920, "mem_used_mb": 81420},
+            ],
+            "deployments": [],
+        },
+        ts=1.0,
+    )
+
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(
+        transport=transport, base_url="http://test", timeout=30,
+    ) as c:
+        r = await c.post(
+            "/v1/chat/completions",
+            json={"model": "llama-1b", "messages": [{"role": "user", "content": "hi"}]},
+        )
+
+    assert r.status_code == 200
+
+
+@pytest.mark.asyncio
 async def test_proxy_400_when_no_model_field(app_with_active_deployment):
     app, _ = app_with_active_deployment
     transport = httpx.ASGITransport(app=app)

@@ -206,13 +206,18 @@ def test_rank_deployments_for_orders_by_scorer(tmp_path):
     assert [d.id for d in ranked] == [d11.id, d12.id, d10.id]
 
 
-def test_rank_deployments_for_filters_by_memory(tmp_path):
-    """Node 11 has too-low mem_free → dropped from the ranking."""
+def test_rank_deployments_for_keeps_ready_deployments_with_low_free_memory(tmp_path):
+    """Ready deployments already paid their VRAM cost at placement time.
+
+    Request routing must not double-count vram_reserved_mb against current
+    free memory; engines like vLLM can legitimately reserve most of the GPU
+    once they are healthy.
+    """
     conn = _fresh(tmp_path)
     base = model_store.add(conn, name="test-base", hf_repo="o/x")
-    _seed_dep_on_node(conn, model_id=base.id, node_id=10, vram_mb=8000)
-    _seed_dep_on_node(conn, model_id=base.id, node_id=11, vram_mb=8000)
-    _seed_dep_on_node(conn, model_id=base.id, node_id=12, vram_mb=8000)
+    d10 = _seed_dep_on_node(conn, model_id=base.id, node_id=10, vram_mb=8000)
+    d11 = _seed_dep_on_node(conn, model_id=base.id, node_id=11, vram_mb=8000)
+    d12 = _seed_dep_on_node(conn, model_id=base.id, node_id=12, vram_mb=8000)
     signals = {
         10: NodeSignals(node_id=10, mem_free_mb=20000, in_flight=0, latency_p95_ms=100),
         11: NodeSignals(node_id=11, mem_free_mb=500, in_flight=0, latency_p95_ms=100),
@@ -223,8 +228,7 @@ def test_rank_deployments_for_filters_by_memory(tmp_path):
         signals_by_node=signals,
         request=RoutingRequest(affinity_key=None),
     )
-    assert 11 not in {d.node_id for d in ranked}
-    assert len(ranked) == 2
+    assert {d.id for d in ranked} == {d10.id, d11.id, d12.id}
 
 
 def test_find_deployment_for_is_head_of_rank_deployments_for(tmp_path):

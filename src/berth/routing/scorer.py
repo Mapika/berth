@@ -12,6 +12,9 @@ SAFETY_MARGIN_MB = 1024
 class DeploymentCandidate:
     deployment_id: int
     node_id: int
+    # Incremental memory required before a candidate can be used. Ready
+    # deployments usually pass 0 here because their base reservation was
+    # already charged at placement/container start.
     model_required_mb: int
 
 
@@ -57,7 +60,10 @@ def default_scorer(
             in_flight = 10**9
             p95 = 10**9
         else:
-            if s.mem_free_mb - SAFETY_MARGIN_MB < c.model_required_mb:
+            if (
+                c.model_required_mb > 0
+                and s.mem_free_mb - SAFETY_MARGIN_MB < c.model_required_mb
+            ):
                 continue
             in_flight = s.in_flight
             p95 = s.latency_p95_ms

@@ -192,7 +192,12 @@ def rank_deployments_for(
         DeploymentCandidate(
             deployment_id=d.id,
             node_id=d.node_id,
-            model_required_mb=d.vram_reserved_mb,
+            # These are already-running deployments. Their reserved VRAM has
+            # already been consumed by the engine, and vLLM often keeps most
+            # of that allocation for KV cache. Treating it as a new memory
+            # requirement here double-counts and can filter out the only
+            # healthy deployment.
+            model_required_mb=0,
         )
         for d in ready
     ]

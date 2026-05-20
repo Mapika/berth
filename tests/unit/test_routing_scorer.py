@@ -49,6 +49,20 @@ def test_scorer_drops_candidates_without_memory_headroom():
     assert [c.deployment_id for c in out] == [2]
 
 
+def test_scorer_zero_incremental_memory_bypasses_headroom_filter():
+    candidates = [
+        _cand(deployment_id=1, node_id=10, model_required_mb=0),
+    ]
+    signals = {
+        10: _signals(node_id=10, mem_free_mb=0),
+    }
+    out = default_scorer(
+        candidates=candidates, signals_by_node=signals,
+        request=RoutingRequest(affinity_key=None),
+    )
+    assert [c.deployment_id for c in out] == [1]
+
+
 def test_scorer_ranks_lower_in_flight_first():
     candidates = [
         _cand(deployment_id=1, node_id=10),
