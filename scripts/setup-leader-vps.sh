@@ -85,10 +85,12 @@ apt-get install -y \
   ca-certificates \
   caddy \
   curl \
+  fail2ban \
   git \
   haproxy \
   python3-venv \
-  ufw
+  ufw \
+  unattended-upgrades
 
 echo "==> Creating berth user and directories"
 if ! id berth >/dev/null 2>&1; then
@@ -315,6 +317,79 @@ ufw allow OpenSSH || ufw allow 22/tcp
 ufw allow 80/tcp
 ufw allow 443/tcp
 ufw --force enable
+
+echo "==> Enabling unattended security upgrades"
+cat >/etc/apt/apt.conf.d/52berth-unattended <<'EOF'
+APT::Periodic::Update-Package-Lists "1";
+APT::Periodic::Unattended-Upgrade "1";
+APT::Periodic::AutocleanInterval "7";
+Unattended-Upgrade::Allowed-Origins {
+    "${distro_id}:${distro_codename}-security";
+    "${distro_id}ESMApps:${distro_codename}-apps-security";
+    "${distro_id}ESM:${distro_codename}-infra-security";
+};
+Unattended-Upgrade::Automatic-Reboot "false";
+EOF
+systemctl enable --now unattended-upgrades
+
+echo "==> Kernel hardening (sysctl)"
+cat >/etc/sysctl.d/99-berth.conf <<'EOF'
+# This host is not a router.
+net.ipv4.ip_forward = 0
+net.ipv6.conf.all.forwarding = 0
+# Reverse-path filtering (drop packets that arrive on the wrong interface).
+net.ipv4.conf.all.rp_filter = 1
+net.ipv4.conf.default.rp_filter = 1
+# Reject ICMP redirects — we don't update routes from hostile networks.
+net.ipv4.conf.all.accept_redirects = 0
+net.ipv4.conf.default.accept_redirects = 0
+net.ipv6.conf.all.accept_redirects = 0
+net.ipv6.conf.default.accept_redirects = 0
+net.ipv4.conf.all.send_redirects = 0
+net.ipv4.conf.default.send_redirects = 0
+# No source-routed packets.
+net.ipv4.conf.all.accept_source_route = 0
+net.ipv6.conf.all.accept_source_route = 0
+# Log spoofed/redirect/source-routed packets.
+net.ipv4.conf.all.log_martians = 1
+# SYN flood mitigation.
+net.ipv4.tcp_syncookies = 1
+# Restrict kernel pointer / dmesg disclosure.
+kernel.dmesg_restrict = 1
+kernel.kptr_restrict = 2
+# ptrace only by descendants of the tracer (admin can override).
+kernel.yama.ptrace_scope = 2
+EOF
+sysctl --system >/dev/null
+
+echo "==> SSH hardening"
+install -d -m 0755 /etc/ssh/sshd_config.d
+cat >/etc/ssh/sshd_config.d/99-berth.conf <<'EOF'
+PermitRootLogin no
+PasswordAuthentication no
+KbdInteractiveAuthentication no
+PubkeyAuthentication yes
+MaxAuthTries 3
+LoginGraceTime 30
+EOF
+# Validate before reloading: a broken sshd_config + reload could lock us out.
+if sshd -t; then
+  systemctl reload ssh 2>/dev/null || systemctl reload sshd
+else
+  echo "warn: sshd config validation failed; not reloading. Edit /etc/ssh/sshd_config.d/99-berth.conf." >&2
+fi
+
+echo "==> Enabling fail2ban for SSH"
+install -d -m 0755 /etc/fail2ban/jail.d
+cat >/etc/fail2ban/jail.d/sshd.local <<'EOF'
+[sshd]
+enabled = true
+backend = systemd
+bantime = 1h
+findtime = 10m
+maxretry = 5
+EOF
+systemctl enable --now fail2ban
 
 echo "==> Starting services"
 systemctl daemon-reload
