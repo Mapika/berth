@@ -48,7 +48,10 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-if ! [[ "$BASE_DOMAIN" =~ ^[A-Za-z0-9][A-Za-z0-9.-]*[A-Za-z0-9]$ ]]; then
+# Strict FQDN: labels are alphanumeric (with optional internal hyphens), at
+# least one dot, TLD is two or more letters. Rejects ``a..b``, leading/trailing
+# hyphens, single-label inputs, and trailing dots.
+if ! [[ "$BASE_DOMAIN" =~ ^([A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?\.)+[A-Za-z]{2,}$ ]]; then
   die "base domain does not look valid: $BASE_DOMAIN"
 fi
 
@@ -65,6 +68,7 @@ CADDY_TLS_PORT=8443
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 [[ -f "${REPO_ROOT}/pyproject.toml" ]] || die "could not find repo root from ${SCRIPT_DIR}"
+[[ -f "${REPO_ROOT}/uv.lock" ]] || die "uv.lock missing — run uv lock before deploying"
 
 run_as_berth() {
   if command -v sudo >/dev/null 2>&1; then
@@ -94,21 +98,62 @@ install -d -o berth -g berth -m 0700 "$BERTH_HOME"
 install -d -o berth -g berth -m 0755 "$BERTH_OPT"
 
 echo "==> Copying current checkout to ${BERTH_SRC}"
+# Excludes cover (a) dev caches and VCS state, and (b) common locations where
+# operator-local secrets accumulate (.env, *.pem/key, editor configs, node
+# modules, build artefacts). If you add a new secret-bearing pattern to a
+# contributor checkout, add it here too.
 rm -rf "$BERTH_SRC"
 install -d -o berth -g berth -m 0755 "$BERTH_SRC"
 tar \
   --exclude='.git' \
   --exclude='.venv' \
   --exclude='__pycache__' \
+  --exclude='.pytest_cache' \
+  --exclude='.mypy_cache' \
+  --exclude='.ruff_cache' \
+  --exclude='node_modules' \
+  --exclude='dist' \
+  --exclude='build' \
+  --exclude='.env' \
+  --exclude='.env.*' \
+  --exclude='.envrc' \
+  --exclude='.direnv' \
+  --exclude='secrets' \
+  --exclude='*.pem' \
+  --exclude='*.key' \
+  --exclude='id_rsa*' \
+  --exclude='*.kdbx' \
+  --exclude='.idea' \
+  --exclude='.vscode' \
+  --exclude='.DS_Store' \
   -C "$REPO_ROOT" -cf - . | tar -C "$BERTH_SRC" -xf -
 chown -R berth:berth "$BERTH_SRC"
 
-echo "==> Installing berth into ${BERTH_VENV}"
+echo "==> Installing berth into ${BERTH_VENV} with hash-pinned deps"
 if [[ ! -x "${BERTH_VENV}/bin/python" ]]; then
   run_as_berth python3 -m venv "$BERTH_VENV"
 fi
-run_as_berth "${BERTH_VENV}/bin/python" -m pip install --upgrade pip wheel
-run_as_berth "${BERTH_VENV}/bin/pip" install "$BERTH_SRC"
+# Bootstrap pip + uv inside the venv. uv reads uv.lock and emits a pip-style
+# requirements file with hashes for every transitive dep, which we then install
+# with --require-hashes so the VPS sees exactly what CI tested.
+run_as_berth "${BERTH_VENV}/bin/python" -m pip install --upgrade --no-cache-dir pip wheel uv
+REQ_LOCK="$(mktemp /tmp/berth-requirements.XXXXXX.txt)"
+chmod 0644 "$REQ_LOCK"
+trap 'rm -f "$REQ_LOCK"' EXIT
+run_as_berth "${BERTH_VENV}/bin/uv" export \
+  --frozen --no-dev --no-emit-project \
+  --directory "$BERTH_SRC" \
+  --format requirements-txt > "$REQ_LOCK"
+run_as_berth "${BERTH_VENV}/bin/uv" pip install \
+  --python "${BERTH_VENV}/bin/python" \
+  --require-hashes \
+  --requirement "$REQ_LOCK"
+# Install the project itself separately, with --no-deps so we don't pull in
+# anything not already in the hash-locked set.
+run_as_berth "${BERTH_VENV}/bin/uv" pip install \
+  --python "${BERTH_VENV}/bin/python" \
+  --no-deps \
+  "$BERTH_SRC"
 
 echo "==> Bootstrapping leader config, DB, CA, key pepper, and first admin key"
 BOOTSTRAP_ARGS=(
@@ -151,10 +196,34 @@ RestartSec=5
 StandardOutput=journal
 StandardError=journal
 
+# Process hardening: the leader listens on two high ports and talks to Docker
+# over /var/run/docker.sock; it never needs kernel modules, devices, raw
+# sockets, or capabilities of any kind.
 NoNewPrivileges=true
 PrivateTmp=true
-ProtectSystem=full
+PrivateDevices=true
+ProtectSystem=strict
 ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectKernelLogs=true
+ProtectControlGroups=true
+ProtectClock=true
+ProtectHostname=true
+ProtectProc=invisible
+ProcSubset=pid
+RestrictNamespaces=true
+RestrictRealtime=true
+RestrictSUIDSGID=true
+LockPersonality=true
+RemoveIPC=true
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+SystemCallFilter=~@privileged @resources
+CapabilityBoundingSet=
+AmbientCapabilities=
+UMask=0077
 ReadWritePaths=${BERTH_HOME}
 
 [Install]
@@ -187,6 +256,17 @@ https://${PUBLIC_HOST}:${CADDY_TLS_PORT} {
         header_up X-Forwarded-Proto https
     }
 }
+
+# Catch-all on the same loopback listener: any request whose Host header does
+# not match the public site above gets 421 Misdirected Request instead of
+# Caddy's empty 200. tls internal uses Caddy's local CA, which is fine here —
+# this site only sees connections that HAProxy already routed via the leader
+# SNI but with a wrong Host header.
+https://:${CADDY_TLS_PORT} {
+    bind 127.0.0.1
+    tls internal
+    respond 421
+}
 EOF
 
 echo "==> Writing HAProxy config"
@@ -213,9 +293,11 @@ frontend berth_https
     bind *:443
     tcp-request inspect-delay 5s
     tcp-request content accept if { req.ssl_hello_type 1 }
+    # Drop connections that don't carry one of our two expected SNI values.
+    # No default_backend: anything not matched here has already been rejected.
+    tcp-request content reject if !{ req.ssl_sni -i ${CLUSTER_HOST} ${PUBLIC_HOST} }
     use_backend berth_cluster if { req.ssl_sni -i ${CLUSTER_HOST} }
     use_backend berth_public if { req.ssl_sni -i ${PUBLIC_HOST} }
-    default_backend berth_public
 
 backend berth_public
     server caddy_public 127.0.0.1:${CADDY_TLS_PORT} check
@@ -237,6 +319,7 @@ ufw --force enable
 echo "==> Starting services"
 systemctl daemon-reload
 systemctl enable --now berth
+systemctl enable caddy
 systemctl restart caddy
 systemctl enable --now haproxy
 systemctl restart haproxy
