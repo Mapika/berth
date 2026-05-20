@@ -19,7 +19,7 @@ from berth.store import service_profiles as profile_store
 from berth.store import service_routes as route_store
 
 # Docker requires a container name to match this pattern; ``model_name`` gets
-# baked into the container name (``serve-{backend}-{model_name}-{id}``) and
+# baked into the container name (``berth-{backend}-{model_name}-{id}``) and
 # is also passed as ``--served-model-name`` argv. Constrain at the API
 # boundary so a name with spaces / shell metacharacters / path separators
 # can't escape into Docker or argv contexts, and can't leave half-created

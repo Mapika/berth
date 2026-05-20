@@ -50,7 +50,7 @@ export default function App() {
           <div className="max-w-[1280px] mx-auto px-8 h-14 flex items-center justify-between gap-8">
             <div className="flex items-center gap-10">
               <div className="text-[13px] tracking-tightish select-none">
-                serve<span className="text-accent">-</span>engine
+                berth
               </div>
               <nav className="flex items-center gap-6">
                 {VIEWS.map(v => {

@@ -68,7 +68,7 @@ daemon started (pid …)
 
 public  : https://192.168.0.164:11500    ⚠  using cluster-CA cert
             external clients must trust sha256:7f3a… or set [public_tls]
-cluster : https://192.168.0.164:11501  (cert: serve cluster CA)
+cluster : https://192.168.0.164:11501  (cert: berth cluster CA)
             ca fingerprint: sha256:7f3a…
 ```
 
@@ -157,15 +157,14 @@ then file, then autodetect, then literal default):
    `berth daemon start`.
 2. `BERTH_PUBLIC_HOST`, `BERTH_PUBLIC_PORT`, `BERTH_PUBLIC_BIND`,
    `BERTH_CLUSTER_HOST`, `BERTH_CLUSTER_PORT`, `BERTH_CLUSTER_BIND`
-   env vars. The legacy `SERVE_*` names still work for one release.
+   env vars.
 3. `~/.berth/config.toml`.
 4. Autodetect (UDP-connect trick + `gethostbyname`) for the host;
    `127.0.0.1` for the bind; `11500` / `11501` for ports.
 
 `BERTH_LEADER_URL` is an explicit override of the
 **advertised** cluster URL only (i.e. what enrollment URIs contain).
-It does not change bind addresses. The legacy `SERVE_LEADER_URL`
-continues to work for one release.
+It does not change bind addresses.
 
 Inspect:
 
@@ -328,10 +327,10 @@ cluster port to known agent source IPs.
   whoever controls an enrolled agent host can stream traffic into
   your fleet until you `berth nodes remove` them.
 
-## Legacy: reverse-proxy mode
+## Reverse-Proxy Fingerprint Mode
 
 The pre-secure-by-default deployment style (reverse proxy in front of
-plain-HTTP uvicorn, forwarding `x-serve-client-fingerprint`) is still
+plain-HTTP uvicorn, forwarding `x-berth-client-fingerprint`) is
 supported as an opt-in for operators who already run TLS termination
 upstream:
 
@@ -342,7 +341,7 @@ BERTH_TRUST_FORWARDED_FP=1 berth daemon start
 With that flag set, `LeaderHub` will accept the proxy-forwarded
 fingerprint header when no TLS peer cert is present, but only from
 direct peers in `BERTH_FORWARDED_ALLOW_IPS` (default: `127.0.0.1`;
-legacy `SERVE_*` names still work for one release). **Do not set this
+only `BERTH_*` names are supported). **Do not set this
 on an internet-exposed leader without an upstream proxy doing real mTLS
 verification** — the header is unauthenticated by itself.
 
@@ -492,13 +491,13 @@ to scrape with the default 30 s interval.
 
 | Series | Type | Labels |
 | --- | --- | --- |
-| `serve_node_gpu_util_pct` | gauge | `node`, `gpu` |
-| `serve_node_gpu_mem_used_bytes` | gauge | `node`, `gpu` |
-| `serve_deployment_in_flight` | gauge | `node`, `deployment`, `model` |
-| `serve_deployment_requests_total` | counter | `node`, `deployment`, `model` |
-| `serve_deployment_latency_p50_ms` | gauge | `node`, `deployment`, `model` |
-| `serve_deployment_latency_p95_ms` | gauge | `node`, `deployment`, `model` |
-| `serve_deployment_errors_total` | counter | `node`, `deployment`, `model` |
+| `berth_node_gpu_util_pct` | gauge | `node`, `gpu` |
+| `berth_node_gpu_mem_used_bytes` | gauge | `node`, `gpu` |
+| `berth_deployment_in_flight` | gauge | `node`, `deployment`, `model` |
+| `berth_deployment_requests_total` | counter | `node`, `deployment`, `model` |
+| `berth_deployment_latency_p50_ms` | gauge | `node`, `deployment`, `model` |
+| `berth_deployment_latency_p95_ms` | gauge | `node`, `deployment`, `model` |
+| `berth_deployment_errors_total` | counter | `node`, `deployment`, `model` |
 
 The leader's own node also appears in these series — a small background
 task on the daemon mirrors the agent heartbeat for the local node so

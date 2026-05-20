@@ -8,11 +8,11 @@ def test_format_daemon_metrics_empty():
         api_keys_active=0,
         request_count=0,
     )
-    assert "# TYPE serve_deployments gauge" in text
-    assert "serve_deployments{status=" not in text  # no rows
-    assert "serve_models_total 0" in text
-    assert "serve_api_keys_active 0" in text
-    assert "serve_proxy_requests_total 0" in text
+    assert "# TYPE berth_deployments gauge" in text
+    assert "berth_deployments{status=" not in text  # no rows
+    assert "berth_models_total 0" in text
+    assert "berth_api_keys_active 0" in text
+    assert "berth_proxy_requests_total 0" in text
 
 
 def test_format_daemon_metrics_with_rows():
@@ -22,8 +22,8 @@ def test_format_daemon_metrics_with_rows():
         api_keys_active=5,
         request_count=42,
     )
-    assert 'serve_deployments{status="ready"} 2' in text
-    assert 'serve_deployments{status="loading"} 1' in text
-    assert "serve_models_total 3" in text
-    assert "serve_api_keys_active 5" in text
-    assert "serve_proxy_requests_total 42" in text
+    assert 'berth_deployments{status="ready"} 2' in text
+    assert 'berth_deployments{status="loading"} 1' in text
+    assert "berth_models_total 3" in text
+    assert "berth_api_keys_active 5" in text
+    assert "berth_proxy_requests_total 42" in text

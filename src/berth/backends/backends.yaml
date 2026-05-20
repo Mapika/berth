@@ -1,5 +1,5 @@
-# Pinned engine images. Update via `serve update-engines` or
-# `serve config set engine.<name>.image <tag>`.
+# Pinned engine images. Update via `berth update-engines` or
+# `berth config set engine.<name>.image <tag>`.
 
 vllm:
   image: vllm/vllm-openai
@@ -43,7 +43,7 @@ trtllm:
   # Tag tracks https://github.com/NVIDIA/TensorRT-LLM/releases (active RC line).
   # NGC strips the `v` prefix from github release names (github "v1.3.0rc14"
   # -> NGC tag "1.3.0rc14"). Pull is anonymous; no NGC account required.
-  # Bump via `serve update-engines` when the github release line moves.
+  # Bump via `berth update-engines` when the github release line moves.
   image: nvcr.io/nvidia/tensorrt-llm/release
   pinned_tag: "1.3.0rc14"
   health_path: /health

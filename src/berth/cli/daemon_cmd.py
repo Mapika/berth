@@ -96,14 +96,14 @@ def _print_startup_banner(cfg: config.ResolvedConfig, pid: int) -> None:
     else:
         typer.echo(
             f"public  : {cfg.public_url}    "
-            "⚠  using cluster-CA cert"
+            "using cluster-CA cert"
         )
         typer.echo(
             "            external clients must trust "
             f"{ca_fp} or set [public_tls]"
         )
     typer.echo(
-        f"cluster : {cfg.cluster_url}  (cert: serve cluster CA)"
+        f"cluster : {cfg.cluster_url}  (cert: berth cluster CA)"
     )
     typer.echo(f"            ca fingerprint: {ca_fp}")
     if cfg.cluster_bind == "0.0.0.0":  # nosec
@@ -139,9 +139,6 @@ def daemon_start(
         "daemon, don't write a PID file). Use under systemd Type=exec, "
         "or for development debugging.",
     ),
-    # Back-compat aliases.
-    host: str = typer.Option(None, "--host", hidden=True),
-    port: int = typer.Option(None, "--port", hidden=True),
 ):
     """Start the daemon. Defaults to background mode with a PID file
     and detached process; `--foreground` runs it in this terminal."""
@@ -149,8 +146,8 @@ def daemon_start(
         typer.echo("daemon already running")
         raise typer.Exit(0)
     cfg = config.resolve_config(
-        cli_public_host=public_host or host,
-        cli_public_port=public_port or port,
+        cli_public_host=public_host,
+        cli_public_port=public_port,
         cli_public_bind=public_bind,
         cli_cluster_host=cluster_host,
         cli_cluster_port=cluster_port,
@@ -166,13 +163,11 @@ def daemon_start(
         # tracks us already.
         from berth.daemon.__main__ import (
             configure_logging,
-        )
-        from berth.daemon.__main__ import (
-            serve as _serve_inline,
+            run_daemon,
         )
         configure_logging()
         try:
-            asyncio.run(_serve_inline(cfg, config.SOCK_PATH))
+            asyncio.run(run_daemon(cfg, config.SOCK_PATH))
         except KeyboardInterrupt:
             pass
         return

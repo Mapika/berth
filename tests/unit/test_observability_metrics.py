@@ -25,8 +25,8 @@ def test_format_cluster_metrics_emits_gpu_gauges():
     a = MetricsAggregator()
     a.ingest(node_id=1, sample=_sample(), ts=0.0)
     out = format_cluster_metrics(a, node_labels={1: "worker-a"})
-    assert 'serve_node_gpu_util_pct{node="worker-a",gpu="0"} 42' in out
-    assert 'serve_node_gpu_mem_used_bytes{node="worker-a",gpu="0"} 1073741824' in out
+    assert 'berth_node_gpu_util_pct{node="worker-a",gpu="0"} 42' in out
+    assert 'berth_node_gpu_mem_used_bytes{node="worker-a",gpu="0"} 1073741824' in out
 
 
 def test_format_cluster_metrics_emits_deployment_gauges():
@@ -34,11 +34,11 @@ def test_format_cluster_metrics_emits_deployment_gauges():
     a.ingest(node_id=1, sample=_sample(), ts=0.0)
     out = format_cluster_metrics(a, node_labels={1: "worker-a"})
     assert (
-        'serve_deployment_in_flight{node="worker-a",deployment="7",model="llama3-8b"} 3'
+        'berth_deployment_in_flight{node="worker-a",deployment="7",model="llama3-8b"} 3'
         in out
     )
     assert (
-        'serve_deployment_errors_total{node="worker-a",deployment="7",model="llama3-8b"} 1'
+        'berth_deployment_errors_total{node="worker-a",deployment="7",model="llama3-8b"} 1'
         in out
     )
 
@@ -60,11 +60,11 @@ def test_format_cluster_metrics_escapes_prometheus_label_values():
     a.ingest(
         node_id=1,
         sample={
-            "gpus": [{"index": '0"\nserve_api_keys_active 999\nx="', "util_pct": 1}],
+            "gpus": [{"index": '0"\nberth_api_keys_active 999\nx="', "util_pct": 1}],
             "deployments": [
                 {
                     "deployment_id": '7" ,bad="1',
-                    "model_id": 'model"\\\nserve_models_total 999',
+                    "model_id": 'model"\\\nberth_models_total 999',
                     "in_flight": 1,
                 },
             ],
@@ -74,16 +74,16 @@ def test_format_cluster_metrics_escapes_prometheus_label_values():
 
     out = format_cluster_metrics(
         a,
-        node_labels={1: 'worker"\\\nserve_proxy_requests_total 999'},
+        node_labels={1: 'worker"\\\nberth_proxy_requests_total 999'},
     )
 
-    assert "\nserve_api_keys_active 999\n" not in out
-    assert "\nserve_models_total 999" not in out
-    assert "\nserve_proxy_requests_total 999" not in out
-    assert 'node="worker\\"\\\\\\nserve_proxy_requests_total 999"' in out
-    assert 'gpu="0\\"\\nserve_api_keys_active 999\\nx=\\""' in out
+    assert "\nberth_api_keys_active 999\n" not in out
+    assert "\nberth_models_total 999" not in out
+    assert "\nberth_proxy_requests_total 999" not in out
+    assert 'node="worker\\"\\\\\\nberth_proxy_requests_total 999"' in out
+    assert 'gpu="0\\"\\nberth_api_keys_active 999\\nx=\\""' in out
     assert 'deployment="7\\" ,bad=\\"1"' in out
-    assert 'model="model\\"\\\\\\nserve_models_total 999"' in out
+    assert 'model="model\\"\\\\\\nberth_models_total 999"' in out
 
 
 def test_format_cluster_metrics_treats_malformed_agent_numbers_as_zero():
@@ -115,10 +115,10 @@ def test_format_cluster_metrics_treats_malformed_agent_numbers_as_zero():
 
     out = format_cluster_metrics(a, node_labels={1: "worker-a"})
 
-    assert 'serve_node_gpu_util_pct{node="worker-a",gpu="0"} 0' in out
-    assert 'serve_node_gpu_mem_used_bytes{node="worker-a",gpu="0"} 0' in out
-    assert 'serve_deployment_in_flight{node="worker-a",deployment="7",model="llama3-8b"} 0' in out
+    assert 'berth_node_gpu_util_pct{node="worker-a",gpu="0"} 0' in out
+    assert 'berth_node_gpu_mem_used_bytes{node="worker-a",gpu="0"} 0' in out
+    assert 'berth_deployment_in_flight{node="worker-a",deployment="7",model="llama3-8b"} 0' in out
     assert (
-        'serve_deployment_latency_p95_ms{node="worker-a",deployment="7",model="llama3-8b"} 0'
+        'berth_deployment_latency_p95_ms{node="worker-a",deployment="7",model="llama3-8b"} 0'
         in out
     )

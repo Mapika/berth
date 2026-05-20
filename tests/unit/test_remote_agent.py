@@ -227,7 +227,7 @@ async def test_proxy_request_streams_chunks():
     sent = await ws.pop_to_agent()
     req = decode_frame(sent)
     assert isinstance(req, HttpRequest)
-    assert req.headers["x-serve-container-id"] == "cid"
+    assert req.headers["x-berth-container-id"] == "cid"
     sid = req.stream_id
 
     await ws.push_from_agent(encode_frame(HttpChunk(

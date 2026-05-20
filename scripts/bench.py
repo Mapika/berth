@@ -32,17 +32,17 @@ from pathlib import Path
 import httpx
 
 BASE = "http://127.0.0.1:11500"
-SERVE_BIN = Path(__file__).resolve().parent.parent / ".venv" / "bin" / "serve"
-# When auth is enabled (any active API key in the daemon), set SERVE_API_KEY
+BERTH_BIN = Path(__file__).resolve().parent.parent / ".venv" / "bin" / "berth"
+# When auth is enabled (any active API key in the daemon), set BERTH_API_KEY
 # to a Bearer secret. Empty string disables the header.
-API_KEY = os.environ.get("SERVE_API_KEY", "")
+API_KEY = os.environ.get("BERTH_API_KEY", "")
 AUTH_HEADERS = {"Authorization": f"Bearer {API_KEY}"} if API_KEY else {}
 
 
-def _run_serve(*args: str) -> str:
-    out = subprocess.run([str(SERVE_BIN), *args], capture_output=True, text=True)  # nosec
+def _run_berth(*args: str) -> str:
+    out = subprocess.run([str(BERTH_BIN), *args], capture_output=True, text=True)  # nosec
     if out.returncode != 0:
-        raise RuntimeError(f"serve {' '.join(args)}: {out.stderr}")
+        raise RuntimeError(f"berth {' '.join(args)}: {out.stderr}")
     return out.stdout
 
 
@@ -218,10 +218,10 @@ def pct(xs: list[float], p: float) -> float:
 # ----------------- cold-load probe -----------------
 
 def cold_load(model: str, engine: str, ctx: int = 4096) -> float:
-    _run_serve("stop")
+    _run_berth("stop")
     time.sleep(2)
     t0 = time.time()
-    _run_serve("run", model, "--gpu", "0", "--ctx", str(ctx), "--engine", engine)
+    _run_berth("run", model, "--gpu", "0", "--ctx", str(ctx), "--engine", engine)
     return time.time() - t0
 
 

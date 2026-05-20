@@ -182,12 +182,12 @@ class AgentFrameDispatcher:
         )))
 
     async def _run_http_stream(self, frame: HttpRequest) -> None:
-        cid = frame.headers.get("x-serve-container-id")
+        cid = frame.headers.get("x-berth-container-id")
         endpoint = self._endpoints.get(cid or "")
         if endpoint is None:
             await self._send(encode_frame(HttpChunk(
                 stream_id=frame.stream_id, status=502,
-                headers={"x-serve-error": "no-endpoint"},
+                headers={"x-berth-error": "no-endpoint"},
                 body_b64="", eof=True,
             )))
             return
@@ -195,7 +195,7 @@ class AgentFrameDispatcher:
         body = base64.b64decode(frame.body_b64) if frame.body_b64 else b""
         url = f"http://{addr}:{port}{frame.path}"
         headers = {k: v for k, v in frame.headers.items()
-                   if k != "x-serve-container-id"}
+                   if k != "x-berth-container-id"}
         try:
             agen = await self._http.stream(frame.method, url, headers, body)
             async for status, hdrs, chunk, eof in agen:
@@ -216,8 +216,8 @@ class AgentFrameDispatcher:
             await self._send(encode_frame(HttpChunk(
                 stream_id=frame.stream_id, status=502,
                 headers={
-                    "x-serve-error": "proxy-failed",
-                    "x-serve-detail": str(e)[:200],
+                    "x-berth-error": "proxy-failed",
+                    "x-berth-detail": str(e)[:200],
                 },
                 body_b64="", eof=True,
             )))
@@ -308,7 +308,7 @@ class _DockerAdapter:
 
     Handles two plan shapes:
 
-    1. Legacy / local-style: caller pre-built `volumes` (full leader-side
+    1. Local-style: caller pre-built `volumes` (full leader-side
        paths) and `command` argv (with absolute model path inside the
        container). We just hand it to docker.run.
 
@@ -332,7 +332,7 @@ class _DockerAdapter:
         self._status_cb = status_cb
         self._quiet_downloads = quiet_downloads
         # Default to the same on-disk layout the leader uses, but rooted
-        # at the agent's own SERVE_HOME.
+        # at the agent's own BERTH_HOME.
         from berth import config as _cfg
         self._models_dir = models_dir or _cfg.MODELS_DIR
         self._configs_dir = configs_dir or _cfg.CONFIGS_DIR
@@ -385,7 +385,7 @@ class _DockerAdapter:
                 host_cfg = self._configs_dir / f"{dep_id}.yml"
                 host_cfg.write_text(cfg_body)
                 volumes[str(self._configs_dir.resolve())] = {
-                    "bind": "/serve/configs", "mode": "ro",
+                    "bind": "/berth/configs", "mode": "ro",
                 }
             _emit_status(
                 self._status_cb,
@@ -413,7 +413,7 @@ class _DockerAdapter:
             )
             return (h.id, h.address, h.port)
 
-        # Legacy / local-style plan — pass through unchanged.
+        # Local-style plan — pass through unchanged.
         _emit_status(
             self._status_cb,
             "deployment.container_starting",
@@ -478,8 +478,8 @@ class _HttpxAdapter:
         return gen()
 
 
-def _load_agent_config(serve_home: Path) -> dict:
-    p = serve_home / "agent.yaml"
+def _load_agent_config(berth_home: Path) -> dict:
+    p = berth_home / "agent.yaml"
     if not p.exists():
         raise FileNotFoundError(
             f"agent config not found at {p}; run `berth agent register` first"
@@ -498,7 +498,7 @@ def _build_ssl_context(cfg: dict) -> ssl.SSLContext:
 
 
 async def run_agent(
-    serve_home: Path,
+    berth_home: Path,
     *,
     status_cb: StatusCallback | None = None,
     quiet_downloads: bool = False,
@@ -508,7 +508,7 @@ async def run_agent(
     from berth.cluster.host_info import collect_host_info
     from berth.lifecycle.docker_client import DockerClient
 
-    cfg = _load_agent_config(serve_home)
+    cfg = _load_agent_config(berth_home)
     ssl_ctx = _build_ssl_context(cfg)
     _emit_status(
         status_cb,
@@ -548,7 +548,7 @@ async def run_agent(
     # no-endpoint. Walk docker on startup and rebuild the map.
     preloaded_endpoints: dict[str, tuple[str, int]] = {}
     try:
-        for c in dc._client.containers.list(filters={"name": "serve-"}):
+        for c in dc._client.containers.list(filters={"name": "berth-"}):
             if c.status != "running":
                 continue
             ports = (c.attrs.get("NetworkSettings", {}) or {}).get("Ports", {}) or {}

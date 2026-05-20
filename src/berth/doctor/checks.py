@@ -45,12 +45,12 @@ def check_paths() -> CheckResult:
     p.mkdir(parents=True, exist_ok=True)
     if not os.access(p, os.W_OK):
         return CheckResult(
-            name="serve directory",
+            name="berth directory",
             status="fail",
             detail=f"{p} is not writable",
             fix=f"chmod u+w {p}",
         )
-    return CheckResult(name="serve directory", status="ok", detail=f"{p} writable")
+    return CheckResult(name="berth directory", status="ok", detail=f"{p} writable")
 
 
 def check_ports() -> CheckResult:
@@ -196,7 +196,7 @@ def check_engine_images() -> CheckResult:
             name="engine images",
             status="warn",
             detail=f"cached: {found or 'none'}; missing: {missing}",
-            fix="serve will pull on first use; or `docker pull <image>` ahead of time",
+            fix="berth will pull on first use; or `docker pull <image>` ahead of time",
         )
     return CheckResult(
         name="engine images",

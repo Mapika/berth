@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.4.0 - 2026-05-20
+
+### Breaking
+
+- Removed the `serve` console-script alias; use `berth`.
+- Renamed the Python distribution from `serve-engine` to `berth`.
+- Removed `SERVE_*` environment variable compatibility; use `BERTH_*`.
+- Removed automatic `~/.serve` migration; use `~/.berth` or set `BERTH_HOME`.
+- Removed deprecated daemon `--host` / `--port` aliases; use
+  `--public-host` / `--public-port` / `--public-bind`.
+- Removed legacy agent enrollment via `--leader` and `--token`; use
+  `berth agent register --uri ...`.
+- Renamed berth-owned metrics, headers, container names, and config mount paths
+  from the old `serve` prefix to `berth`.
+
 ## 0.3.0 - 2026-05-20
 
 Rebrand: the project is now **berth**. The PyPI distribution name remains

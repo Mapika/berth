@@ -11,9 +11,9 @@ docker build -f docker/daemon.Dockerfile -t berth:dev .
 ## Run
 
 ```bash
-docker run -d --name serve \
+docker run -d --name berth \
     --network host \
-    -v ~/.serve:/root/.serve \
+    -v ~/.berth:/root/.berth \
     -v /var/run/docker.sock:/var/run/docker.sock \
     berth:dev
 ```
@@ -27,6 +27,6 @@ docker run -d --name serve \
 The pinned engine images in `backends/backends.yaml` are pulled lazily on first use. To pre-pull them:
 
 ```bash
-docker exec serve berth pull-engine vllm
-docker exec serve berth pull-engine sglang
+docker exec berth berth pull-engine vllm
+docker exec berth berth pull-engine sglang
 ```

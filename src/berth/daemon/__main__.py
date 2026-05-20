@@ -41,15 +41,15 @@ def configure_logging() -> None:
 
 
 def _ensure_cluster_server_cert(
-    serve_home: Path, hosts: list[str]
+    berth_home: Path, hosts: list[str]
 ) -> tuple[Path, Path, str]:
     """Make sure the cluster CA exists and a server cert covering `hosts`
     is on disk. Returns (cert_path, key_path, ca_fingerprint)."""
-    ca_dir = serve_home / "ca"
+    ca_dir = berth_home / "ca"
     if not (ca_dir / "ca.crt").exists():
         generate_ca(ca_dir, common_name="berth-ca")
     ca = load_ca(ca_dir)
-    leader_dir = serve_home / "leader"
+    leader_dir = berth_home / "leader"
     crt_path = leader_dir / "server.crt"
     key_path = leader_dir / "server.key"
     required = list(dict.fromkeys([*hosts, "127.0.0.1", "localhost"]))
@@ -78,7 +78,7 @@ def _bind_control_socket(sock_path: Path) -> socket.socket:
     return sock
 
 
-async def serve(cfg: config.ResolvedConfig, sock_path: Path) -> None:
+async def run_daemon(cfg: config.ResolvedConfig, sock_path: Path) -> None:
     log_ = logging.getLogger(__name__)
     config.ensure_private_dir(config.BERTH_DIR)
     config.MODELS_DIR.mkdir(parents=True, exist_ok=True)
@@ -233,15 +233,12 @@ def main(argv: list[str] | None = None) -> int:
         "deployments must target an enrolled agent.",
     )
     p.add_argument("--sock", default=str(config.SOCK_PATH))
-    # Back-compat aliases: --host/--port map to --public-host/--public-port.
-    p.add_argument("--host", dest="public_host_alias")
-    p.add_argument("--port", type=int, dest="public_port_alias")
     args = p.parse_args(argv)
 
     configure_logging()
     cfg = config.resolve_config(
-        cli_public_host=args.public_host or args.public_host_alias,
-        cli_public_port=args.public_port or args.public_port_alias,
+        cli_public_host=args.public_host,
+        cli_public_port=args.public_port,
         cli_public_bind=args.public_bind,
         cli_cluster_host=args.cluster_host,
         cli_cluster_port=args.cluster_port,
@@ -250,7 +247,7 @@ def main(argv: list[str] | None = None) -> int:
         cli_public_key=args.public_key,
         cli_leader_only=args.leader_only,
     )
-    asyncio.run(serve(cfg, Path(args.sock)))
+    asyncio.run(run_daemon(cfg, Path(args.sock)))
     return 0
 
 

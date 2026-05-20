@@ -33,7 +33,7 @@ export function EnrollCard({ onMinted }: { onMinted: () => void }) {
   })
 
   const uri = minted ? enrollmentUri(minted) : ''
-  const command = minted ? `serve agent register --uri '${uri}'` : ''
+  const command = minted ? `berth agent register --uri '${uri}'` : ''
   const remaining = expiresAt ? Math.max(0, expiresAt - now) : 0
   const remainingLabel = remaining > 0
     ? `${Math.floor(remaining / 60000)}m ${Math.floor((remaining % 60000) / 1000).toString().padStart(2, '0')}s`
@@ -117,7 +117,7 @@ export function EnrollCard({ onMinted }: { onMinted: () => void }) {
             </pre>
             <p className="text-mute text-[11px] tracking-wider leading-relaxed">
               the agent fetches the ca, verifies its sha256 against the pin in the uri, then registers.
-              re-run <code className="text-dim">serve agent start</code> after.
+              re-run <code className="text-dim">berth agent start</code> after.
             </p>
           </div>
         </div>

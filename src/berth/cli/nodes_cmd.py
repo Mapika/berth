@@ -76,11 +76,7 @@ def enroll(label: str):
     data = _uds_post("/admin/nodes/enroll", {"label": label})
     leader = data["leader_url"]
     token = data["token"]
-    ca_fp = data.get("ca_fingerprint")
-    if ca_fp is None:
-        # Leader on an older build that didn't return the fingerprint.
-        # We still print a URI but the agent will have to skip pinning.
-        ca_fp = ""
+    ca_fp = data["ca_fingerprint"]
     uri = build_enrollment_uri(leader=leader, token=token, ca_fp=ca_fp)
     typer.echo("Enrollment URI (single-use, expires in 10 min):")
     typer.echo("")
@@ -95,4 +91,3 @@ def remove(node_id: int):
     """Decommission a node — revokes its cert fingerprint and deletes the row."""
     _uds_delete(f"/admin/nodes/{node_id}")
     typer.echo(f"removed node {node_id}")
-

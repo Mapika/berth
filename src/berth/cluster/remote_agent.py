@@ -260,7 +260,7 @@ class RemoteAgentLink:
                 stream_id=stream_id,
                 method=method,
                 path=path,
-                headers={**headers, "x-serve-container-id": container_id},
+                headers={**headers, "x-berth-container-id": container_id},
                 body_b64=base64.b64encode(body).decode("ascii"),
             ))
             first = True

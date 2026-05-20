@@ -263,7 +263,7 @@ def admin_ca_pem(request: Request):
 
     return PlainTextResponse(
         request.app.state.ca_cert_pem,
-        headers={"X-Serve-CA-Fingerprint": request.app.state.ca_fingerprint},
+        headers={"X-Berth-CA-Fingerprint": request.app.state.ca_fingerprint},
         media_type="application/x-pem-file",
     )
 

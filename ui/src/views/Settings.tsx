@@ -172,7 +172,7 @@ export default function Settings() {
 
       <section className="space-y-4">
         <div className="flex items-baseline justify-between">
-          <div className="label">~/.serve/config.toml</div>
+          <div className="label">~/.berth/config.toml</div>
           <div className="text-mute text-[10px] tracking-wider">
             {config_file_exists ? config_file : `${config_file} · not present`}
           </div>
@@ -181,9 +181,9 @@ export default function Settings() {
           {tomlPreview(values, sources)}
         </pre>
         <p className="text-mute text-[11px] tracking-wider leading-relaxed">
-          edit via cli: <code className="text-dim">serve config set-public host=… port=…</code> ·{' '}
-          <code className="text-dim">serve config set-cluster bind=…</code> ·{' '}
-          <code className="text-dim">serve config set-public-tls cert=… key=…</code>.{' '}
+          edit via cli: <code className="text-dim">berth config set-public host=... port=...</code> ·{' '}
+          <code className="text-dim">berth config set-cluster bind=...</code> ·{' '}
+          <code className="text-dim">berth config set-public-tls cert=... key=...</code>.{' '}
           restart the daemon to pick up changes.
         </p>
       </section>

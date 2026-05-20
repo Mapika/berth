@@ -111,7 +111,7 @@ From a GitHub release wheel:
 
 ```bash
 uv tool install \
-  https://github.com/Mapika/berth/releases/download/v0.3.0/serve_engine-0.3.0-py3-none-any.whl
+  https://github.com/Mapika/berth/releases/download/v0.4.0/berth-0.4.0-py3-none-any.whl
 berth doctor
 ```
 
@@ -129,13 +129,16 @@ uv pip install -e ".[dev]"
 berth doctor
 ```
 
+Upgrading from the temporary `serve` compatibility layer is covered in
+[docs/upgrade-0.4.md](docs/upgrade-0.4.md).
+
 Daemon in a container:
 
 ```bash
 git clone https://github.com/Mapika/berth
 cd berth
 docker build -f docker/daemon.Dockerfile -t berth:dev .
-docker run -d --name serve \
+docker run -d --name berth \
   --network host \
   -v ~/.berth:/root/.berth \
   -v /var/run/docker.sock:/var/run/docker.sock \
@@ -144,10 +147,6 @@ docker run -d --name serve \
 
 The daemon container does not run inference itself. It talks to the host Docker
 socket and starts separate engine containers.
-
-If `serve` is already taken by an existing shell alias (for example
-`alias serve='python -m http.server'`), invoke as `python -m berth` or
-`unalias serve`.
 
 ## First Run
 
@@ -172,8 +171,8 @@ berth key create web --tier admin
 Save the printed `secret:` value:
 
 ```bash
-export SERVE_TOKEN=sk-...
-export SERVE_URL=https://127.0.0.1:11500
+export BERTH_TOKEN=sk-...
+export BERTH_URL=https://127.0.0.1:11500
 ```
 
 Open the web UI at:
@@ -208,8 +207,8 @@ berth ps
 Call the OpenAI-compatible API:
 
 ```bash
-curl -k "$SERVE_URL/v1/chat/completions" \
-  -H "Authorization: Bearer $SERVE_TOKEN" \
+curl -k "$BERTH_URL/v1/chat/completions" \
+  -H "Authorization: Bearer $BERTH_TOKEN" \
   -H 'Content-Type: application/json' \
   -d '{
     "model": "qwen-0_5b",
@@ -240,7 +239,7 @@ $ berth ps
 ID  MODEL     BACKEND  GPU  STATUS  PIN
 1   qwen-0_5b vllm     0    ready   yes
 
-$ curl -k "$SERVE_URL/v1/chat/completions" ...
+$ curl -k "$BERTH_URL/v1/chat/completions" ...
 {"choices":[{"message":{"role":"assistant","content":"OK"}}]}
 ```
 
@@ -252,8 +251,8 @@ when you want repeatable launch settings and a stable public model name.
 Create a vLLM service profile:
 
 ```bash
-curl -k -X POST "$SERVE_URL/admin/service-profiles" \
-  -H "Authorization: Bearer $SERVE_TOKEN" \
+curl -k -X POST "$BERTH_URL/admin/service-profiles" \
+  -H "Authorization: Bearer $BERTH_TOKEN" \
   -H 'Content-Type: application/json' \
   -d '{
     "name": "qwen-vllm",
@@ -269,15 +268,15 @@ curl -k -X POST "$SERVE_URL/admin/service-profiles" \
 Deploy it:
 
 ```bash
-curl -k -X POST "$SERVE_URL/admin/service-profiles/qwen-vllm/deploy" \
-  -H "Authorization: Bearer $SERVE_TOKEN"
+curl -k -X POST "$BERTH_URL/admin/service-profiles/qwen-vllm/deploy" \
+  -H "Authorization: Bearer $BERTH_TOKEN"
 ```
 
 Expose it as a public model name:
 
 ```bash
-curl -k -X POST "$SERVE_URL/admin/routes" \
-  -H "Authorization: Bearer $SERVE_TOKEN" \
+curl -k -X POST "$BERTH_URL/admin/routes" \
+  -H "Authorization: Bearer $BERTH_TOKEN" \
   -H 'Content-Type: application/json' \
   -d '{
     "name": "chat-default",
@@ -290,8 +289,8 @@ curl -k -X POST "$SERVE_URL/admin/routes" \
 Call the route:
 
 ```bash
-curl -k "$SERVE_URL/v1/chat/completions" \
-  -H "Authorization: Bearer $SERVE_TOKEN" \
+curl -k "$BERTH_URL/v1/chat/completions" \
+  -H "Authorization: Bearer $BERTH_TOKEN" \
   -H 'Content-Type: application/json' \
   -d '{
     "model": "chat",

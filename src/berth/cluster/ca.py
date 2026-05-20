@@ -176,7 +176,7 @@ def generate_server_cert(ca: CA, *, hosts: list[str]) -> CertBundle:
     san = _san_entries(hosts)
     builder = (
         x509.CertificateBuilder()
-        .subject_name(_name(hosts[0] if hosts else "serve-leader"))
+        .subject_name(_name(hosts[0] if hosts else "berth-leader"))
         .issuer_name(ca_cert.subject)
         .public_key(leaf_key.public_key())
         .serial_number(x509.random_serial_number())

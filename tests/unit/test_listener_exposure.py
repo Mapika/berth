@@ -18,7 +18,7 @@ def _apps(tmp_path):
         docker_client=MagicMock(),
         backends={"vllm": VLLMBackend()},
         models_dir=tmp_path,
-        serve_home=tmp_path,
+        berth_home=tmp_path,
     )
 
 

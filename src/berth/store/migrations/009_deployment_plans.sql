@@ -1,6 +1,6 @@
 -- Per-load plan history for base pre-warming.
 -- The predictor v2.0 only pre-warmed adapters because rebuilding a base
--- deployment needs the operator's original `serve run` flags (gpu_ids,
+-- deployment needs the operator's original `berth run` flags (gpu_ids,
 -- ctx, max_loras, max_lora_rank, dtype, extra_args, etc). The deployments
 -- table itself drops some of these (extra_args, gpu_memory_utilization)
 -- and rotates as containers stop, so we capture the full DeploymentPlan

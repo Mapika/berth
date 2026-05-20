@@ -47,7 +47,7 @@ curl -k https://127.0.0.1:11500/healthz
 For a real exposed service, prefer:
 
 ```bash
-berth deploy bootstrap --domain serve.example.com
+berth deploy bootstrap --domain berth.example.com
 ```
 
 Then put Caddy or Nginx in front. See `docs/caddy.md`.
@@ -81,7 +81,7 @@ Checks:
 ```bash
 berth ps
 berth logs
-docker ps -a --filter name=serve-
+docker ps -a --filter name=berth-
 ```
 
 Common causes:
@@ -140,7 +140,7 @@ BERTH_PUBLIC_BIND=127.0.0.1 berth daemon start
 For reverse proxy mode, use `docs/caddy.md` or:
 
 ```bash
-berth deploy bootstrap --domain serve.example.com
+berth deploy bootstrap --domain berth.example.com
 ```
 
 ## API Key Fails
@@ -154,8 +154,9 @@ berth key create web --tier admin
 Then:
 
 ```bash
-export SERVE_TOKEN=sk-...
-curl -k "$SERVE_URL/v1/models" -H "Authorization: Bearer $SERVE_TOKEN"
+export BERTH_TOKEN=sk-...
+export BERTH_URL=https://127.0.0.1:11500
+curl -k "$BERTH_URL/v1/models" -H "Authorization: Bearer $BERTH_TOKEN"
 ```
 
 If the key pepper file was lost from `~/.berth/key_pepper`, old keys cannot be

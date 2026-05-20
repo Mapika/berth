@@ -59,4 +59,4 @@ async def test_metrics_with_valid_key_returns_200(tmp_path):
             headers={"Authorization": f"Bearer {secret}"},
         )
     assert r.status_code == 200
-    assert b"serve_" in r.content
+    assert b"berth_" in r.content

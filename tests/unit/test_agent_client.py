@@ -147,7 +147,7 @@ async def test_http_request_streams_chunks_back():
     disp.register_endpoint(container_id="cid-1", address="127.0.0.1", port=9000)
     await disp.handle(HttpRequest(
         stream_id="s1", method="GET", path="/",
-        headers={"x-serve-container-id": "cid-1"}, body_b64="",
+        headers={"x-berth-container-id": "cid-1"}, body_b64="",
     ))
     # Allow the inflight task to drain
     await asyncio.sleep(0.01)
@@ -174,7 +174,7 @@ async def test_http_request_with_unknown_container_returns_502():
     disp = AgentFrameDispatcher(docker=_DockerStub(), http=_HttpOk(), send=sender)
     await disp.handle(HttpRequest(
         stream_id="sX", method="GET", path="/",
-        headers={"x-serve-container-id": "missing"}, body_b64="",
+        headers={"x-berth-container-id": "missing"}, body_b64="",
     ))
     await asyncio.sleep(0.01)
     chunks = [decode_frame(s) for s in sent]
@@ -194,7 +194,7 @@ async def test_http_request_with_engine_failure_returns_502():
     disp.register_endpoint(container_id="cid-1", address="127.0.0.1", port=9000)
     await disp.handle(HttpRequest(
         stream_id="sFail", method="GET", path="/",
-        headers={"x-serve-container-id": "cid-1"}, body_b64="",
+        headers={"x-berth-container-id": "cid-1"}, body_b64="",
     ))
     await asyncio.sleep(0.01)
     chunks = [decode_frame(s) for s in sent]
@@ -237,7 +237,7 @@ async def test_remote_docker_adapter_emits_status_and_quiets_download(
         "model_sentinel": "__MODEL__",
         "command": ["vllm", "serve", "__MODEL__"],
         "image": "vllm/vllm-openai:test",
-        "name": "serve-vllm-qwen",
+        "name": "berth-vllm-qwen",
         "environment": {},
         "kwargs": {},
         "internal_port": 8000,

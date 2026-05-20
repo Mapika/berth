@@ -48,11 +48,11 @@ def test_two_agents_to_one_aggregator_through_hub_handler():
     assert snap[2]["gpus"][0]["util_pct"] == 50
 
     prom = format_cluster_metrics(agg, node_labels={1: "a", 2: "b"})
-    assert 'serve_node_gpu_util_pct{node="a",gpu="0"} 30' in prom
-    assert 'serve_node_gpu_util_pct{node="b",gpu="0"} 50' in prom
+    assert 'berth_node_gpu_util_pct{node="a",gpu="0"} 30' in prom
+    assert 'berth_node_gpu_util_pct{node="b",gpu="0"} 50' in prom
     # Deployment-level series labelled correctly per node.
-    assert 'serve_deployment_in_flight{node="a",deployment="7",model="llama3-8b"} 2' in prom
-    assert 'serve_deployment_in_flight{node="b",deployment="7",model="llama3-8b"} 2' in prom
+    assert 'berth_deployment_in_flight{node="a",deployment="7",model="llama3-8b"} 2' in prom
+    assert 'berth_deployment_in_flight{node="b",deployment="7",model="llama3-8b"} 2' in prom
 
     body = render_metrics_snapshot(agg, nodes=[_node(1, "a"), _node(2, "b")])
     assert len(body["nodes"]) == 2

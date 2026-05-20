@@ -11,8 +11,7 @@
 #     BERTH_HOME (see config.py).
 #   - The berth package is installed in a venv at /opt/berth/venv
 #     (e.g. `uv venv /opt/berth/venv && /opt/berth/venv/bin/pip install
-#     -e /opt/berth/serve-engine`).  The PyPI distribution name is
-#     still `serve-engine` for one release; the binary is `berth`.
+#     -e /opt/berth`).
 #
 # Adjust the ExecStart path to match your install layout.
 

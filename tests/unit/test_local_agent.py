@@ -44,7 +44,7 @@ class _FakeDocker:
 
 @pytest.mark.asyncio
 async def test_start_returns_address_and_port():
-    dc = DockerClient(client=_FakeDocker(), network_name="serve")
+    dc = DockerClient(client=_FakeDocker(), network_name="berth")
     link = LocalAgentLink(node_id=0, docker_client=dc)
     started = await link.start_deployment({
         "image": "x", "name": "d-1", "command": [], "environment": {},
@@ -57,7 +57,7 @@ async def test_start_returns_address_and_port():
 
 @pytest.mark.asyncio
 async def test_proxy_request_streams_response():
-    dc = DockerClient(client=_FakeDocker(), network_name="serve")
+    dc = DockerClient(client=_FakeDocker(), network_name="berth")
 
     async def handler(request: httpx.Request) -> httpx.Response:
         async def gen():
@@ -87,7 +87,7 @@ async def test_proxy_request_streams_response():
 
 @pytest.mark.asyncio
 async def test_stop_clears_endpoint():
-    dc = DockerClient(client=_FakeDocker(), network_name="serve")
+    dc = DockerClient(client=_FakeDocker(), network_name="berth")
     link = LocalAgentLink(node_id=0, docker_client=dc)
     started = await link.start_deployment({
         "image": "x", "name": "d-1", "command": [], "environment": {},
@@ -100,7 +100,7 @@ async def test_stop_clears_endpoint():
 
 @pytest.mark.asyncio
 async def test_proxy_unknown_container_raises():
-    dc = DockerClient(client=_FakeDocker(), network_name="serve")
+    dc = DockerClient(client=_FakeDocker(), network_name="berth")
     link = LocalAgentLink(node_id=0, docker_client=dc)
     with pytest.raises(KeyError):
         async for _ in link.proxy_request(
@@ -111,7 +111,7 @@ async def test_proxy_unknown_container_raises():
 
 
 def test_link_properties():
-    dc = DockerClient(client=_FakeDocker(), network_name="serve")
+    dc = DockerClient(client=_FakeDocker(), network_name="berth")
     link = LocalAgentLink(node_id=7, docker_client=dc)
     assert link.node_id == 7
     assert link.is_ready is True

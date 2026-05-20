@@ -14,7 +14,7 @@
       "gridPos": { "h": 8, "w": 12, "x": 0, "y": 0 },
       "targets": [
         {
-          "expr": "serve_node_gpu_util_pct",
+          "expr": "berth_node_gpu_util_pct",
           "legendFormat": "{{node}} gpu{{gpu}}",
           "refId": "A"
         }
@@ -30,7 +30,7 @@
       "gridPos": { "h": 8, "w": 12, "x": 12, "y": 0 },
       "targets": [
         {
-          "expr": "serve_node_gpu_mem_used_bytes",
+          "expr": "berth_node_gpu_mem_used_bytes",
           "legendFormat": "{{node}} gpu{{gpu}}",
           "refId": "A"
         }
@@ -46,7 +46,7 @@
       "gridPos": { "h": 8, "w": 12, "x": 0, "y": 8 },
       "targets": [
         {
-          "expr": "serve_deployment_in_flight",
+          "expr": "berth_deployment_in_flight",
           "legendFormat": "{{node}} {{model}} (dep {{deployment}})",
           "refId": "A"
         }
@@ -59,7 +59,7 @@
       "gridPos": { "h": 8, "w": 12, "x": 12, "y": 8 },
       "targets": [
         {
-          "expr": "serve_deployment_latency_p95_ms",
+          "expr": "berth_deployment_latency_p95_ms",
           "legendFormat": "{{node}} {{model}}",
           "refId": "A"
         }
@@ -75,7 +75,7 @@
       "gridPos": { "h": 8, "w": 12, "x": 0, "y": 16 },
       "targets": [
         {
-          "expr": "sum by (node) (serve_deployment_requests_total)",
+          "expr": "sum by (node) (berth_deployment_requests_total)",
           "legendFormat": "{{node}}",
           "refId": "A"
         }
@@ -88,7 +88,7 @@
       "gridPos": { "h": 8, "w": 12, "x": 12, "y": 16 },
       "targets": [
         {
-          "expr": "rate(serve_deployment_errors_total[1m])",
+          "expr": "rate(berth_deployment_errors_total[1m])",
           "legendFormat": "{{node}} {{model}}",
           "refId": "A"
         }

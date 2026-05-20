@@ -2,7 +2,7 @@
 
 Uvicorn's default `WebSocketProtocol` doesn't put the SSL object into
 the ASGI scope, so handlers cannot inspect the client cert. We inject
-it into `scope["extensions"]["serve.tls"] = {"ssl_object": ...}` so
+it into `scope["extensions"]["berth.tls"] = {"ssl_object": ...}` so
 LeaderHub can do real mTLS verification instead of trusting a
 forwarded header.
 
@@ -56,7 +56,7 @@ class TLSAwareWebSocketProtocol(_BaseWSProtocol):
             ssl_obj = None
         extensions: dict[str, Any] = {"websocket.http.response": {}}
         if ssl_obj is not None:
-            extensions["serve.tls"] = {"ssl_object": ssl_obj}
+            extensions["berth.tls"] = {"ssl_object": ssl_obj}
 
         self.scope = {
             "type": "websocket",

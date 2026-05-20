@@ -32,7 +32,7 @@ def test_security_probe_passes_against_live_tls_listeners(tmp_path: Path):
     cluster_port = _free_port()
     sock_path = tmp_path / "sock"
     env = os.environ.copy()
-    env["SERVE_HOME"] = str(tmp_path)
+    env["BERTH_HOME"] = str(tmp_path)
 
     proc = subprocess.Popen(
         [

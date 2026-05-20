@@ -25,11 +25,9 @@ agent_app = typer.Typer(help="Manage the local agent on this host.")
 app.add_typer(agent_app, name="agent")
 
 
-def _serve_home() -> Path:
-    """Lazy ~/.berth resolution honouring BERTH_HOME (legacy: SERVE_HOME)
-    at call time so tests that monkeypatch the env var see the override
-    (config.BERTH_DIR is fixed at import time)."""
-    return Path(_env_get(os.environ, "SERVE_HOME") or str(Path.home() / ".berth"))
+def _berth_home() -> Path:
+    """Resolve BERTH_HOME at call time for tests and one-shot CLI calls."""
+    return Path(_env_get(os.environ, "BERTH_HOME") or str(Path.home() / ".berth"))
 
 
 def _agent_log_path(home: Path, override: Path | None = None) -> Path:
@@ -262,9 +260,9 @@ def _fetch_ca_pinned(leader: str, expected_fp: str) -> str:
 
 
 def _do_register(
-    *, leader: str, token: str, ca_pem: str | None, reachable_as: str | None,
+    *, leader: str, token: str, ca_pem: str, reachable_as: str | None,
 ) -> None:
-    home = _serve_home()
+    home = _berth_home()
     ensure_private_dir(home)
 
     info = collect_host_info()
@@ -286,28 +284,19 @@ def _do_register(
         },
     }
     register_url = f"{leader.rstrip('/')}/admin/nodes/register"
-    if ca_pem is not None:
-        # CA already verified by fingerprint; write it now so the post
-        # below verifies properly.
-        (home / "ca.crt").write_text(ca_pem)
-        r = httpx.post(
-            register_url, json=payload,
-            verify=str(home / "ca.crt"), timeout=30.0,
-        )
-    else:
-        # Legacy --leader/--token path with no pinned fingerprint:
-        # do the original behavior (server cert verification with system
-        # trust store).
-        r = httpx.post(register_url, json=payload, timeout=30.0)
+    # CA already verified by fingerprint; write it now so the post below
+    # verifies properly.
+    (home / "ca.crt").write_text(ca_pem)
+    r = httpx.post(
+        register_url, json=payload,
+        verify=str(home / "ca.crt"), timeout=30.0,
+    )
     r.raise_for_status()
     data = r.json()
 
     (home / "agent.crt").write_text(data["agent_cert"])
     key_path = home / "agent.key"
     write_private_file(key_path, data["agent_key"].encode("utf-8"))
-    # If the server returned a CA too (legacy), persist it.
-    if "ca_cert" in data and ca_pem is None:
-        (home / "ca.crt").write_text(data["ca_cert"])
     cfg = {
         "leader_url": leader,
         "node_id": data["node_id"],
@@ -323,18 +312,9 @@ def _do_register(
 @agent_app.command("register")
 def register(
     uri: str = typer.Option(
-        None, "--uri",
+        ..., "--uri",
         help="Single-paste enrollment URI from `berth nodes enroll` "
-             "(format: berth://enroll?leader=…&token=…&ca_fp=…). "
-             "Mutually exclusive with --leader/--token.",
-    ),
-    leader: str = typer.Option(
-        None, "--leader",
-        help="https://<leader-host>:<port> (legacy; prefer --uri).",
-    ),
-    token: str = typer.Option(
-        None, "--token",
-        help="Single-use enrollment token (legacy; prefer --uri).",
+             "(format: berth://enroll?leader=...&token=...&ca_fp=...).",
     ),
     reachable_as: str | None = typer.Option(
         None, "--reachable-as",
@@ -343,36 +323,14 @@ def register(
 ):
     """Exchange a one-time enrollment token for a durable agent certificate.
 
-    Prefer the `--uri` form: it bundles the leader URL, token, and CA
-    fingerprint so the agent can detect a swapped CA during the bootstrap
-    download. The legacy `--leader/--token` form remains for scripted
-    setups but cannot pin the CA — use it only when the network path to
-    the leader is trusted."""
-    if uri is not None and (leader is not None or token is not None):
-        raise typer.BadParameter(
-            "--uri is mutually exclusive with --leader/--token"
-        )
-    if uri is None and (leader is None or token is None):
-        raise typer.BadParameter(
-            "provide --uri, or both --leader and --token"
-        )
-
-    if uri is not None:
-        leader_url, token_val, ca_fp = parse_enrollment_uri(uri)
-        ca_pem = _fetch_ca_pinned(leader_url, ca_fp) if ca_fp else None
-        _do_register(
-            leader=leader_url, token=token_val,
-            ca_pem=ca_pem, reachable_as=reachable_as,
-        )
-    else:
-        if leader is None or token is None:
-            raise typer.BadParameter(
-                "provide --uri, or both --leader and --token"
-            )
-        _do_register(
-            leader=leader, token=token,
-            ca_pem=None, reachable_as=reachable_as,
-        )
+    The URI bundles the leader URL, token, and CA fingerprint so the
+    agent can detect a swapped CA during bootstrap."""
+    leader_url, token_val, ca_fp = parse_enrollment_uri(uri)
+    ca_pem = _fetch_ca_pinned(leader_url, ca_fp)
+    _do_register(
+        leader=leader_url, token=token_val,
+        ca_pem=ca_pem, reachable_as=reachable_as,
+    )
 
 
 @agent_app.command("start")
@@ -392,7 +350,7 @@ def start(
     """Run the agent daemon in the foreground."""
     from berth.cluster.agent_client import run_agent
 
-    home = _serve_home()
+    home = _berth_home()
     path = _agent_log_path(home, log_file)
     _configure_agent_logging(path, verbose=verbose)
 
@@ -416,7 +374,7 @@ def logs(
     ),
 ):
     """Show the local agent log file."""
-    path = _agent_log_path(_serve_home(), log_file)
+    path = _agent_log_path(_berth_home(), log_file)
     if not path.exists():
         typer.echo(f"agent log not found: {path}", err=True)
         raise typer.Exit(1)
@@ -437,7 +395,7 @@ def logs(
 @agent_app.command("status")
 def status():
     """Show this host's agent registration status."""
-    home = _serve_home()
+    home = _berth_home()
     cfg_path = home / "agent.yaml"
     if not cfg_path.exists():
         typer.echo("not registered")

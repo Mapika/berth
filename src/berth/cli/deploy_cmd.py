@@ -172,23 +172,22 @@ def _bootstrap(
     behind_proxy: bool,
     sni_443: bool = False,
     leader_only: bool = False,
-    serve_home: Path,
+    berth_home: Path,
     force: bool,
 ) -> dict[str, str]:
     """Pure-ish workhorse: writes config + DB state, returns a dict of
     artefacts the CLI prints. Separated from the typer entry point so
     tests can drive it without invoking the CLI runner."""
-    config.ensure_private_dir(serve_home)
-    # Point all our config constants at this serve_home — important when
-    # operators set SERVE_HOME or pass --serve-home.
-    config.BERTH_DIR = serve_home  # type: ignore[misc]
-    config.MODELS_DIR = serve_home / "models"
-    config.LOGS_DIR = serve_home / "logs"
-    config.CONFIGS_DIR = serve_home / "configs"
-    config.DB_PATH = serve_home / "db.sqlite"
-    config.SOCK_PATH = serve_home / "sock"
-    config.CONFIG_FILE = serve_home / "config.toml"
-    config.LEADER_DIR = serve_home / "leader"
+    config.ensure_private_dir(berth_home)
+    # Point config constants at this home for bootstrap-time writes.
+    config.BERTH_DIR = berth_home  # type: ignore[misc]
+    config.MODELS_DIR = berth_home / "models"
+    config.LOGS_DIR = berth_home / "logs"
+    config.CONFIGS_DIR = berth_home / "configs"
+    config.DB_PATH = berth_home / "db.sqlite"
+    config.SOCK_PATH = berth_home / "sock"
+    config.CONFIG_FILE = berth_home / "config.toml"
+    config.LEADER_DIR = berth_home / "leader"
 
     out: dict[str, str] = {}
     cluster_host = cluster_domain or domain
@@ -231,14 +230,14 @@ def _bootstrap(
     from berth.cluster.ca import generate_ca
     from berth.store import api_keys, db
 
-    ca_dir = serve_home / "ca"
+    ca_dir = berth_home / "ca"
     if not (ca_dir / "ca.crt").exists():
         generate_ca(ca_dir, common_name="berth-ca")
         out["ca_status"] = f"generated {ca_dir}/ca.crt + ca.key (mode 0600)"
     else:
         out["ca_status"] = f"{ca_dir} already provisioned"
 
-    api_keys.configure_pepper(serve_home / "key_pepper")
+    api_keys.configure_pepper(berth_home / "key_pepper")
 
     conn = db.connect(config.DB_PATH)
     db.init_schema(conn)
@@ -285,7 +284,7 @@ def _bootstrap(
 def bootstrap(
     domain: str = typer.Option(
         ..., "--domain",
-        help="Public FQDN clients use to reach the leader, e.g. serve.example.com",
+        help="Public FQDN clients use to reach the leader, e.g. berth.example.com",
     ),
     cluster_domain: str = typer.Option(
         None, "--cluster-domain",
@@ -320,8 +319,8 @@ def bootstrap(
         "running behind Caddy. Mostly useful when you already manage "
         "certs through another mechanism.",
     ),
-    serve_home: str = typer.Option(
-        None, "--serve-home",
+    berth_home: str = typer.Option(
+        None, "--berth-home",
         help="Override the daemon's home directory (default: ~/.berth).",
     ),
     force: bool = typer.Option(
@@ -347,7 +346,7 @@ def bootstrap(
         raise typer.BadParameter("--sni-443 requires --cluster-domain")
     if sni_443 and direct_tls:
         raise typer.BadParameter("--sni-443 cannot be combined with --direct-tls")
-    home = Path(serve_home).expanduser() if serve_home else config.BERTH_DIR
+    home = Path(berth_home).expanduser() if berth_home else config.BERTH_DIR
 
     out = _bootstrap(
         domain=domain,
@@ -358,7 +357,7 @@ def bootstrap(
         behind_proxy=not direct_tls,
         sni_443=sni_443,
         leader_only=leader_only,
-        serve_home=home,
+        berth_home=home,
         force=force,
     )
 
@@ -424,4 +423,4 @@ def bootstrap(
     typer.echo("     berth agent start")
     typer.echo("")
     typer.echo("Back up the DR set (db + ca + key_pepper + config) regularly:")
-    typer.echo("     berth backup create /var/backups/serve-$(date +%F).tar.gz")
+    typer.echo("     berth backup create /var/backups/berth-$(date +%F).tar.gz")

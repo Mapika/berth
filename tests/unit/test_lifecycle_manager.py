@@ -396,7 +396,7 @@ def test_reconcile_fails_loading_container_that_never_becomes_healthy(
 
 def test_load_writes_engine_config_yaml_and_mounts_it(conn, monkeypatch, tmp_path, topo_one_gpu):
     """Backends that return engine_config() get a per-deployment YAML written
-    to configs_dir, mounted at /serve/configs:ro, and --config <in-container path>
+    to configs_dir, mounted at /berth/configs:ro, and --config <in-container path>
     threaded through build_argv. TRT-LLM is the consumer; this test uses a
     minimal stub backend so we can assert without pulling the trtllm image."""
     import yaml
@@ -416,7 +416,7 @@ def test_load_writes_engine_config_yaml_and_mounts_it(conn, monkeypatch, tmp_pat
             )
 
         def build_argv(self, plan, *, local_model_path, config_path=None):
-            argv = ["serve", local_model_path]
+            argv = ["berth", local_model_path]
             if config_path is not None:
                 argv.extend(["--config", config_path])
             return argv
@@ -454,15 +454,15 @@ def test_load_writes_engine_config_yaml_and_mounts_it(conn, monkeypatch, tmp_pat
     # weights dir, default_target_concurrency falls back to floor=8.
     assert payload["n"] == 8
 
-    # Manager mounted configs_dir at /serve/configs:ro and passed the in-container
+    # Manager mounted configs_dir at /berth/configs:ro and passed the in-container
     # path to build_argv via --config.
     call = docker_client.run.call_args
     volumes = call.kwargs["volumes"]
     assert str(configs_dir.resolve()) in volumes
-    assert volumes[str(configs_dir.resolve())] == {"bind": "/serve/configs", "mode": "ro"}
+    assert volumes[str(configs_dir.resolve())] == {"bind": "/berth/configs", "mode": "ro"}
     cmd = call.kwargs["command"]
     i = cmd.index("--config")
-    assert cmd[i + 1] == f"/serve/configs/{dep.id}.yml"
+    assert cmd[i + 1] == f"/berth/configs/{dep.id}.yml"
 
 
 def test_stop_removes_engine_config_yaml(conn, monkeypatch, tmp_path, topo_one_gpu):
@@ -483,7 +483,7 @@ def test_stop_removes_engine_config_yaml(conn, monkeypatch, tmp_path, topo_one_g
             )
 
         def build_argv(self, plan, *, local_model_path, config_path=None):
-            return ["serve", local_model_path]
+            return ["berth", local_model_path]
 
         def engine_config(self, plan):
             return {"k": "v"}

@@ -83,7 +83,7 @@ async def test_enrollment_then_router_routes_through_remote_link(tmp_path):
         backends={"vllm": VLLMBackend()},
         models_dir=tmp_path,
         topology=topology,
-        serve_home=tmp_path,
+        berth_home=tmp_path,
     )
 
     # 1) Enroll a new agent — get back a one-time token.

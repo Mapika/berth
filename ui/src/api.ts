@@ -1,4 +1,4 @@
-const TOKEN_KEY = 'serve.adminToken'
+const TOKEN_KEY = 'berth.adminToken'
 
 export function getToken(): string | null {
   return localStorage.getItem(TOKEN_KEY)
@@ -430,7 +430,7 @@ export function enrollmentUri(r: EnrollResponse): string {
     token: r.token,
     ca_fp: r.ca_fingerprint,
   })
-  return `serve://enroll?${q.toString()}`
+  return `berth://enroll?${q.toString()}`
 }
 
 export type LeaderServerCert =

@@ -39,7 +39,7 @@ async def test_enrollment_uri_flow_end_to_end(tmp_path):
         backends={"vllm": VLLMBackend()},
         models_dir=tmp_path,
         topology=topology,
-        serve_home=tmp_path,
+        berth_home=tmp_path,
     )
     transport = httpx.ASGITransport(app=app)
 
@@ -69,7 +69,7 @@ async def test_enrollment_uri_flow_end_to_end(tmp_path):
         # before trusting the CA. The header MUST match the URI's pin.
         r = await c.get("/admin/ca.pem")
         assert r.status_code == 200
-        assert r.headers["x-serve-ca-fingerprint"] == ca_fp
+        assert r.headers["x-berth-ca-fingerprint"] == ca_fp
         actual_fp = "sha256:" + hashlib.sha256(
             r.text.encode("utf-8")
         ).hexdigest()
@@ -104,12 +104,12 @@ async def test_ca_pem_endpoint_returns_pem_and_fingerprint(tmp_path):
         backends={"vllm": VLLMBackend()},
         models_dir=tmp_path,
         topology=topology,
-        serve_home=tmp_path,
+        berth_home=tmp_path,
     )
     transport = httpx.ASGITransport(app=app)
     async with httpx.AsyncClient(transport=transport, base_url="http://t") as c:
         r = await c.get("/admin/ca.pem")
     assert r.status_code == 200
     assert r.text.startswith("-----BEGIN CERTIFICATE-----")
-    fp = r.headers["x-serve-ca-fingerprint"]
+    fp = r.headers["x-berth-ca-fingerprint"]
     assert fp == "sha256:" + hashlib.sha256(r.text.encode("utf-8")).hexdigest()

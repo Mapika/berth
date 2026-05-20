@@ -1,7 +1,7 @@
 """Boot the daemon for real and verify both TLS listeners respond.
 
 This test spawns `python -m berth.daemon` as a subprocess pointed
-at a tmp_path SERVE_HOME, then connects over HTTPS to both the public
+at a tmp_path BERTH_HOME, then connects over HTTPS to both the public
 and cluster listeners. The cluster CA is loaded directly from the tmp
 home to validate the server cert chain — proving the certs the daemon
 generates at startup load into a real ssl.SSLContext.
@@ -92,7 +92,7 @@ def test_daemon_tls_both_listeners(tmp_path: Path):
         assert r.text.strip() == ca_pem.strip()
         import hashlib
         fp = "sha256:" + hashlib.sha256(r.text.encode("utf-8")).hexdigest()
-        assert r.headers["x-serve-ca-fingerprint"] == fp
+        assert r.headers["x-berth-ca-fingerprint"] == fp
     finally:
         proc.terminate()
         try:
@@ -126,17 +126,17 @@ def test_daemon_control_socket_is_owner_only(tmp_path: Path):
             proc.wait()
 
 
-def test_daemon_serve_home_is_owner_only(tmp_path: Path):
-    serve_home = tmp_path / "home"
-    serve_home.mkdir()
-    serve_home.chmod(0o755)
+def test_daemon_berth_home_is_owner_only(tmp_path: Path):
+    berth_home = tmp_path / "home"
+    berth_home.mkdir()
+    berth_home.chmod(0o755)
     public_port = _free_port()
     cluster_port = _free_port()
-    sock_path = serve_home / "sock"
-    proc = _start_daemon(serve_home, public_port, cluster_port, sock_path)
+    sock_path = berth_home / "sock"
+    proc = _start_daemon(berth_home, public_port, cluster_port, sock_path)
     try:
         _wait_for_port(public_port)
-        mode = stat.S_IMODE(serve_home.stat().st_mode)
+        mode = stat.S_IMODE(berth_home.stat().st_mode)
         assert mode == 0o700
     finally:
         proc.terminate()

@@ -80,7 +80,7 @@ def require_metrics_key(request: Request) -> api_keys.ApiKey | None:
 
     Any non-revoked key (no tier requirement) is accepted — the only goal
     is to keep the deployment inventory / engine URLs / key counts off
-    public scrapers. UDS callers bypass (so `serve metrics` over the
+    public scrapers. UDS callers bypass (so local control commands over the
     local socket still works).
     """
     if _is_local_control_request(request):

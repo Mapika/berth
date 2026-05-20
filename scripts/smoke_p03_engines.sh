@@ -21,9 +21,9 @@ for engine in vllm sglang; do
     curl -sS "http://127.0.0.1:11500/v1/chat/completions" \
       -H "Content-Type: application/json" \
       -d "{\"model\":\"qwen-0_5b\",\"messages\":[{\"role\":\"user\",\"content\":\"Reply OK\"}],\"max_tokens\":8,\"stream\":false}" \
-      | tee "/tmp/serve_p03_$engine.out"
+      | tee "/tmp/berth_p03_$engine.out"
     echo
-    grep -q "OK" "/tmp/serve_p03_$engine.out" || { echo "FAIL: no OK from $engine"; exit 1; }
+    grep -q "OK" "/tmp/berth_p03_$engine.out" || { echo "FAIL: no OK from $engine"; exit 1; }
     berth stop
     sleep 2
 done

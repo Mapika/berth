@@ -95,7 +95,7 @@ def build_apps(
     models_dir: Path,
     topology: Topology | None = None,
     configs_dir: Path | None = None,
-    serve_home: Path | None = None,
+    berth_home: Path | None = None,
     leader_url: str | None = None,
     resolved_cfg: object | None = None,
     leader_only: bool = False,
@@ -171,7 +171,7 @@ def build_apps(
     from berth import config as _cfg
     from berth.cluster.ca import generate_ca, load_ca
     from berth.cluster.enrollment import EnrollmentTokens
-    home = serve_home or _cfg.BERTH_DIR
+    home = berth_home or _cfg.BERTH_DIR
     ca_dir = home / "ca"
     if not (ca_dir / "ca.crt").exists():
         generate_ca(ca_dir, common_name="berth-ca")
@@ -315,11 +315,10 @@ def build_apps(
     import os as _os
 
     from berth.cluster.ca import fingerprint_ca_pem
-    from berth.config import _env_get as _berth_env_get
     from berth.daemon.admin import cluster_router as admin_cluster_router
     resolved_leader_url = (
         leader_url
-        or _berth_env_get(_os.environ, "SERVE_LEADER_URL")
+        or _os.environ.get("BERTH_LEADER_URL")
         or "https://127.0.0.1:11501"
     )
     ca_fingerprint = fingerprint_ca_pem(ca.cert_pem)
@@ -330,7 +329,7 @@ def build_apps(
         app.state.metrics_aggregator = metrics_aggregator
         app.state.routing_affinity = routing_affinity
         # The rate limiter checks these flags to decide whether to honour
-        # X-Forwarded-For. Defaults to False (legacy direct-TLS mode).
+        # X-Forwarded-For. Defaults to False for direct-TLS mode.
         app.state.trust_proxy_headers = bool(
             getattr(resolved_cfg, "trust_proxy_headers", False)
         )
@@ -344,7 +343,7 @@ def build_apps(
         app.state.leader_url = resolved_leader_url
         # Stash the resolved config so /admin/cluster + /admin/config
         # don't re-parse config.toml on every poll. None for the
-        # build_app legacy path (tests) — admin routes fall back to a
+        # build_app test path — admin routes fall back to a
         # fresh resolve when absent.
         app.state.resolved_cfg = resolved_cfg
 
@@ -444,7 +443,7 @@ def build_app(
     backends: dict[str, Backend],
     models_dir: Path,
     topology: Topology | None = None,
-    serve_home: Path | None = None,
+    berth_home: Path | None = None,
 ) -> FastAPI:
     """Single-app factory retained for tests that exercise the full surface."""
     _public, _cluster, uds_app = build_apps(
@@ -453,6 +452,6 @@ def build_app(
         backends=backends,
         models_dir=models_dir,
         topology=topology,
-        serve_home=serve_home,
+        berth_home=berth_home,
     )
     return uds_app

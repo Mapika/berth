@@ -45,22 +45,22 @@ class _FakeWebSocket:
 
 
 def test_forwarded_fingerprint_rejects_untrusted_direct_peer(monkeypatch):
-    monkeypatch.setenv("SERVE_TRUST_FORWARDED_FP", "1")
-    monkeypatch.setenv("SERVE_FORWARDED_ALLOW_IPS", "127.0.0.1")
+    monkeypatch.setenv("BERTH_TRUST_FORWARDED_FP", "1")
+    monkeypatch.setenv("BERTH_FORWARDED_ALLOW_IPS", "127.0.0.1")
     ws = _FakeWebSocket(
         client=("198.51.100.10", 44444),
-        headers={"x-serve-client-fingerprint": "sha256:aaa"},
+        headers={"x-berth-client-fingerprint": "sha256:aaa"},
     )
 
     assert _default_fingerprint_resolver(ws) is None
 
 
 def test_forwarded_fingerprint_accepts_allowed_proxy_peer(monkeypatch):
-    monkeypatch.setenv("SERVE_TRUST_FORWARDED_FP", "1")
-    monkeypatch.setenv("SERVE_FORWARDED_ALLOW_IPS", "127.0.0.1")
+    monkeypatch.setenv("BERTH_TRUST_FORWARDED_FP", "1")
+    monkeypatch.setenv("BERTH_FORWARDED_ALLOW_IPS", "127.0.0.1")
     ws = _FakeWebSocket(
         client=("127.0.0.1", 44444),
-        headers={"x-serve-client-fingerprint": "sha256:aaa"},
+        headers={"x-berth-client-fingerprint": "sha256:aaa"},
     )
 
     assert _default_fingerprint_resolver(ws) == "sha256:aaa"
@@ -71,7 +71,7 @@ def test_forwarded_fingerprint_supports_berth_env_names(monkeypatch):
     monkeypatch.setenv("BERTH_FORWARDED_ALLOW_IPS", "10.0.0.0/8")
     ws = _FakeWebSocket(
         client=("10.2.3.4", 44444),
-        headers={"x-serve-client-fingerprint": "sha256:aaa"},
+        headers={"x-berth-client-fingerprint": "sha256:aaa"},
     )
 
     assert _default_fingerprint_resolver(ws) == "sha256:aaa"

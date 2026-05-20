@@ -457,7 +457,7 @@ class LifecycleManager:
                     self._configs_dir.mkdir(parents=True, exist_ok=True)
                     host_cfg = self._configs_dir / f"{dep.id}.yml"
                     host_cfg.write_text(engine_config_body)
-                container_config_path = f"/serve/configs/{dep.id}.yml"
+                container_config_path = f"/berth/configs/{dep.id}.yml"
 
             container_env = backend.container_env(effective_plan)
 
@@ -479,7 +479,7 @@ class LifecycleManager:
 
                 agent_plan = {
                     "image": plan.image_tag,
-                    "name": f"serve-{plan.backend}-{plan.model_name}-{dep.id}",
+                    "name": f"berth-{plan.backend}-{plan.model_name}-{dep.id}",
                     "command": argv,
                     "environment": container_env,
                     "kwargs": _json_safe_docker_kwargs(
@@ -573,7 +573,7 @@ class LifecycleManager:
             volumes = {str(self._models_dir.resolve()): {"bind": "/cache", "mode": "ro"}}
             if container_config_path is not None:
                 volumes[str(self._configs_dir.resolve())] = {
-                    "bind": "/serve/configs", "mode": "ro",
+                    "bind": "/berth/configs", "mode": "ro",
                 }
 
             argv = backend.build_argv(
@@ -584,7 +584,7 @@ class LifecycleManager:
 
             handle = self._docker.run(
                 image=plan.image_tag,
-                name=f"serve-{plan.backend}-{plan.model_name}-{dep.id}",
+                name=f"berth-{plan.backend}-{plan.model_name}-{dep.id}",
                 command=argv,
                 environment=container_env,
                 kwargs=backend.container_kwargs(effective_plan),

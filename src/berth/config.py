@@ -3,80 +3,22 @@ from __future__ import annotations
 import os
 import socket
 import tomllib
-import warnings
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-# One-shot deprecation tracking — emit each legacy env-var warning at most
-# once per process so a tight loop or many config readers don't spam.
-_DEPRECATED_ENV_WARNED: set[str] = set()
+
+def _env_get(env_map: Mapping[str, str], key: str) -> str | None:
+    """Look up a current berth environment variable."""
+    if not key.startswith("BERTH_"):
+        raise ValueError(f"expected BERTH_* key, got {key!r}")
+    return env_map.get(key)
 
 
-def _env_get(env_map: Mapping[str, str], legacy_serve_key: str) -> str | None:
-    """Look up an env var, preferring `BERTH_X` over the legacy `SERVE_X`.
-
-    The CLI binary, package, and brand are all `berth`; `SERVE_*` env vars
-    are kept for one release with a deprecation warning. Call sites keep
-    using the legacy name — the helper rewrites it to the BERTH_ prefix
-    for the primary lookup.
-    """
-    if not legacy_serve_key.startswith("SERVE_"):
-        raise ValueError(f"expected SERVE_* key, got {legacy_serve_key!r}")
-    berth_key = "BERTH_" + legacy_serve_key[len("SERVE_"):]
-    v = env_map.get(berth_key)
-    if v:
-        return v
-    v = env_map.get(legacy_serve_key)
-    if v:
-        if legacy_serve_key not in _DEPRECATED_ENV_WARNED:
-            _DEPRECATED_ENV_WARNED.add(legacy_serve_key)
-            warnings.warn(
-                f"{legacy_serve_key} is deprecated; use {berth_key} "
-                "(will be removed in a future release)",
-                DeprecationWarning,
-                stacklevel=2,
-            )
-        return v
-    return None
-
-
-BERTH_DIR = Path(_env_get(os.environ, "SERVE_HOME") or Path.home() / ".berth")
+BERTH_DIR = Path(_env_get(os.environ, "BERTH_HOME") or Path.home() / ".berth")
 PRIVATE_DIR_MODE = 0o700
 PRIVATE_FILE_MODE = 0o600
-
-
-def _maybe_migrate_legacy_serve_dir() -> None:
-    """One-shot migration of `~/.serve` to `~/.berth` for pre-rename installs.
-
-    Runs at module load so any caller that reads BERTH_DIR after import
-    sees the moved tree. Only fires on the default path: an explicit
-    BERTH_HOME or legacy SERVE_HOME means the operator chose a custom
-    location and we must not move anything. Also skips when `~/.berth`
-    already exists — we refuse to merge two trees automatically.
-    """
-    default_path = Path.home() / ".berth"
-    if BERTH_DIR.resolve() != default_path.resolve():
-        return
-    if default_path.exists():
-        return
-    legacy = Path.home() / ".serve"
-    if not legacy.exists():
-        return
-    try:
-        legacy.rename(default_path)
-    except OSError as e:
-        # Pre-logging-setup, so write to stderr directly.
-        import sys
-        print(
-            f"[berth] WARNING: could not migrate {legacy} -> {default_path}: {e}. "
-            "Move the directory by hand and retry.",
-            file=sys.stderr,
-        )
-
-
-_maybe_migrate_legacy_serve_dir()
 MODELS_DIR = BERTH_DIR / "models"
 LOGS_DIR = BERTH_DIR / "logs"
 CONFIGS_DIR = BERTH_DIR / "configs"  # per-deployment engine YAMLs (TRT-LLM --config)
@@ -118,7 +60,7 @@ class ResolvedConfig:
     public_scheme: str = "https"  # "http" when behind a TLS-terminating proxy
     trust_proxy_headers: bool = False
     forwarded_allow_ips: str = "127.0.0.1"
-    leader_url_override: str | None = None  # BERTH_LEADER_URL (legacy: SERVE_LEADER_URL)
+    leader_url_override: str | None = None
     # Control-plane only mode. When True the daemon does not require local
     # Docker or NVIDIA: it serves /v1/*, /admin/*, /metrics, the UI, and the
     # cluster listener, but all deployments must target a remote agent
@@ -315,20 +257,20 @@ def resolve_config(
         return default
 
     public_host = _pick(
-        "public_host", cli_public_host, "SERVE_PUBLIC_HOST",
+        "public_host", cli_public_host, "BERTH_PUBLIC_HOST",
         public_file, "host", DEFAULT_PUBLIC_HOST,
         autodetect=autodetect_outbound_ip,
     )
     public_port = _pick(
-        "public_port", cli_public_port, "SERVE_PUBLIC_PORT",
+        "public_port", cli_public_port, "BERTH_PUBLIC_PORT",
         public_file, "port", DEFAULT_PUBLIC_PORT,
     )
     public_bind = _pick(
-        "public_bind", cli_public_bind, "SERVE_PUBLIC_BIND",
+        "public_bind", cli_public_bind, "BERTH_PUBLIC_BIND",
         public_file, "bind", DEFAULT_BIND,
     )
     cluster_host = _pick(
-        "cluster_host", cli_cluster_host, "SERVE_CLUSTER_HOST",
+        "cluster_host", cli_cluster_host, "BERTH_CLUSTER_HOST",
         cluster_file, "host", public_host,  # default to public_host
     )
     if source["cluster_host"] == "default":
@@ -337,30 +279,30 @@ def resolve_config(
             f"inherit:public_host({source['public_host']})"
         )
     cluster_port = _pick(
-        "cluster_port", cli_cluster_port, "SERVE_CLUSTER_PORT",
+        "cluster_port", cli_cluster_port, "BERTH_CLUSTER_PORT",
         cluster_file, "port", DEFAULT_CLUSTER_PORT,
     )
     cluster_bind = _pick(
-        "cluster_bind", cli_cluster_bind, "SERVE_CLUSTER_BIND",
+        "cluster_bind", cli_cluster_bind, "BERTH_CLUSTER_BIND",
         cluster_file, "bind", DEFAULT_BIND,
     )
     public_cert = _pick(
-        "public_cert_path", cli_public_cert, "SERVE_PUBLIC_CERT",
+        "public_cert_path", cli_public_cert, "BERTH_PUBLIC_CERT",
         tls_file, "cert", None,
     )
     public_key = _pick(
-        "public_key_path", cli_public_key, "SERVE_PUBLIC_KEY",
+        "public_key_path", cli_public_key, "BERTH_PUBLIC_KEY",
         tls_file, "key", None,
     )
     # Reverse-proxy mode. When set, the daemon binds plain HTTP on the
     # public listener (Caddy/Nginx terminates TLS upstream) and trusts
     # X-Forwarded-* headers from the configured proxy IPs.
     public_scheme = _pick(
-        "public_scheme", None, "SERVE_PUBLIC_SCHEME",
+        "public_scheme", None, "BERTH_PUBLIC_SCHEME",
         public_file, "scheme", "https",
     )
     trust_proxy_headers_raw = _pick(
-        "trust_proxy_headers", None, "SERVE_TRUST_PROXY_HEADERS",
+        "trust_proxy_headers", None, "BERTH_TRUST_PROXY_HEADERS",
         public_file, "trust_proxy_headers", False,
     )
     trust_proxy_headers = (
@@ -369,11 +311,11 @@ def resolve_config(
         else trust_proxy_headers_raw
     )
     forwarded_allow_ips = _pick(
-        "forwarded_allow_ips", None, "SERVE_FORWARDED_ALLOW_IPS",
+        "forwarded_allow_ips", None, "BERTH_FORWARDED_ALLOW_IPS",
         public_file, "forwarded_allow_ips", "127.0.0.1",
     )
     leader_only_raw = _pick(
-        "leader_only", cli_leader_only, "SERVE_LEADER_ONLY",
+        "leader_only", cli_leader_only, "BERTH_LEADER_ONLY",
         server_file, "leader_only", False,
     )
     leader_only = (
@@ -383,7 +325,7 @@ def resolve_config(
     )
     unsafe_deploy_raw = _pick(
         "allow_unsafe_deploy_options", cli_allow_unsafe_deploy_options,
-        "SERVE_ALLOW_UNSAFE_DEPLOY_OPTIONS",
+        "BERTH_ALLOW_UNSAFE_DEPLOY_OPTIONS",
         server_file, "allow_unsafe_deploy_options", False,
     )
     allow_unsafe_deploy_options = (
@@ -391,14 +333,9 @@ def resolve_config(
         if not isinstance(unsafe_deploy_raw, bool)
         else unsafe_deploy_raw
     )
-    leader_override = _env_get(env_map, "SERVE_LEADER_URL")
+    leader_override = _env_get(env_map, "BERTH_LEADER_URL")
     if leader_override:
-        # Tag with whichever name the operator actually set.
-        source["leader_url"] = (
-            "env:BERTH_LEADER_URL"
-            if env_map.get("BERTH_LEADER_URL")
-            else "env:SERVE_LEADER_URL"
-        )
+        source["leader_url"] = "env:BERTH_LEADER_URL"
 
     def _as_int(value: object) -> int:
         if isinstance(value, int):

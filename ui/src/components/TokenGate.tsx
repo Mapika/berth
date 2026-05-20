@@ -11,7 +11,7 @@ export default function TokenGate({ children }: { children: React.ReactNode }) {
         <div className="w-full max-w-md enter">
           <div className="flex items-center gap-2 mb-12">
             <div className="text-base">
-              serve<span className="text-accent">-</span>engine
+              berth
             </div>
             <span className="caret" />
           </div>
@@ -24,7 +24,7 @@ export default function TokenGate({ children }: { children: React.ReactNode }) {
               </p>
               <pre className="text-[12px] bg-elev border border-rule px-3 py-2 text-ink overflow-x-auto">
                 <span className="text-mute select-none">$ </span>
-                serve key create web --tier admin
+                berth key create web --tier admin
               </pre>
             </div>
             <div className="space-y-3">

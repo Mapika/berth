@@ -1,8 +1,8 @@
 # berth daemon as a container.
 #
 # Build:  docker build -f docker/daemon.Dockerfile -t berth:dev .
-# Run:    docker run -d --name serve --network host \
-#             -v ~/.serve:/root/.serve \
+# Run:    docker run -d --name berth --network host \
+#             -v ~/.berth:/root/.berth \
 #             -v /var/run/docker.sock:/var/run/docker.sock \
 #             berth:dev
 #
@@ -28,6 +28,6 @@ COPY README.md ./
 RUN uv pip install --system --no-cache .
 
 EXPOSE 11500
-VOLUME ["/root/.serve"]
+VOLUME ["/root/.berth"]
 
-CMD ["python3", "-m", "berth.daemon", "--host", "0.0.0.0", "--port", "11500"]
+CMD ["python3", "-m", "berth.daemon", "--public-bind", "0.0.0.0", "--public-port", "11500"]

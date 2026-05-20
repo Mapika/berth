@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import os
 import stat
 
@@ -15,6 +16,8 @@ def test_register_writes_config(tmp_path, monkeypatch):
     home.mkdir()
     home.chmod(0o755)
     monkeypatch.setenv("BERTH_HOME", str(home))
+    ca_pem = "-----BEGIN CERTIFICATE-----\nC\n-----END CERTIFICATE-----\n"
+    ca_fp = "sha256:" + hashlib.sha256(ca_pem.encode("utf-8")).hexdigest()
 
     class _MockResp:
         status_code = 200
@@ -28,27 +31,39 @@ def test_register_writes_config(tmp_path, monkeypatch):
                     "PRIVATE KEY-----\nB\n-----END "
                     "PRIVATE KEY-----\n"
                 ),
-                "ca_cert":    "-----BEGIN CERTIFICATE-----\nC\n-----END CERTIFICATE-----\n",
             }
 
     posted: dict = {}
 
-    def _post(url, json, timeout=None):
+    def _get(url, verify=None, timeout=None):
+        class _CAResp:
+            text = ca_pem
+
+            def raise_for_status(self): pass
+
+        return _CAResp()
+
+    def _post(url, json, verify=None, timeout=None):
         posted["url"] = url
         posted["json"] = json
+        posted["verify"] = verify
         return _MockResp()
 
+    monkeypatch.setattr(httpx, "get", _get)
     monkeypatch.setattr(httpx, "post", _post)
 
     r = CliRunner().invoke(app, [
         "agent", "register",
-        "--leader", "https://leader.example:11500",
-        "--token", "tok-123",
+        "--uri", (
+            "berth://enroll?leader=https%3A%2F%2Fleader.example%3A11500"
+            f"&token=tok-123&ca_fp={ca_fp}"
+        ),
     ])
     assert r.exit_code == 0, r.output
 
     assert posted["url"].endswith("/admin/nodes/register")
     assert posted["json"]["token"] == "tok-123"
+    assert posted["verify"] == str(home / "ca.crt")
     assert "host_info" in posted["json"]
 
     cfg = yaml.safe_load((home / "agent.yaml").read_text())
@@ -61,6 +76,17 @@ def test_register_writes_config(tmp_path, monkeypatch):
     # Key file should be 0o600.
     mode = (home / "agent.key").stat().st_mode & 0o777
     assert mode == 0o600
+
+
+def test_register_rejects_legacy_leader_token_flags(tmp_path, monkeypatch):
+    monkeypatch.setenv("BERTH_HOME", str(tmp_path))
+    r = CliRunner().invoke(app, [
+        "agent", "register",
+        "--leader", "https://leader.example:11500",
+        "--token", "tok-123",
+    ])
+    assert r.exit_code != 0
+    assert "No such option" in r.output
 
 
 def test_register_agent_key_owner_only_if_write_stops_before_chmod(
@@ -86,10 +112,9 @@ def test_register_agent_key_owner_only_if_write_stops_before_chmod(
                     "PRIVATE KEY-----\nB\n-----END "
                     "PRIVATE KEY-----\n"
                 ),
-                "ca_cert": "-----BEGIN CERTIFICATE-----\nC\n-----END CERTIFICATE-----\n",
             }
 
-    def _post(url, json, timeout=None):
+    def _post(url, json, verify=None, timeout=None):
         return _MockResp()
 
     real_chmod = os.chmod
@@ -109,7 +134,7 @@ def test_register_agent_key_owner_only_if_write_stops_before_chmod(
             _do_register(
                 leader="https://leader.example:11500",
                 token="tok-123",
-                ca_pem=None,
+                ca_pem="-----BEGIN CERTIFICATE-----\nC\n-----END CERTIFICATE-----\n",
                 reachable_as=None,
             )
         except RuntimeError:

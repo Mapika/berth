@@ -149,7 +149,7 @@ def test_heartbeat_round_trips_with_metrics():
     assert decoded.metrics["deployments"][0]["in_flight"] == 3
 
 
-def test_legacy_heartbeat_wire_format_still_decodes():
+def test_heartbeat_wire_format_decodes():
     raw = '{"type": "heartbeat", "ts": 1234.5}'
     decoded = decode_frame(raw)
     assert isinstance(decoded, Heartbeat)

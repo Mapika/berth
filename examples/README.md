@@ -12,13 +12,13 @@ admin API.
 Apply the profile and route:
 
 ```bash
-curl -k -X POST "$SERVE_URL/admin/service-profiles" \
-  -H "Authorization: Bearer $SERVE_TOKEN" \
+curl -k -X POST "$BERTH_URL/admin/service-profiles" \
+  -H "Authorization: Bearer $BERTH_TOKEN" \
   -H "Content-Type: application/json" \
   --data @examples/service-profile-qwen.json
 
-curl -k -X POST "$SERVE_URL/admin/routes" \
-  -H "Authorization: Bearer $SERVE_TOKEN" \
+curl -k -X POST "$BERTH_URL/admin/routes" \
+  -H "Authorization: Bearer $BERTH_TOKEN" \
   -H "Content-Type: application/json" \
   --data @examples/service-route-chat.json
 ```

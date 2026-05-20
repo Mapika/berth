@@ -28,7 +28,7 @@ app.add_typer(backup_app, name="backup")
 def create_backup(
     dest: str = typer.Argument(
         ...,
-        help="Path to write the tarball, e.g. /var/backups/serve-2026-05-20.tar.gz",
+        help="Path to write the tarball, e.g. /var/backups/berth-2026-05-20.tar.gz",
     ),
 ) -> None:
     """Tarball db.sqlite (consistent .backup snapshot), ca/, key_pepper, config.toml."""

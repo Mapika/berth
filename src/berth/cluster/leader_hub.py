@@ -3,7 +3,6 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
-import os
 import sqlite3
 import time
 from collections.abc import Callable
@@ -40,10 +39,10 @@ def _peer_cert_fingerprint(ws: WebSocket) -> str | None:
 
     Requires the cluster listener to be started with our
     `TLSAwareWebSocketProtocol`, which injects the SSL object into
-    `scope["extensions"]["serve.tls"]["ssl_object"]`. Returns None if no
+    `scope["extensions"]["berth.tls"]["ssl_object"]`. Returns None if no
     client cert was presented (callers reject the connection in that
     case)."""
-    tls_ext = ws.scope.get("extensions", {}).get("serve.tls")
+    tls_ext = ws.scope.get("extensions", {}).get("berth.tls")
     if not tls_ext:
         return None
     ssl_obj = tls_ext.get("ssl_object")
@@ -61,31 +60,25 @@ def _peer_cert_fingerprint(ws: WebSocket) -> str | None:
 def _default_fingerprint_resolver(ws: WebSocket) -> str | None:
     """Production resolver: trust the TLS layer's peer cert.
 
-    Falls back to an `x-serve-client-fingerprint` header only if a
+    Falls back to an `x-berth-client-fingerprint` header only if a
     proxy is explicitly configured to forward it via
-    `BERTH_TRUST_FORWARDED_FP=1` (legacy: `SERVE_TRUST_FORWARDED_FP=1`)
-    and the direct TCP peer is in `BERTH_FORWARDED_ALLOW_IPS` (legacy:
-    `SERVE_FORWARDED_ALLOW_IPS`). This preserves old reverse-proxy
-    deployments as an opt-in without accepting spoofed headers from
-    arbitrary internet clients."""
+    `BERTH_TRUST_FORWARDED_FP=1` and the direct TCP peer is in
+    `BERTH_FORWARDED_ALLOW_IPS`."""
     fp = _peer_cert_fingerprint(ws)
     if fp is not None:
         return fp
-    if _env_get("SERVE_TRUST_FORWARDED_FP") == "1":
+    import os
+
+    if os.environ.get("BERTH_TRUST_FORWARDED_FP") == "1":
         client_host = _websocket_client_host(ws)
-        allowlist = _env_get("SERVE_FORWARDED_ALLOW_IPS") or "127.0.0.1"
+        allowlist = os.environ.get("BERTH_FORWARDED_ALLOW_IPS") or "127.0.0.1"
         if client_host is not None and _allowed_proxy(client_host, allowlist):
-            return ws.headers.get("x-serve-client-fingerprint")
+            return ws.headers.get("x-berth-client-fingerprint")
         log.warning(
             "cluster ws reject: forwarded fingerprint from untrusted peer %s",
             client_host,
         )
     return None
-
-
-def _env_get(legacy_serve_key: str) -> str | None:
-    berth_key = "BERTH_" + legacy_serve_key[len("SERVE_"):]
-    return os.environ.get(berth_key) or os.environ.get(legacy_serve_key)
 
 
 def _allowed_proxy(host: str, allowlist: str) -> bool:

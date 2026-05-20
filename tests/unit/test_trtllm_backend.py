@@ -133,10 +133,10 @@ def test_build_argv_includes_config_flag_when_path_given():
     """When the manager hands us a config_path, --config <path> appears once."""
     argv = TRTLLMBackend().build_argv(
         _plan(), local_model_path="/models/x",
-        config_path="/serve/configs/42.yml",
+        config_path="/berth/configs/42.yml",
     )
     i = argv.index("--config")
-    assert argv[i + 1] == "/serve/configs/42.yml"
+    assert argv[i + 1] == "/berth/configs/42.yml"
     assert argv.count("--config") == 1
 
 

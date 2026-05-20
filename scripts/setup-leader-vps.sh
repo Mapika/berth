@@ -133,7 +133,7 @@ chown -R berth:berth "$BERTH_SRC"
 
 echo "==> Installing berth into ${BERTH_VENV} with hash-pinned deps"
 # Always recreate the venv. This wipes ~* partial-install markers that older
-# runs (including the pre-rename ``serve-engine`` package) leave behind in
+# runs leave behind in
 # site-packages, which otherwise spam pip warnings on every subsequent install.
 rm -rf "$BERTH_VENV"
 run_as_berth python3 -m venv "$BERTH_VENV"
@@ -177,7 +177,7 @@ BOOTSTRAP_ARGS=(
   --public-port "$PUBLIC_PORT"
   --cluster-port "$CLUSTER_PORT"
   --public-tls-port "$CADDY_TLS_PORT"
-  --serve-home "$BERTH_HOME"
+  --berth-home "$BERTH_HOME"
 )
 if [[ "$FORCE" == "1" ]]; then
   BOOTSTRAP_ARGS+=(--force)

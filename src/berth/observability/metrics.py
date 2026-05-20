@@ -8,20 +8,20 @@ from berth.daemon.metrics_aggregator import MetricsAggregator, safe_metric_int
 from berth.observability.trtllm_metrics import translate_many
 
 _CLUSTER_HELP_BLOCK = """\
-# HELP serve_node_gpu_util_pct Per-GPU utilization percent.
-# TYPE serve_node_gpu_util_pct gauge
-# HELP serve_node_gpu_mem_used_bytes Per-GPU memory used in bytes.
-# TYPE serve_node_gpu_mem_used_bytes gauge
-# HELP serve_deployment_in_flight Per-deployment in-flight request count.
-# TYPE serve_deployment_in_flight gauge
-# HELP serve_deployment_requests_total Per-deployment requests in the last window.
-# TYPE serve_deployment_requests_total counter
-# HELP serve_deployment_latency_p50_ms Per-deployment p50 latency (ms).
-# TYPE serve_deployment_latency_p50_ms gauge
-# HELP serve_deployment_latency_p95_ms Per-deployment p95 latency (ms).
-# TYPE serve_deployment_latency_p95_ms gauge
-# HELP serve_deployment_errors_total Per-deployment error count in the last window.
-# TYPE serve_deployment_errors_total counter
+# HELP berth_node_gpu_util_pct Per-GPU utilization percent.
+# TYPE berth_node_gpu_util_pct gauge
+# HELP berth_node_gpu_mem_used_bytes Per-GPU memory used in bytes.
+# TYPE berth_node_gpu_mem_used_bytes gauge
+# HELP berth_deployment_in_flight Per-deployment in-flight request count.
+# TYPE berth_deployment_in_flight gauge
+# HELP berth_deployment_requests_total Per-deployment requests in the last window.
+# TYPE berth_deployment_requests_total counter
+# HELP berth_deployment_latency_p50_ms Per-deployment p50 latency (ms).
+# TYPE berth_deployment_latency_p50_ms gauge
+# HELP berth_deployment_latency_p95_ms Per-deployment p95 latency (ms).
+# TYPE berth_deployment_latency_p95_ms gauge
+# HELP berth_deployment_errors_total Per-deployment error count in the last window.
+# TYPE berth_deployment_errors_total counter
 """
 
 
@@ -55,11 +55,11 @@ def format_cluster_metrics(
         for g in sample.get("gpus", []):
             gpu = _label_value(g.get("index", -1))
             lines.append(
-                f'serve_node_gpu_util_pct{{node="{node}",gpu="{gpu}"}} '
+                f'berth_node_gpu_util_pct{{node="{node}",gpu="{gpu}"}} '
                 f'{safe_metric_int(g.get("util_pct", 0))}'
             )
             lines.append(
-                f'serve_node_gpu_mem_used_bytes{{node="{node}",gpu="{gpu}"}} '
+                f'berth_node_gpu_mem_used_bytes{{node="{node}",gpu="{gpu}"}} '
                 f'{safe_metric_int(g.get("mem_used_mb", 0)) * 1024 * 1024}'
             )
         for d in sample.get("deployments", []):
@@ -67,23 +67,23 @@ def format_cluster_metrics(
             model = _label_value(d.get("model_id", ""))
             tail = f'{{node="{node}",deployment="{dep}",model="{model}"}}'
             lines.append(
-                f'serve_deployment_in_flight{tail} '
+                f'berth_deployment_in_flight{tail} '
                 f'{safe_metric_int(d.get("in_flight", 0))}'
             )
             lines.append(
-                f'serve_deployment_requests_total{tail} '
+                f'berth_deployment_requests_total{tail} '
                 f'{safe_metric_int(d.get("requests_last_window", 0))}'
             )
             lines.append(
-                f'serve_deployment_latency_p50_ms{tail} '
+                f'berth_deployment_latency_p50_ms{tail} '
                 f'{safe_metric_int(d.get("latency_p50_ms", 0))}'
             )
             lines.append(
-                f'serve_deployment_latency_p95_ms{tail} '
+                f'berth_deployment_latency_p95_ms{tail} '
                 f'{safe_metric_int(d.get("latency_p95_ms", 0))}'
             )
             lines.append(
-                f'serve_deployment_errors_total{tail} '
+                f'berth_deployment_errors_total{tail} '
                 f'{safe_metric_int(d.get("errors_last_window", 0))}'
             )
     return "\n".join(lines) + "\n"
@@ -97,19 +97,19 @@ def format_daemon_metrics(
     request_count: int,
 ) -> str:
     lines: list[str] = []
-    lines.append("# HELP serve_deployments Count of deployments by status.")
-    lines.append("# TYPE serve_deployments gauge")
+    lines.append("# HELP berth_deployments Count of deployments by status.")
+    lines.append("# TYPE berth_deployments gauge")
     for status, n in sorted(deployments_by_status.items()):
-        lines.append(f'serve_deployments{{status="{_label_value(status)}"}} {n}')
-    lines.append("# HELP serve_models_total Number of registered models.")
-    lines.append("# TYPE serve_models_total gauge")
-    lines.append(f"serve_models_total {models_total}")
-    lines.append("# HELP serve_api_keys_active Number of non-revoked API keys.")
-    lines.append("# TYPE serve_api_keys_active gauge")
-    lines.append(f"serve_api_keys_active {api_keys_active}")
-    lines.append("# HELP serve_proxy_requests_total Total /v1/* requests processed.")
-    lines.append("# TYPE serve_proxy_requests_total counter")
-    lines.append(f"serve_proxy_requests_total {request_count}")
+        lines.append(f'berth_deployments{{status="{_label_value(status)}"}} {n}')
+    lines.append("# HELP berth_models_total Number of registered models.")
+    lines.append("# TYPE berth_models_total gauge")
+    lines.append(f"berth_models_total {models_total}")
+    lines.append("# HELP berth_api_keys_active Number of non-revoked API keys.")
+    lines.append("# TYPE berth_api_keys_active gauge")
+    lines.append(f"berth_api_keys_active {api_keys_active}")
+    lines.append("# HELP berth_proxy_requests_total Total /v1/* requests processed.")
+    lines.append("# TYPE berth_proxy_requests_total counter")
+    lines.append(f"berth_proxy_requests_total {request_count}")
     return "\n".join(lines) + "\n"
 
 
