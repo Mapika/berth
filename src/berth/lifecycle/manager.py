@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import math
 import sqlite3
 from dataclasses import replace
 from pathlib import Path
@@ -33,6 +34,7 @@ from berth.store import deployment_adapters as da_store
 from berth.store import deployment_plans as plan_store
 from berth.store import deployments as dep_store
 from berth.store import models as model_store
+from berth.store import node_gpus as node_gpus_store
 from berth.store import nodes as nodes_store
 
 log = logging.getLogger(__name__)
@@ -68,6 +70,35 @@ def _json_safe_docker_kwargs(kw: dict) -> dict:
     if ulimits:
         out["ulimits"] = [_ulimit_to_dict(u) for u in ulimits]
     return out
+
+
+def _remote_vram_reservation_mb(
+    conn: sqlite3.Connection,
+    *,
+    node_id: int,
+    gpu_ids: list[int],
+    gpu_memory_utilization: float,
+) -> int:
+    """Best-effort reservation for an explicitly targeted remote deploy.
+
+    The leader must not download remote model weights just to estimate VRAM.
+    Remote engines are launched with a memory-utilization fraction, so the
+    selected GPU inventory is the safest lightweight reservation signal.
+    """
+    if not gpu_ids:
+        return 0
+    by_index = {
+        g.gpu_index: g.total_vram_mb
+        for g in node_gpus_store.list_for_node(conn, node_id)
+    }
+    selected = [by_index[i] for i in gpu_ids if i in by_index]
+    if not selected:
+        node = nodes_store.get(conn, node_id)
+        if node is None or node.gpu_count <= 0:
+            return 0
+        per_gpu = node.total_vram_mb / node.gpu_count
+        selected = [int(per_gpu) for _ in gpu_ids]
+    return int(math.ceil(sum(selected) * gpu_memory_utilization))
 
 
 async def _dispatch_start(
@@ -238,32 +269,67 @@ class LifecycleManager:
                 )
 
             local_path = model.local_path
-            if local_path is None:
+            if local_path is not None and not Path(local_path).exists():
+                if is_remote:
+                    log.warning(
+                        "remote deploy %s ignoring stale leader-local model path %s",
+                        plan.model_name, local_path,
+                    )
+                    local_path = None
+                else:
+                    log.warning(
+                        "local model path %s for %s is missing; re-downloading",
+                        local_path, plan.model_name,
+                    )
+                    local_path = None
+            if local_path is None and not is_remote:
                 local_path = await download_model_async(
                     hf_repo=plan.hf_repo,
                     revision=plan.revision,
                     cache_dir=self._models_dir,
                 )
                 model_store.set_local_path(self._conn, model.id, local_path)
+            elif local_path is None and is_remote:
+                log.info(
+                    "remote deploy %s on node %s: skipping leader-side model "
+                    "download; agent will fetch %s@%s",
+                    plan.model_name, target_node_id, plan.hf_repo, plan.revision,
+                )
 
             if plan.target_concurrency is None:
-                target_concurrency = default_target_concurrency(
-                    Path(local_path),
-                    max_model_len=plan.max_model_len,
-                    dtype=plan.dtype,
-                )
-                log.info(
-                    "auto target_concurrency=%d for %s (ctx=%d, dtype=%s)",
-                    target_concurrency, plan.model_name, plan.max_model_len, plan.dtype,
-                )
+                if local_path is None:
+                    target_concurrency = 8
+                    log.info(
+                        "remote deploy %s: using fallback target_concurrency=%d "
+                        "(no leader-local model config)",
+                        plan.model_name, target_concurrency,
+                    )
+                else:
+                    target_concurrency = default_target_concurrency(
+                        Path(local_path),
+                        max_model_len=plan.max_model_len,
+                        dtype=plan.dtype,
+                    )
+                    log.info(
+                        "auto target_concurrency=%d for %s (ctx=%d, dtype=%s)",
+                        target_concurrency, plan.model_name, plan.max_model_len, plan.dtype,
+                    )
             else:
                 target_concurrency = plan.target_concurrency
-            vram_mb = estimate_vram_mb(KVEstimateInput(
-                model_dir=Path(local_path),
-                max_model_len=plan.max_model_len,
-                target_concurrency=target_concurrency,
-                dtype=plan.dtype,
-            ))
+            if local_path is None:
+                vram_mb = _remote_vram_reservation_mb(
+                    self._conn,
+                    node_id=target_node_id,
+                    gpu_ids=list(plan.gpu_ids),
+                    gpu_memory_utilization=plan.gpu_memory_utilization,
+                )
+            else:
+                vram_mb = estimate_vram_mb(KVEstimateInput(
+                    model_dir=Path(local_path),
+                    max_model_len=plan.max_model_len,
+                    target_concurrency=target_concurrency,
+                    dtype=plan.dtype,
+                ))
 
             priors = [
                 d for d in dep_store.list_ready(self._conn) if d.model_id == model.id

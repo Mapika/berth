@@ -93,22 +93,17 @@ async def test_remote_dispatch_routes_via_agentlink(tmp_path, monkeypatch):
         side_effect=AssertionError("leader docker must not be called for remote deploy"),
     )
 
-    # Patch model download to a no-op so the test doesn't reach out to HF.
-    fake_path = tmp_path / "model"
-    fake_path.mkdir()
-    # Minimal config.json for KV estimation. Use real Qwen-style shape.
-    (fake_path / "config.json").write_text(json.dumps({
-        "hidden_size": 1024, "num_attention_heads": 16,
-        "num_key_value_heads": 16, "num_hidden_layers": 24,
-        "max_position_embeddings": 4096, "vocab_size": 151936,
-        "torch_dtype": "bfloat16",
-    }))
-
-    async def _fake_download(**_kw):
-        return str(fake_path)
-
+    download_model = AsyncMock(
+        side_effect=AssertionError("leader must not download for remote deploy")
+    )
     monkeypatch.setattr(
-        "berth.lifecycle.manager.download_model_async", _fake_download,
+        "berth.lifecycle.manager.download_model_async", download_model,
+    )
+    estimate_vram = MagicMock(
+        side_effect=AssertionError("leader must not estimate from local weights")
+    )
+    monkeypatch.setattr(
+        "berth.lifecycle.manager.estimate_vram_mb", estimate_vram,
     )
 
     topology = Topology(
@@ -157,15 +152,20 @@ async def test_remote_dispatch_routes_via_agentlink(tmp_path, monkeypatch):
     assert captured["model_sentinel"] == "__BERTH_MODEL_PATH__"
     # Argv contains the sentinel (not a leader-side path).
     assert any("__BERTH_MODEL_PATH__" in a for a in captured["command"])
+    assert "--max-num-seqs" in captured["command"]
+    assert captured["command"][captured["command"].index("--max-num-seqs") + 1] == "8"
     # Volumes are NOT set (agent constructs them) — leader-side paths must not leak.
     assert "volumes" not in captured
     # docker.run on the leader was not called.
     docker_client.run.assert_not_called()
+    download_model.assert_not_awaited()
+    estimate_vram.assert_not_called()
     # Deployment row is marked ready with the remote node_id.
     final = dep_store.get_by_id(conn, dep.id)
     assert final is not None
     assert final.status == "ready"
     assert final.node_id == remote.id
+    assert final.vram_reserved_mb == 7373
     assert final.container_id == "cid-remote"
     assert captured_probe["container_id"] == "cid-remote"
     assert captured_probe["path"] == VLLMBackend().health_path
