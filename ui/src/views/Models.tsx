@@ -1,6 +1,6 @@
 import { Fragment, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { api, queryKeys, type LoadDeploymentBody, type Model } from '../api'
+import { api, queryKeys, type Deployment, type LoadDeploymentBody, type Model } from '../api'
 import { parseGpuIds, parseMaxModelLen, remoteNodeLabel } from '../launchForm'
 
 type LauncherForm = {
@@ -17,6 +17,32 @@ const DEFAULT_FORM: LauncherForm = {
   gpuIds: '0',
   pinned: false,
   nodeLabel: '',
+}
+
+const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms))
+
+function isDroppedFetch(e: unknown): boolean {
+  return e instanceof TypeError && /failed to fetch|network/i.test(e.message)
+}
+
+async function recoverStartedDeployment(
+  modelId: number,
+  beforeMaxId: number,
+): Promise<Deployment> {
+  for (let i = 0; i < 15; i += 1) {
+    const rows = await api.listDeployments()
+    const dep = rows
+      .filter(d => d.id > beforeMaxId && d.model_id === modelId)
+      .sort((a, b) => b.id - a.id)[0]
+    if (dep) {
+      if (dep.status === 'failed') {
+        throw new Error(dep.last_error || 'deployment failed after it started')
+      }
+      return dep
+    }
+    await sleep(1000)
+  }
+  throw new Error('deployment request disconnected before a new deployment appeared')
 }
 
 export default function Models() {
@@ -43,7 +69,7 @@ export default function Models() {
     onSuccess: () => qc.invalidateQueries({ queryKey: queryKeys.models }),
   })
   const launchModel = useMutation({
-    mutationFn: (m: Model) => {
+    mutationFn: async (m: Model) => {
       const gpuIds = parseGpuIds(form.gpuIds)
       const maxLen = parseMaxModelLen(form.maxModelLen)
       const payload: LoadDeploymentBody = {
@@ -55,7 +81,14 @@ export default function Models() {
       }
       if (form.backend) payload.backend = form.backend
       payload.node_label = remoteNodeLabel(form.nodeLabel)
-      return api.loadModel(payload)
+      const before = await api.listDeployments()
+      const beforeMaxId = before.reduce((max, d) => Math.max(max, d.id), 0)
+      try {
+        return await api.loadModel(payload)
+      } catch (e) {
+        if (!isDroppedFetch(e)) throw e
+        return recoverStartedDeployment(m.id, beforeMaxId)
+      }
     },
     onMutate: () => setLaunchError(''),
     onSuccess: () => {
