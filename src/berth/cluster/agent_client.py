@@ -5,6 +5,7 @@ import base64
 import logging
 import ssl
 from collections.abc import Awaitable, Callable
+from contextlib import suppress
 from pathlib import Path
 from typing import Any
 
@@ -65,6 +66,24 @@ def build_heartbeat_frame(
 
 log = logging.getLogger(__name__)
 StatusCallback = Callable[[str, dict[str, Any]], None]
+
+
+class SerializedSender:
+    """Serialize writes to a websocket-like send callable.
+
+    The agent sends heartbeats, op results, HTTP chunks, and log chunks
+    from different tasks. Keeping those writes behind one lock avoids
+    concurrent websocket writes when the UI starts streaming through the
+    tunnel.
+    """
+
+    def __init__(self, send: Callable[[str], Awaitable[None]]) -> None:
+        self._send = send
+        self._lock = asyncio.Lock()
+
+    async def send(self, message: str) -> None:
+        async with self._lock:
+            await self._send(message)
 
 
 def _emit_status(
@@ -585,12 +604,10 @@ async def run_agent(
             )
             async with websockets.connect(ws_url, ssl=ssl_ctx) as ws:
                 backoff = 1.0
-
-                async def send(s):
-                    await ws.send(s)
+                sender = SerializedSender(ws.send)
 
                 disp = AgentFrameDispatcher(
-                    docker=docker, http=http, send=send,
+                    docker=docker, http=http, send=sender.send,
                 )
                 # Restore endpoints discovered at startup so existing
                 # remote deployments answer immediately after a reconnect.
@@ -599,7 +616,7 @@ async def run_agent(
                         container_id=_cid, address=_addr, port=_port,
                     )
                 info = collect_host_info()
-                await ws.send(encode_frame(Hello(
+                await sender.send(encode_frame(Hello(
                     agent_version=_v,
                     host_info={
                         "cpu_count": info.cpu_count,
@@ -628,7 +645,10 @@ async def run_agent(
                 import time as _t
                 agent_started_at = _t.time()
 
-                async def heartbeat(started_at: float = agent_started_at):
+                async def heartbeat(
+                    started_at: float = agent_started_at,
+                    sender: SerializedSender = sender,
+                ):
                     while True:
                         frame = build_heartbeat_frame(
                             in_flight=agent_in_flight,
@@ -636,7 +656,7 @@ async def run_agent(
                             deployment_models=agent_deployment_models,
                             uptime_s=_t.time() - started_at,
                         )
-                        await ws.send(encode_frame(frame))
+                        await sender.send(encode_frame(frame))
                         await asyncio.sleep(5.0)
 
                 hb = asyncio.create_task(heartbeat())
@@ -652,6 +672,8 @@ async def run_agent(
                         await disp.handle(frame)
                 finally:
                     hb.cancel()
+                    with suppress(asyncio.CancelledError):
+                        await hb
         except (OSError, websockets.WebSocketException) as e:
             log.warning(
                 "agent connection lost: %s; reconnecting in %.1fs",

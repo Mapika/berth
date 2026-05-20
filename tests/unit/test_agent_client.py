@@ -5,7 +5,7 @@ import base64
 
 import pytest
 
-from berth.cluster.agent_client import AgentFrameDispatcher, _DockerAdapter
+from berth.cluster.agent_client import AgentFrameDispatcher, SerializedSender, _DockerAdapter
 from berth.cluster.protocol import (
     HttpChunk,
     HttpRequest,
@@ -56,6 +56,30 @@ class _DockerRunStub:
     def run(self, **kwargs):
         self.calls.append(kwargs)
         return _RunResult()
+
+
+@pytest.mark.asyncio
+async def test_serialized_sender_prevents_concurrent_writes():
+    active = False
+    sent: list[str] = []
+
+    async def raw_send(message: str) -> None:
+        nonlocal active
+        assert active is False
+        active = True
+        await asyncio.sleep(0.01)
+        sent.append(message)
+        active = False
+
+    sender = SerializedSender(raw_send)
+
+    await asyncio.gather(
+        sender.send("heartbeat"),
+        sender.send("http-chunk"),
+        sender.send("log-chunk"),
+    )
+
+    assert sent == ["heartbeat", "http-chunk", "log-chunk"]
 
 
 @pytest.mark.asyncio
