@@ -42,6 +42,9 @@ def _ok_hostname(s: str) -> bool:
 def _caddyfile(domain: str, port: int) -> str:
     return f"""# /etc/caddy/Caddyfile — drop this in and `sudo systemctl reload caddy`
 {domain} {{
+    header {{
+        Strict-Transport-Security "max-age=31536000"
+    }}
     reverse_proxy 127.0.0.1:{port} {{
         header_up X-Forwarded-Proto https
     }}
@@ -49,7 +52,22 @@ def _caddyfile(domain: str, port: int) -> str:
 """
 
 
-def _caddyfile_sni_443(domain: str, public_port: int, *, tls_port: int = 8443) -> str:
+def _caddyfile_sni_443(
+    domain: str,
+    public_port: int,
+    *,
+    tls_port: int = 8443,
+    cluster_domain: str | None = None,
+) -> str:
+    cluster_http = (
+        f"""
+http://{cluster_domain} {{
+    respond 404
+}}
+"""
+        if cluster_domain and cluster_domain != domain
+        else ""
+    )
     return f"""# /etc/caddy/Caddyfile — Caddy serves public HTTPS on loopback.
 # HAProxy owns :443 and forwards SNI {domain!r} to 127.0.0.1:{tls_port}.
 {{
@@ -59,9 +77,16 @@ def _caddyfile_sni_443(domain: str, public_port: int, *, tls_port: int = 8443) -
 http://{domain} {{
     redir https://{domain}{{uri}} permanent
 }}
+{cluster_http}
 
 https://{domain}:{tls_port} {{
     bind 127.0.0.1
+    header {{
+        # Caddy is behind HAProxy on :443; do not advertise loopback :{tls_port}
+        # as an external HTTP/3 endpoint.
+        -Alt-Svc
+        Strict-Transport-Security "max-age=31536000"
+    }}
     reverse_proxy 127.0.0.1:{public_port} {{
         header_up X-Forwarded-Proto https
     }}
@@ -231,7 +256,12 @@ def _bootstrap(
 
     out["leader_url"] = advertised_leader_url
     out["caddyfile"] = (
-        _caddyfile_sni_443(domain, public_port, tls_port=public_tls_port)
+        _caddyfile_sni_443(
+            domain,
+            public_port,
+            tls_port=public_tls_port,
+            cluster_domain=cluster_host,
+        )
         if sni_443
         else _caddyfile(domain, public_port)
     )

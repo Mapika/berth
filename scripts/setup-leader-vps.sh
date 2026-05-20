@@ -171,8 +171,18 @@ http://${PUBLIC_HOST} {
     redir https://${PUBLIC_HOST}{uri} permanent
 }
 
+http://${CLUSTER_HOST} {
+    respond 404
+}
+
 https://${PUBLIC_HOST}:${CADDY_TLS_PORT} {
     bind 127.0.0.1
+    header {
+        # Caddy is behind HAProxy on :443; do not advertise loopback
+        # :${CADDY_TLS_PORT} as an external HTTP/3 endpoint.
+        -Alt-Svc
+        Strict-Transport-Security "max-age=31536000"
+    }
     reverse_proxy 127.0.0.1:${PUBLIC_PORT} {
         header_up X-Forwarded-Proto https
     }

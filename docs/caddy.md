@@ -23,8 +23,18 @@ http://leader.example.com {
     redir https://leader.example.com{uri} permanent
 }
 
+http://cluster.example.com {
+    respond 404
+}
+
 https://leader.example.com:8443 {
     bind 127.0.0.1
+    header {
+        # Caddy is behind HAProxy on :443; do not advertise loopback :8443
+        # as an external HTTP/3 endpoint.
+        -Alt-Svc
+        Strict-Transport-Security "max-age=31536000"
+    }
     reverse_proxy 127.0.0.1:11500 {
         header_up X-Forwarded-Proto https
     }

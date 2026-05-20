@@ -198,6 +198,7 @@ def test_bootstrap_renders_caddyfile_for_domain(tmp_path, monkeypatch):
     assert "serve.example.com" in cf
     assert "127.0.0.1:11500" in cf
     assert "X-Forwarded-Proto" in cf
+    assert "Strict-Transport-Security" in cf
 
 
 def test_bootstrap_renders_sni_443_proxy_configs(tmp_path, monkeypatch):
@@ -217,6 +218,10 @@ def test_bootstrap_renders_sni_443_proxy_configs(tmp_path, monkeypatch):
 
     assert "https://leader.example.com:8443" in out["caddyfile"]
     assert "bind 127.0.0.1" in out["caddyfile"]
+    assert "http://cluster.example.com" in out["caddyfile"]
+    assert "respond 404" in out["caddyfile"]
+    assert "-Alt-Svc" in out["caddyfile"]
+    assert "Strict-Transport-Security" in out["caddyfile"]
     assert "127.0.0.1:11500" in out["caddyfile"]
     assert "req.ssl_sni -i cluster.example.com" in out["haproxy"]
     assert "req.ssl_sni -i leader.example.com" in out["haproxy"]
