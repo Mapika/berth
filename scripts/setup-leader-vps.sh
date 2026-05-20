@@ -132,9 +132,11 @@ tar \
 chown -R berth:berth "$BERTH_SRC"
 
 echo "==> Installing berth into ${BERTH_VENV} with hash-pinned deps"
-if [[ ! -x "${BERTH_VENV}/bin/python" ]]; then
-  run_as_berth python3 -m venv "$BERTH_VENV"
-fi
+# Always recreate the venv. This wipes ~* partial-install markers that older
+# runs (including the pre-rename ``serve-engine`` package) leave behind in
+# site-packages, which otherwise spam pip warnings on every subsequent install.
+rm -rf "$BERTH_VENV"
+run_as_berth python3 -m venv "$BERTH_VENV"
 # Bootstrap pip + uv inside the venv. uv reads uv.lock and emits a pip-style
 # requirements file with hashes for every transitive dep, which we then install
 # with --require-hashes so the VPS sees exactly what CI tested.
@@ -142,20 +144,28 @@ run_as_berth "${BERTH_VENV}/bin/python" -m pip install --upgrade --no-cache-dir 
 REQ_LOCK="$(mktemp /tmp/berth-requirements.XXXXXX.txt)"
 chmod 0644 "$REQ_LOCK"
 trap 'rm -f "$REQ_LOCK"' EXIT
-run_as_berth "${BERTH_VENV}/bin/uv" export \
-  --frozen --no-dev --no-emit-project \
-  --directory "$BERTH_SRC" \
-  --format requirements-txt > "$REQ_LOCK"
-run_as_berth "${BERTH_VENV}/bin/uv" pip install \
-  --python "${BERTH_VENV}/bin/python" \
-  --require-hashes \
-  --requirement "$REQ_LOCK"
-# Install the project itself separately, with --no-deps so we don't pull in
-# anything not already in the hash-locked set.
-run_as_berth "${BERTH_VENV}/bin/uv" pip install \
-  --python "${BERTH_VENV}/bin/python" \
-  --no-deps \
-  "$BERTH_SRC"
+# Run uv from inside $BERTH_SRC: uv walks up from CWD looking for uv.toml, and
+# the berth user can't traverse e.g. /root/berth/ if the operator launched the
+# script from there. ``--no-config`` belts-and-braces against any host-wide
+# uv config that would otherwise be searched.
+(
+  cd "$BERTH_SRC"
+  run_as_berth "${BERTH_VENV}/bin/uv" export \
+    --frozen --no-dev --no-emit-project --no-config \
+    --format requirements-txt > "$REQ_LOCK"
+  run_as_berth "${BERTH_VENV}/bin/uv" pip install \
+    --python "${BERTH_VENV}/bin/python" \
+    --no-config \
+    --require-hashes \
+    --requirement "$REQ_LOCK"
+  # Install the project itself separately, with --no-deps so we don't pull in
+  # anything not already in the hash-locked set.
+  run_as_berth "${BERTH_VENV}/bin/uv" pip install \
+    --python "${BERTH_VENV}/bin/python" \
+    --no-config \
+    --no-deps \
+    "$BERTH_SRC"
+)
 
 echo "==> Bootstrapping leader config, DB, CA, key pepper, and first admin key"
 BOOTSTRAP_ARGS=(
