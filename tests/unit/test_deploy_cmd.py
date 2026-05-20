@@ -3,6 +3,7 @@ configuration: writes config.toml, initialises the DB + CA + pepper,
 mints the first admin key, prints next-step instructions."""
 from __future__ import annotations
 
+import re
 import stat
 import tomllib
 
@@ -11,6 +12,12 @@ from typer.testing import CliRunner
 from berth import cli, config
 from berth.cli.deploy_cmd import _bootstrap, _ok_hostname
 from berth.store import api_keys, db
+
+# GitHub Actions runners set FORCE_COLOR=1, which makes Typer's Click error
+# formatter highlight option names by wrapping each hyphen-separated segment
+# in its own ANSI colour escape. A naive substring search for "--cluster-domain"
+# then fails because the captured bytes are ``--\e[...m-cluster\e[0m\e[...m-domain\e[0m``.
+_ANSI = re.compile(r"\x1b\[[0-9;]*m")
 
 
 def _isolate(monkeypatch, home):
@@ -251,7 +258,7 @@ def test_cli_sni_443_requires_cluster_domain(tmp_path, monkeypatch):
         "--serve-home", str(tmp_path),
     ])
     assert res.exit_code != 0
-    assert "cluster-domain" in res.output
+    assert "cluster-domain" in _ANSI.sub("", res.output)
 
 
 def test_cli_writes_files_and_prints_summary(tmp_path, monkeypatch):
