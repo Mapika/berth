@@ -1,34 +1,52 @@
-# Caddy in front of berth
+# Caddy and HAProxy in front of berth
 
-Caddy terminates TLS for the public OpenAI endpoint and reverse-proxies
-to the daemon's plain-HTTP listener on `127.0.0.1:11500`. The cluster
-listener (`:11501`, mTLS WS) is *not* fronted by Caddy — it speaks its
-own mutual-TLS direct to agents.
+Recommended public deployments use HAProxy on external `:443` as a TCP
+SNI router:
+
+- `leader.example.com:443` is passed through to Caddy on
+  `127.0.0.1:8443`; Caddy terminates public TLS and reverse-proxies to
+  berth's plain-HTTP public listener on `127.0.0.1:11500`.
+- `cluster.example.com:443` is passed through directly to berth's
+  cluster listener on `127.0.0.1:11501`; HAProxy does not terminate TLS,
+  so berth still sees the agent's mTLS client certificate.
 
 ## Caddyfile
 
-Minimal working example:
+Recommended 443/SNI example:
 
 ```caddyfile
-serve.example.com {
+{
+    auto_https disable_redirects
+}
+
+http://leader.example.com {
+    redir https://leader.example.com{uri} permanent
+}
+
+https://leader.example.com:8443 {
+    bind 127.0.0.1
     reverse_proxy 127.0.0.1:11500 {
-        # Pass through the canonical client IP. The daemon's rate
-        # limiter reads X-Forwarded-For when trust_proxy_headers is on.
-        header_up X-Forwarded-For {remote_host}
         header_up X-Forwarded-Proto https
     }
-
-    # Optional: rate limit the public OpenAI endpoint at the edge.
-    # Requires the caddy-ratelimit module — comment out if not built in.
-    # rate_limit {
-    #     zone openai {
-    #         key {remote_host}
-    #         events 60
-    #         window 1m
-    #     }
-    #     match /v1/*
-    # }
 }
+```
+
+## HAProxy
+
+```haproxy
+frontend berth_https
+    bind *:443
+    tcp-request inspect-delay 5s
+    tcp-request content accept if { req.ssl_hello_type 1 }
+    use_backend berth_cluster if { req.ssl_sni -i cluster.example.com }
+    use_backend berth_public if { req.ssl_sni -i leader.example.com }
+    default_backend berth_public
+
+backend berth_public
+    server caddy_public 127.0.0.1:8443 check
+
+backend berth_cluster
+    server berth_cluster 127.0.0.1:11501 check
 ```
 
 ## On the daemon side
@@ -36,46 +54,37 @@ serve.example.com {
 Set the corresponding `~/.berth/config.toml`:
 
 ```toml
+[server]
+leader_only = true
+
 [public]
-host = "serve.example.com"
+host = "leader.example.com"
 port = 11500
 bind = "127.0.0.1"
 scheme = "http"
 trust_proxy_headers = true
 forwarded_allow_ips = "127.0.0.1"
+
+[cluster]
+host = "cluster.example.com"
+port = 11501
+bind = "127.0.0.1"
 ```
 
-`scheme = "http"` tells the daemon to bind plain HTTP (Caddy handles
-TLS). `trust_proxy_headers = true` opts into honouring
-`X-Forwarded-For` and `X-Forwarded-Proto` from the configured proxy
-addresses. `forwarded_allow_ips` should match where Caddy talks to
-the daemon from — `127.0.0.1` when they share the box.
-
-## Cluster listener
-
-Caddy does **not** sit in front of `:11501`. The cluster listener
-speaks mTLS end-to-end: agents present a client cert minted by the
-leader's CA at enrollment time, and the leader validates the client
-cert via `ssl_cert_reqs=CERT_OPTIONAL` plus a fingerprint lookup in
-the nodes table. Putting Caddy in front would either break mTLS
-verification or require pass-through TLS — neither buys us anything.
-
-Open `:11501` directly in your VPS firewall:
-
-```bash
-sudo ufw allow 11501/tcp
-```
+Set `BERTH_LEADER_URL=https://cluster.example.com` in the berth
+systemd unit so enrollment URIs advertise the external 443 endpoint
+instead of the loopback cluster port.
 
 ## Verifying the path
 
-After `systemctl restart berth && systemctl restart caddy`:
+After restarting berth, Caddy, and HAProxy:
 
 ```bash
 # From the operator's laptop:
-curl -i https://serve.example.com/healthz
+curl -i https://leader.example.com/healthz
 # → HTTP/2 200, {"ok": true}
 
 # From a would-be agent:
-curl -k https://serve.example.com:11501/admin/ca.pem
+curl -k https://cluster.example.com/admin/ca.pem
 # → the CA PEM the daemon serves on the cluster listener
 ```

@@ -55,6 +55,31 @@ def test_bootstrap_writes_config_with_behind_proxy_defaults(tmp_path, monkeypatc
     assert cfg["cluster"]["bind"] == "0.0.0.0"
 
 
+def test_bootstrap_writes_sni_443_leader_only_config(tmp_path, monkeypatch):
+    _isolate(monkeypatch, tmp_path)
+    out = _bootstrap(
+        domain="leader.example.com",
+        cluster_domain="cluster.example.com",
+        public_port=11500,
+        cluster_port=11501,
+        public_tls_port=8443,
+        behind_proxy=True,
+        sni_443=True,
+        leader_only=True,
+        serve_home=tmp_path,
+        force=False,
+    )
+
+    cfg = tomllib.loads((tmp_path / "config.toml").read_text())
+    assert cfg["server"]["leader_only"] is True
+    assert cfg["public"]["host"] == "leader.example.com"
+    assert cfg["public"]["bind"] == "127.0.0.1"
+    assert cfg["cluster"]["host"] == "cluster.example.com"
+    assert cfg["cluster"]["port"] == 11501
+    assert cfg["cluster"]["bind"] == "127.0.0.1"
+    assert out["leader_url"] == "https://cluster.example.com"
+
+
 def test_bootstrap_writes_direct_tls_config(tmp_path, monkeypatch):
     _isolate(monkeypatch, tmp_path)
     out = _bootstrap(
@@ -172,7 +197,31 @@ def test_bootstrap_renders_caddyfile_for_domain(tmp_path, monkeypatch):
     cf = out["caddyfile"]
     assert "serve.example.com" in cf
     assert "127.0.0.1:11500" in cf
-    assert "X-Forwarded-For" in cf
+    assert "X-Forwarded-Proto" in cf
+
+
+def test_bootstrap_renders_sni_443_proxy_configs(tmp_path, monkeypatch):
+    _isolate(monkeypatch, tmp_path)
+    out = _bootstrap(
+        domain="leader.example.com",
+        cluster_domain="cluster.example.com",
+        public_port=11500,
+        cluster_port=11501,
+        public_tls_port=8443,
+        behind_proxy=True,
+        sni_443=True,
+        leader_only=True,
+        serve_home=tmp_path,
+        force=False,
+    )
+
+    assert "https://leader.example.com:8443" in out["caddyfile"]
+    assert "bind 127.0.0.1" in out["caddyfile"]
+    assert "127.0.0.1:11500" in out["caddyfile"]
+    assert "req.ssl_sni -i cluster.example.com" in out["haproxy"]
+    assert "req.ssl_sni -i leader.example.com" in out["haproxy"]
+    assert "127.0.0.1:11501" in out["haproxy"]
+    assert "BERTH_LEADER_URL=https://cluster.example.com" in out["systemd_unit"]
 
 
 def test_cli_rejects_bad_domain(tmp_path, monkeypatch):
@@ -185,6 +234,19 @@ def test_cli_rejects_bad_domain(tmp_path, monkeypatch):
     ])
     assert res.exit_code != 0
     assert "hostname" in res.output.lower()
+
+
+def test_cli_sni_443_requires_cluster_domain(tmp_path, monkeypatch):
+    _isolate(monkeypatch, tmp_path)
+    runner = CliRunner()
+    res = runner.invoke(cli.app, [
+        "deploy", "bootstrap",
+        "--domain", "leader.example.com",
+        "--sni-443",
+        "--serve-home", str(tmp_path),
+    ])
+    assert res.exit_code != 0
+    assert "cluster-domain" in res.output
 
 
 def test_cli_writes_files_and_prints_summary(tmp_path, monkeypatch):
