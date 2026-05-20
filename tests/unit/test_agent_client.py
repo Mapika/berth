@@ -5,7 +5,7 @@ import base64
 
 import pytest
 
-from berth.cluster.agent_client import AgentFrameDispatcher
+from berth.cluster.agent_client import AgentFrameDispatcher, _DockerAdapter
 from berth.cluster.protocol import (
     HttpChunk,
     HttpRequest,
@@ -41,6 +41,21 @@ class _HttpOk:
 class _HttpFail:
     async def stream(self, method, url, headers, body):
         raise RuntimeError("connection refused")
+
+
+class _RunResult:
+    id = "cid-remote"
+    address = "127.0.0.1"
+    port = 32768
+
+
+class _DockerRunStub:
+    def __init__(self):
+        self.calls: list[dict] = []
+
+    def run(self, **kwargs):
+        self.calls.append(kwargs)
+        return _RunResult()
 
 
 @pytest.mark.asyncio
@@ -163,6 +178,58 @@ async def test_http_request_with_engine_failure_returns_502():
     assert isinstance(last, HttpChunk)
     assert last.status == 502
     assert last.eof is True
+
+
+@pytest.mark.asyncio
+async def test_remote_docker_adapter_emits_status_and_quiets_download(
+    tmp_path, monkeypatch,
+):
+    models_dir = tmp_path / "models"
+    snapshot = models_dir / "snapshots" / "qwen"
+    snapshot.mkdir(parents=True)
+    events: list[tuple[str, dict]] = []
+    captured_download: dict = {}
+
+    def fake_download_model(**kwargs):
+        captured_download.update(kwargs)
+        return str(snapshot)
+
+    monkeypatch.setattr(
+        "berth.lifecycle.downloader.download_model",
+        fake_download_model,
+    )
+    docker = _DockerRunStub()
+    adapter = _DockerAdapter(
+        docker,
+        models_dir=models_dir,
+        configs_dir=tmp_path / "configs",
+        status_cb=lambda event, payload: events.append((event, payload)),
+        quiet_downloads=True,
+    )
+
+    result = await adapter.start({
+        "model_hf_repo": "Qwen/Qwen2.5-0.5B-Instruct",
+        "model_revision": "main",
+        "model_sentinel": "__MODEL__",
+        "command": ["vllm", "serve", "__MODEL__"],
+        "image": "vllm/vllm-openai:test",
+        "name": "serve-vllm-qwen",
+        "environment": {},
+        "kwargs": {},
+        "internal_port": 8000,
+    })
+
+    assert result == ("cid-remote", "127.0.0.1", 32768)
+    assert captured_download["quiet"] is True
+    assert docker.calls[0]["command"] == [
+        "vllm", "serve", "/cache/snapshots/qwen",
+    ]
+    assert [event for event, _ in events] == [
+        "deployment.download_started",
+        "deployment.download_finished",
+        "deployment.container_starting",
+        "deployment.container_started",
+    ]
 
 
 def test_build_heartbeat_frame_without_collectors_is_bare():

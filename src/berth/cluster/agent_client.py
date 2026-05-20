@@ -64,6 +64,20 @@ def build_heartbeat_frame(
     )
 
 log = logging.getLogger(__name__)
+StatusCallback = Callable[[str, dict[str, Any]], None]
+
+
+def _emit_status(
+    status_cb: StatusCallback | None,
+    event: str,
+    **payload: Any,
+) -> None:
+    if status_cb is None:
+        return
+    try:
+        status_cb(event, payload)
+    except Exception:
+        log.debug("agent status callback failed", exc_info=True)
 
 
 class AgentFrameDispatcher:
@@ -286,8 +300,18 @@ class _DockerAdapter:
        the in-container model path before running.
     """
 
-    def __init__(self, dc, *, models_dir: Path | None = None, configs_dir: Path | None = None):
+    def __init__(
+        self,
+        dc,
+        *,
+        models_dir: Path | None = None,
+        configs_dir: Path | None = None,
+        status_cb: StatusCallback | None = None,
+        quiet_downloads: bool = False,
+    ):
         self._dc = dc
+        self._status_cb = status_cb
+        self._quiet_downloads = quiet_downloads
         # Default to the same on-disk layout the leader uses, but rooted
         # at the agent's own SERVE_HOME.
         from berth import config as _cfg
@@ -302,11 +326,24 @@ class _DockerAdapter:
             self._models_dir.mkdir(parents=True, exist_ok=True)
             self._configs_dir.mkdir(parents=True, exist_ok=True)
 
+            _emit_status(
+                self._status_cb,
+                "deployment.download_started",
+                repo=plan["model_hf_repo"],
+                revision=plan.get("model_revision", "main"),
+            )
             local_path = await asyncio.to_thread(
                 download_model,
                 hf_repo=plan["model_hf_repo"],
                 revision=plan.get("model_revision", "main"),
                 cache_dir=self._models_dir,
+                quiet=self._quiet_downloads,
+            )
+            _emit_status(
+                self._status_cb,
+                "deployment.download_finished",
+                repo=plan["model_hf_repo"],
+                local_path=str(local_path),
             )
             container_model_path = "/cache/" + str(
                 Path(local_path).resolve().relative_to(self._models_dir.resolve())
@@ -331,6 +368,12 @@ class _DockerAdapter:
                 volumes[str(self._configs_dir.resolve())] = {
                     "bind": "/serve/configs", "mode": "ro",
                 }
+            _emit_status(
+                self._status_cb,
+                "deployment.container_starting",
+                name=plan["name"],
+                image=plan["image"],
+            )
             h = await asyncio.to_thread(
                 self._dc.run,
                 image=plan["image"],
@@ -341,9 +384,23 @@ class _DockerAdapter:
                 volumes=volumes,
                 internal_port=plan["internal_port"],
             )
+            _emit_status(
+                self._status_cb,
+                "deployment.container_started",
+                name=plan["name"],
+                container_id=h.id,
+                address=h.address,
+                port=h.port,
+            )
             return (h.id, h.address, h.port)
 
         # Legacy / local-style plan — pass through unchanged.
+        _emit_status(
+            self._status_cb,
+            "deployment.container_starting",
+            name=plan["name"],
+            image=plan["image"],
+        )
         h = await asyncio.to_thread(
             self._dc.run,
             image=plan["image"],
@@ -353,6 +410,14 @@ class _DockerAdapter:
             kwargs=plan["kwargs"],
             volumes=plan["volumes"],
             internal_port=plan["internal_port"],
+        )
+        _emit_status(
+            self._status_cb,
+            "deployment.container_started",
+            name=plan["name"],
+            container_id=h.id,
+            address=h.address,
+            port=h.port,
         )
         return (h.id, h.address, h.port)
 
@@ -413,7 +478,12 @@ def _build_ssl_context(cfg: dict) -> ssl.SSLContext:
     return ctx
 
 
-async def run_agent(serve_home: Path) -> None:
+async def run_agent(
+    serve_home: Path,
+    *,
+    status_cb: StatusCallback | None = None,
+    quiet_downloads: bool = False,
+) -> None:
     """Run the agent loop forever: connect, handshake, dispatch, reconnect."""
     from berth import __version__ as _v
     from berth.cluster.host_info import collect_host_info
@@ -421,6 +491,12 @@ async def run_agent(serve_home: Path) -> None:
 
     cfg = _load_agent_config(serve_home)
     ssl_ctx = _build_ssl_context(cfg)
+    _emit_status(
+        status_cb,
+        "agent.initializing",
+        leader=cfg["leader_url"],
+        node_id=cfg.get("node_id"),
+    )
     dc = DockerClient(network_name="berth-engines")
     # Engine containers attach to a named bridge network the leader uses
     # by default. The leader's daemon ensures this at startup; the agent
@@ -430,7 +506,12 @@ async def run_agent(serve_home: Path) -> None:
         dc.ensure_network()
     except Exception as e:
         log.warning("agent ensure_network failed (continuing): %s", e)
-    docker = _DockerAdapter(dc)
+        _emit_status(status_cb, "agent.warning", message=f"Docker network: {e}")
+    docker = _DockerAdapter(
+        dc,
+        status_cb=status_cb,
+        quiet_downloads=quiet_downloads,
+    )
     http = _HttpxAdapter()
 
     # Agent-process collectors. Populated as the agent serves
@@ -471,8 +552,20 @@ async def run_agent(serve_home: Path) -> None:
                     "agent re-attached endpoint for container %s (%s:%d)",
                     c.id[:12], host_addr, host_port,
                 )
+                _emit_status(
+                    status_cb,
+                    "agent.endpoint_reattached",
+                    container_id=c.id,
+                    address=host_addr,
+                    port=host_port,
+                )
     except Exception as e:
         log.warning("agent endpoint re-attach failed (continuing): %s", e)
+        _emit_status(
+            status_cb,
+            "agent.warning",
+            message=f"endpoint re-attach: {e}",
+        )
 
     ws_url = (
         cfg["leader_url"]
@@ -484,6 +577,12 @@ async def run_agent(serve_home: Path) -> None:
     backoff = 1.0
     while True:
         try:
+            _emit_status(
+                status_cb,
+                "agent.connecting",
+                leader=cfg["leader_url"],
+                node_id=cfg.get("node_id"),
+            )
             async with websockets.connect(ws_url, ssl=ssl_ctx) as ws:
                 backoff = 1.0
 
@@ -519,6 +618,12 @@ async def run_agent(serve_home: Path) -> None:
                     "agent connected to leader as node_id=%s",
                     welcome.node_id,
                 )
+                _emit_status(
+                    status_cb,
+                    "agent.connected",
+                    leader=cfg["leader_url"],
+                    node_id=welcome.node_id,
+                )
 
                 import time as _t
                 agent_started_at = _t.time()
@@ -551,6 +656,12 @@ async def run_agent(serve_home: Path) -> None:
             log.warning(
                 "agent connection lost: %s; reconnecting in %.1fs",
                 e, backoff,
+            )
+            _emit_status(
+                status_cb,
+                "agent.reconnecting",
+                error=str(e) or e.__class__.__name__,
+                delay_s=backoff,
             )
             await asyncio.sleep(backoff)
             backoff = min(backoff * 2.0, 30.0)

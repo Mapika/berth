@@ -121,7 +121,12 @@ What `--uri` does under the hood:
    `agent.yaml`.
 
 After that, `berth agent start` runs the agent loop and connects to
-`wss://<cluster URL>/cluster/agent` with mTLS.
+`wss://<cluster URL>/cluster/agent` with mTLS. In an interactive
+terminal it shows a compact live status panel; full reconnect,
+download, Docker, and warning details go to `~/.berth/logs/agent.log`.
+Use `berth agent logs --follow` to tail that file, or
+`berth agent start --verbose` when you want raw logs and progress bars
+in the foreground.
 
 ### Verify (from the leader)
 

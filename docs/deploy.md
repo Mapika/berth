@@ -150,7 +150,8 @@ in UFW, and starts the services.
 
    # On the GPU host:
    berth agent register --uri '<paste>'
-   berth agent start                # or run under systemd similarly
+   berth agent start                # compact foreground status
+   berth agent logs --follow        # full agent log, if needed
    ```
 
 ## Bootstrap

@@ -1,7 +1,15 @@
 from __future__ import annotations
 
+import asyncio
+import contextlib
 import hashlib
+import logging
 import os
+import sys
+import time
+from collections import deque
+from dataclasses import dataclass, field
+from datetime import datetime
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
@@ -22,6 +30,189 @@ def _serve_home() -> Path:
     at call time so tests that monkeypatch the env var see the override
     (config.BERTH_DIR is fixed at import time)."""
     return Path(_env_get(os.environ, "SERVE_HOME") or str(Path.home() / ".berth"))
+
+
+def _agent_log_path(home: Path, override: Path | None = None) -> Path:
+    return override or home / "logs" / "agent.log"
+
+
+def _configure_agent_logging(log_path: Path, *, verbose: bool) -> None:
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+    handlers: list[logging.Handler] = [
+        logging.FileHandler(log_path, encoding="utf-8"),
+    ]
+    if verbose:
+        handlers.append(logging.StreamHandler(sys.stderr))
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s %(levelname)s %(name)s: %(message)s",
+        handlers=handlers,
+        force=True,
+    )
+    logging.captureWarnings(True)
+
+
+def _stamp() -> str:
+    return datetime.now().strftime("%H:%M:%S")
+
+
+@dataclass
+class _AgentStatusState:
+    state: str = "starting"
+    leader: str = "-"
+    node_id: str = "-"
+    operation: str = "initializing"
+    last_error: str = "-"
+    started_at: float = field(default_factory=time.monotonic)
+    events: deque[str] = field(default_factory=lambda: deque(maxlen=7))
+
+    def apply(self, event: str, payload: dict) -> None:
+        if event == "agent.initializing":
+            self.state = "initializing"
+            self.leader = str(payload.get("leader") or self.leader)
+            self.node_id = str(payload.get("node_id") or self.node_id)
+            self.operation = "checking Docker and local state"
+            self._add("initializing agent")
+        elif event == "agent.connecting":
+            self.state = "connecting"
+            self.leader = str(payload.get("leader") or self.leader)
+            self.node_id = str(payload.get("node_id") or self.node_id)
+            self.operation = "opening leader websocket"
+            self._add(f"connecting to {self.leader}")
+        elif event == "agent.connected":
+            self.state = "connected"
+            self.leader = str(payload.get("leader") or self.leader)
+            self.node_id = str(payload.get("node_id") or self.node_id)
+            self.operation = "waiting for deployments"
+            self.last_error = "-"
+            self._add(f"connected as node {self.node_id}")
+        elif event == "agent.reconnecting":
+            delay = float(payload.get("delay_s") or 0.0)
+            err = str(payload.get("error") or "connection lost")
+            self.state = "reconnecting"
+            self.last_error = err
+            self.operation = f"reconnecting in {delay:.1f}s"
+            self._add(f"connection lost: {err}")
+        elif event == "agent.warning":
+            msg = str(payload.get("message") or "warning")
+            self.last_error = msg
+            self._add(f"warning: {msg}")
+        elif event == "agent.endpoint_reattached":
+            cid = str(payload.get("container_id") or "")[:12]
+            self._add(f"re-attached container {cid}")
+        elif event == "deployment.download_started":
+            repo = str(payload.get("repo") or "model")
+            rev = str(payload.get("revision") or "main")
+            self.operation = f"downloading {repo}@{rev}"
+            self._add(self.operation)
+        elif event == "deployment.download_finished":
+            repo = str(payload.get("repo") or "model")
+            self.operation = f"download ready: {repo}"
+            self._add(self.operation)
+        elif event == "deployment.container_starting":
+            name = str(payload.get("name") or "container")
+            image = str(payload.get("image") or "image")
+            self.operation = f"starting {name}"
+            self._add(f"starting {name} from {image}")
+        elif event == "deployment.container_started":
+            name = str(payload.get("name") or "container")
+            cid = str(payload.get("container_id") or "")[:12]
+            self.operation = f"container running: {name}"
+            self._add(f"container {cid} running for {name}")
+        elif event == "agent.fatal":
+            self.state = "failed"
+            self.last_error = str(payload.get("error") or "agent failed")
+            self.operation = "stopped"
+            self._add(f"fatal: {self.last_error}")
+
+    def _add(self, message: str) -> None:
+        self.events.appendleft(f"{_stamp()}  {message}")
+
+
+def _render_agent_status(state: _AgentStatusState, log_path: Path):
+    from rich.console import Group
+    from rich.panel import Panel
+    from rich.table import Table
+    from rich.text import Text
+
+    status_style = {
+        "connected": "green",
+        "connecting": "yellow",
+        "reconnecting": "yellow",
+        "failed": "red",
+    }.get(state.state, "cyan")
+    uptime = int(time.monotonic() - state.started_at)
+
+    table = Table.grid(padding=(0, 2))
+    table.add_column(style="dim", no_wrap=True)
+    table.add_column()
+    table.add_row("status", Text(state.state, style=status_style))
+    table.add_row("leader", state.leader)
+    table.add_row("node", state.node_id)
+    table.add_row("uptime", f"{uptime}s")
+    table.add_row("operation", state.operation)
+    table.add_row("last error", state.last_error)
+    table.add_row("log file", str(log_path))
+
+    events = Table(title="recent activity", show_header=False, box=None)
+    events.add_column()
+    for line in state.events:
+        events.add_row(line)
+    if not state.events:
+        events.add_row("waiting for agent events")
+
+    return Panel(
+        Group(table, "", events),
+        title="berth agent",
+        subtitle="Ctrl-C to stop",
+    )
+
+
+async def _run_agent_interactive(home: Path, log_path: Path) -> None:
+    from rich.console import Console
+    from rich.live import Live
+
+    from berth.cluster.agent_client import run_agent
+
+    console = Console()
+    if not console.is_terminal:
+        typer.echo(f"agent running; logs: {log_path}")
+        await run_agent(home, quiet_downloads=True)
+        return
+
+    state = _AgentStatusState()
+    queue: asyncio.Queue[tuple[str, dict]] = asyncio.Queue()
+    loop = asyncio.get_running_loop()
+
+    def status_cb(event: str, payload: dict) -> None:
+        loop.call_soon_threadsafe(queue.put_nowait, (event, payload))
+
+    task = asyncio.create_task(
+        run_agent(home, status_cb=status_cb, quiet_downloads=True)
+    )
+    with Live(
+        _render_agent_status(state, log_path),
+        refresh_per_second=4,
+        console=console,
+        screen=False,
+    ) as live:
+        while not task.done():
+            with contextlib.suppress(asyncio.TimeoutError):
+                event, payload = await asyncio.wait_for(queue.get(), timeout=0.25)
+                state.apply(event, payload)
+            live.update(_render_agent_status(state, log_path))
+        exc = task.exception()
+        if exc is not None:
+            state.apply("agent.fatal", {"error": str(exc)})
+            live.update(_render_agent_status(state, log_path))
+            raise exc
+
+
+def _tail_lines(path: Path, lines: int) -> list[str]:
+    if lines <= 0:
+        return []
+    with path.open(encoding="utf-8", errors="replace") as f:
+        return list(deque(f, maxlen=lines))
 
 
 def parse_enrollment_uri(uri: str) -> tuple[str, str, str]:
@@ -185,12 +376,62 @@ def register(
 
 
 @agent_app.command("start")
-def start():
+def start(
+    verbose: bool = typer.Option(
+        False,
+        "--verbose",
+        "-v",
+        help="Print raw logs/progress to stderr instead of the compact status UI.",
+    ),
+    log_file: Path | None = typer.Option(
+        None,
+        "--log-file",
+        help="Write agent logs here (default: ~/.berth/logs/agent.log).",
+    ),
+):
     """Run the agent daemon in the foreground."""
-    import asyncio
-
     from berth.cluster.agent_client import run_agent
-    asyncio.run(run_agent(_serve_home()))
+
+    home = _serve_home()
+    path = _agent_log_path(home, log_file)
+    _configure_agent_logging(path, verbose=verbose)
+
+    try:
+        if verbose:
+            asyncio.run(run_agent(home, quiet_downloads=False))
+        else:
+            asyncio.run(_run_agent_interactive(home, path))
+    except KeyboardInterrupt:
+        typer.echo("agent stopped")
+
+
+@agent_app.command("logs")
+def logs(
+    follow: bool = typer.Option(False, "--follow", "-f", help="Follow new log lines."),
+    lines: int = typer.Option(100, "--lines", "-n", min=0, help="Initial lines to show."),
+    log_file: Path | None = typer.Option(
+        None,
+        "--log-file",
+        help="Read this log file (default: ~/.berth/logs/agent.log).",
+    ),
+):
+    """Show the local agent log file."""
+    path = _agent_log_path(_serve_home(), log_file)
+    if not path.exists():
+        typer.echo(f"agent log not found: {path}", err=True)
+        raise typer.Exit(1)
+    for line in _tail_lines(path, lines):
+        typer.echo(line, nl=False)
+    if not follow:
+        return
+    with path.open(encoding="utf-8", errors="replace") as f:
+        f.seek(0, os.SEEK_END)
+        while True:
+            line = f.readline()
+            if line:
+                typer.echo(line, nl=False)
+            else:
+                time.sleep(0.5)
 
 
 @agent_app.command("status")
