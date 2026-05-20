@@ -9,6 +9,7 @@ from pydantic import BaseModel
 
 from berth import config as _cfg
 from berth.daemon.admin import get_conn, render_metrics_snapshot, router
+from berth.store import deployments as dep_store
 from berth.store import node_gpus as node_gpus_store
 from berth.store import nodes as nodes_store
 
@@ -83,9 +84,30 @@ def admin_nodes_remove(
         raise HTTPException(404, f"node {node_id} not found")
     if node.label == "local":
         raise HTTPException(400, "cannot remove the local node")
+    # Refuse to remove a node that still has non-terminal deployments — the
+    # row's foreign key reference (deployments.node_id) is not enforced by
+    # the schema, so a delete here would orphan deployment rows pointing at
+    # a nonexistent node, and ``stop()`` could no longer reach the agent.
+    active = [
+        d for d in dep_store.list_all(conn)
+        if d.node_id == node_id and d.status in dep_store.ACTIVE_STATUSES
+    ]
+    if active:
+        ids = ", ".join(str(d.id) for d in active)
+        raise HTTPException(
+            409,
+            f"node {node_id} has {len(active)} active deployment(s) "
+            f"(ids: {ids}); stop them first",
+        )
     registry = request.app.state.agent_registry
-    if registry.get(node_id) is not None:
-        registry.unregister(node_id)
+    link = registry.get(node_id)
+    if link is not None:
+        # Identity-safe unregister introduced in 501d90e: passing the link
+        # object itself, not the node_id, so a stale entry never clobbers a
+        # newer one. (The previous ``unregister(node_id)`` form was a
+        # latent runtime bug — AgentLink doesn't have an ``int``-compatible
+        # node_id attribute and mypy missed it via app.state's ``Any`` type.)
+        registry.unregister(link)
     nodes_store.delete(conn, node_id)
     return {"ok": True}
 

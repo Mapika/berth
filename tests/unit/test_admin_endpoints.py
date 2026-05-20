@@ -878,6 +878,78 @@ async def test_create_stream_token_rejects_malformed_log_stream_path(app):
 
 
 @pytest.mark.asyncio
+async def test_create_deployment_rejects_bad_model_name(app):
+    """model_name lands in the Docker container name and in --served-model-name
+    argv. We constrain to ``[A-Za-z0-9][A-Za-z0-9_.-]{0,62}`` at the API
+    boundary so a space / slash / shell metachar can't escape into Docker or
+    leave half-created DB rows when Docker rejects the name."""
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(
+        transport=transport, base_url="http://test", timeout=30,
+    ) as c:
+        for bad in ["my model", "../escape", "evil$inject", "", "-leading-dash"]:
+            r = await c.post(
+                "/admin/deployments",
+                json={
+                    "model_name": bad,
+                    "hf_repo": "meta-llama/Llama-3.2-1B-Instruct",
+                    "image_tag": "vllm/vllm-openai:v0.7.3",
+                    "gpu_ids": [0],
+                    "max_model_len": 8192,
+                },
+            )
+            assert r.status_code == 422, f"expected 422 for model_name={bad!r}, got {r.status_code}"
+
+
+@pytest.mark.asyncio
+async def test_delete_node_with_active_deployments_returns_409(app, tmp_path):
+    """``DELETE /admin/nodes/<id>`` must refuse if any non-terminal
+    deployments still point at the node. Without this guard the
+    foreign-key-less ``deployments.node_id`` would orphan deployment
+    rows whose stop() path can no longer reach the agent."""
+    from berth.store import deployments as dep_store
+    from berth.store import models as model_store
+    from berth.store import nodes as nodes_store
+
+    conn = app.state.manager._conn
+    node = nodes_store.insert(
+        conn, label="evil-test", fingerprint="sha256:aaa",
+        reachable_as=None, first_seen=0.0, last_seen=0.0,
+        agent_version=None, cpu_count=1, total_ram_mb=1024,
+        gpu_count=1, total_vram_mb=80000,
+    )
+    m = model_store.add(conn, name="m", hf_repo="org/x")
+    d = dep_store.create(
+        conn, model_id=m.id, backend="vllm", image_tag="img:v1",
+        gpu_ids=[0], tensor_parallel=1, max_model_len=4096, dtype="auto",
+    )
+    dep_store.set_container(
+        conn, d.id, container_id="cid", container_name="x",
+        container_port=0, container_address="tunnel", node_id=node,
+    )
+    dep_store.update_status(conn, d.id, "ready")
+
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(
+        transport=transport, base_url="http://test", timeout=10,
+    ) as c:
+        r = await c.delete(f"/admin/nodes/{node}")
+    assert r.status_code == 409
+    assert "active deployment" in r.text.lower()
+    # Node still exists; deployment still references it.
+    assert nodes_store.get(conn, node) is not None
+
+    # After we stop the deployment, the delete succeeds.
+    dep_store.update_status(conn, d.id, "stopped")
+    async with httpx.AsyncClient(
+        transport=transport, base_url="http://test", timeout=10,
+    ) as c:
+        r = await c.delete(f"/admin/nodes/{node}")
+    assert r.status_code == 200
+    assert nodes_store.get(conn, node) is None
+
+
+@pytest.mark.asyncio
 async def test_create_stream_token_returns_path_bound_ticket(app):
     transport = httpx.ASGITransport(app=app)
     async with httpx.AsyncClient(

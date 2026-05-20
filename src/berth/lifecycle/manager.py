@@ -554,9 +554,22 @@ class LifecycleManager:
 
             assert self._docker is not None  # guarded above for the local path
             assert local_path is not None  # local deploys always materialise a model
-            container_model_path = "/cache/" + str(
-                Path(local_path).resolve().relative_to(self._models_dir.resolve())
-            )
+            try:
+                container_model_path = "/cache/" + str(
+                    Path(local_path).resolve().relative_to(self._models_dir.resolve())
+                )
+            except ValueError as e:
+                # Don't surface the underlying filesystem paths in the error
+                # response (the ValueError message would include both
+                # ``local_path`` and ``models_dir``).
+                log.error(
+                    "deployment %s: local_path %r is outside models_dir; "
+                    "refusing to mount",
+                    dep.id, local_path,
+                )
+                raise RuntimeError(
+                    f"deployment {dep.id} local_path is outside the model cache"
+                ) from e
             volumes = {str(self._models_dir.resolve()): {"bind": "/cache", "mode": "ro"}}
             if container_config_path is not None:
                 volumes[str(self._configs_dir.resolve())] = {

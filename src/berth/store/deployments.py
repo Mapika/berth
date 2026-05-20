@@ -114,20 +114,52 @@ def get_by_id(conn: sqlite3.Connection, dep_id: int) -> Deployment | None:
     return _row_to_dep(row) if row else None
 
 
+_TERMINAL_OR_TRANSITIONAL: tuple[Status, ...] = ("stopping", "stopped", "failed")
+
+
 def update_status(
     conn: sqlite3.Connection,
     dep_id: int,
     status: Status,
     *,
     last_error: str | None = None,
-) -> None:
-    if last_error is not None:
-        conn.execute(
-            "UPDATE deployments SET status=?, last_error=? WHERE id=?",
+) -> bool:
+    """Update the deployment's status; returns True if the row was updated.
+
+    Asymmetric: transitions *into* a terminal/transitional state
+    (``stopping`` / ``stopped`` / ``failed``) are always allowed — operators
+    must be able to force-stop or mark-failed at any time. Transitions back
+    *into* an active state (``pending`` / ``loading`` / ``ready``) are
+    refused if the row is already terminal. Without this guard, a late
+    ``ready`` transition from a load() that raced a concurrent ``stop()``
+    revives a deployment whose container has already been torn down; live
+    traffic then routes to a dead engine until HealthMonitor catches up.
+    """
+    if status in _TERMINAL_OR_TRANSITIONAL:
+        # Unconditional — stop_all etc. must always be able to clobber.
+        if last_error is not None:
+            cur = conn.execute(
+                "UPDATE deployments SET status=?, last_error=? WHERE id=?",
+                (status, last_error, dep_id),
+            )
+        else:
+            cur = conn.execute(
+                "UPDATE deployments SET status=? WHERE id=?",
+                (status, dep_id),
+            )
+    elif last_error is not None:
+        cur = conn.execute(
+            "UPDATE deployments SET status=?, last_error=? "
+            "WHERE id=? AND status NOT IN ('stopped', 'failed')",
             (status, last_error, dep_id),
         )
     else:
-        conn.execute("UPDATE deployments SET status=? WHERE id=?", (status, dep_id))
+        cur = conn.execute(
+            "UPDATE deployments SET status=? "
+            "WHERE id=? AND status NOT IN ('stopped', 'failed')",
+            (status, dep_id),
+        )
+    return (cur.rowcount or 0) > 0
 
 
 def set_container(

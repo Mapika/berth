@@ -102,9 +102,12 @@ def rollup_old_events(
     """Aggregate every event with ts < before_iso into usage_aggregates,
     then DELETE the source rows. Returns counters for telemetry.
 
-    Done in a single transaction - partial rollups would re-count
-    events on retry. Uses SQLite's hour_of_week formula
-    (weekday * 24 + hour) so the predictor's SQL filter agrees.
+    Atomic: the upsert loop and the DELETE run inside an explicit
+    ``BEGIN IMMEDIATE`` / ``COMMIT`` so a crash between steps cannot
+    double-count or lose events. The connection runs in autocommit mode
+    (isolation_level=None), so the SQL-level BEGIN is required — the
+    Python-level ``conn.locked()`` context manager would not group the
+    statements into one transaction by itself.
     """
     # Group the soon-to-be-rolled-up rows.
     grouped = conn.execute(
@@ -123,20 +126,27 @@ def rollup_old_events(
     ).fetchall()
     if not grouped:
         return {"buckets_upserted": 0, "events_deleted": 0}
-    buckets = 0
-    for row in grouped:
-        upsert(
-            conn,
-            base_name=row["base_name"],
-            adapter_name=row["adapter_name"],
-            hour_of_week=int(row["hour_of_week"]),
-            count_delta=int(row["n"]),
+    conn.execute("BEGIN IMMEDIATE")
+    try:
+        buckets = 0
+        for row in grouped:
+            upsert(
+                conn,
+                base_name=row["base_name"],
+                adapter_name=row["adapter_name"],
+                hour_of_week=int(row["hour_of_week"]),
+                count_delta=int(row["n"]),
+            )
+            buckets += 1
+        cur = conn.execute(
+            "DELETE FROM usage_events WHERE ts < ?", (before_iso,),
         )
-        buckets += 1
-    cur = conn.execute(
-        "DELETE FROM usage_events WHERE ts < ?", (before_iso,),
-    )
+        deleted = cur.rowcount or 0
+        conn.execute("COMMIT")
+    except Exception:
+        conn.execute("ROLLBACK")
+        raise
     return {
         "buckets_upserted": buckets,
-        "events_deleted": cur.rowcount or 0,
+        "events_deleted": deleted,
     }

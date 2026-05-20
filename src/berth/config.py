@@ -170,7 +170,11 @@ def write_private_file(
 ) -> None:
     """Write secret bytes without a write-then-chmod exposure window."""
     path = Path(path)
-    path.parent.mkdir(parents=True, exist_ok=True)
+    # Tighten parent dirs to 0700 (matching the file's 0600). A bare
+    # ``mkdir(parents=True)`` would use the process umask — typically 0022 —
+    # leaving an intermediate ``leader/`` or ``keys/`` dir world-traversable
+    # if BERTH_HOME ever lives somewhere shared.
+    ensure_private_dir(path.parent)
     flags = os.O_WRONLY | os.O_CREAT | os.O_TRUNC
     flags |= getattr(os, "O_NOFOLLOW", 0)
     fd = os.open(path, flags, mode)

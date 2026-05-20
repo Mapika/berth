@@ -5,11 +5,20 @@ import hmac
 import json
 import secrets
 import sqlite3
+import threading
 from dataclasses import dataclass
 from pathlib import Path
 
 from berth.store import db
 from berth.store.rows import row_get
+
+# Guards _PEPPER_CACHED initialisation. uvicorn dispatches sync routes (incl.
+# ``api_keys.verify`` / ``api_keys.create``) on a thread pool; on a fresh
+# install where the pepper file doesn't yet exist, two threads can otherwise
+# race the existence check, each generate their own ``secrets.token_bytes(32)``,
+# and the second ``write_private_file`` truncates the first. The losing
+# thread's freshly-minted key would be permanently un-verifiable.
+_PEPPER_INIT_LOCK = threading.Lock()
 
 
 @dataclass(frozen=True)
@@ -51,17 +60,23 @@ def _get_pepper() -> bytes:
     """Returns the pepper bytes, loading or creating the file lazily.
     Returns empty bytes when no pepper is configured (legacy mode)."""
     global _PEPPER_CACHED
+    # Fast path: no lock needed once the pepper has been resolved.
     if _PEPPER_CACHED is not None:
         return _PEPPER_CACHED
     if _PEPPER_PATH is None:
         return b""
-    if not _PEPPER_PATH.exists():
-        from berth.config import ensure_private_dir, write_private_file
+    with _PEPPER_INIT_LOCK:
+        # Re-check under the lock: another thread may have populated
+        # _PEPPER_CACHED while we were waiting.
+        if _PEPPER_CACHED is not None:
+            return _PEPPER_CACHED
+        if not _PEPPER_PATH.exists():
+            from berth.config import ensure_private_dir, write_private_file
 
-        ensure_private_dir(_PEPPER_PATH.parent)
-        write_private_file(_PEPPER_PATH, secrets.token_bytes(32))
-    _PEPPER_CACHED = _PEPPER_PATH.read_bytes()
-    return _PEPPER_CACHED
+            ensure_private_dir(_PEPPER_PATH.parent)
+            write_private_file(_PEPPER_PATH, secrets.token_bytes(32))
+        _PEPPER_CACHED = _PEPPER_PATH.read_bytes()
+        return _PEPPER_CACHED
 
 
 def _hash(secret: str) -> str:

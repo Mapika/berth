@@ -296,9 +296,17 @@ async def hot_load_adapter(
                 501,
                 "adapter hot-load is not supported on remote deployments",
             )
-        container_path = "/cache/" + str(
-            Path(adapter.local_path).resolve().relative_to(manager.models_dir.resolve())
-        )
+        try:
+            rel_adapter_path = Path(adapter.local_path).resolve().relative_to(
+                manager.models_dir.resolve(),
+            )
+        except ValueError as e:
+            raise HTTPException(
+                500,
+                f"adapter {adapter.name!r} local_path is outside the "
+                "model cache; re-register the adapter",
+            ) from e
+        container_path = "/cache/" + str(rel_adapter_path)
         url = (
             f"http://{dep.container_address}:{dep.container_port}"
             f"{backend.adapter_load_path}"

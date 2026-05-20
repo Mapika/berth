@@ -1,12 +1,13 @@
 from __future__ import annotations
 
 import asyncio
+import re
 import sqlite3
 from dataclasses import asdict
 from typing import cast
 
 from fastapi import Depends, HTTPException, status
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 
 from berth.backends.base import Backend
 from berth.daemon.admin import get_backends, get_conn, get_manager, router
@@ -16,6 +17,14 @@ from berth.store import deployments as dep_store
 from berth.store import models as model_store
 from berth.store import service_profiles as profile_store
 from berth.store import service_routes as route_store
+
+# Docker requires a container name to match this pattern; ``model_name`` gets
+# baked into the container name (``serve-{backend}-{model_name}-{id}``) and
+# is also passed as ``--served-model-name`` argv. Constrain at the API
+# boundary so a name with spaces / shell metacharacters / path separators
+# can't escape into Docker or argv contexts, and can't leave half-created
+# rows when the Docker daemon rejects the name on container creation.
+_MODEL_NAME_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,62}")
 
 
 class _DeploymentRequestBase(BaseModel):
@@ -35,6 +44,16 @@ class _DeploymentRequestBase(BaseModel):
     max_loras: int = 0
     extra_args: dict[str, str] = {}
     node_label: str | None = None
+
+    @field_validator("model_name")
+    @classmethod
+    def _check_model_name(cls, v: str) -> str:
+        if not _MODEL_NAME_RE.fullmatch(v):
+            raise ValueError(
+                "model_name must be 1-63 chars: letters, digits, dot, "
+                "underscore, or dash; must start with a letter or digit",
+            )
+        return v
 
 
 class CreateDeploymentRequest(_DeploymentRequestBase):

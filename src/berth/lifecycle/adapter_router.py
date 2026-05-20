@@ -293,9 +293,14 @@ async def ensure_adapter_loaded(
             await _engine_unload(backend, deployment, victim.name)
             da_store.detach(conn, deployment.id, victim.id)
 
-    container_path = "/cache/" + str(
-        Path(a.local_path).resolve().relative_to(models_dir.resolve())
-    )
+    try:
+        rel_path = Path(a.local_path).resolve().relative_to(models_dir.resolve())
+    except ValueError as e:
+        raise RuntimeError(
+            f"adapter {a.name!r} local_path is outside the model cache; "
+            "re-register the adapter"
+        ) from e
+    container_path = "/cache/" + str(rel_path)
     await _engine_load(backend, deployment, a.name, container_path)
     da_store.attach(conn, deployment.id, a.id)
     return True
