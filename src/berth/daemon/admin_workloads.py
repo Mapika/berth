@@ -84,6 +84,77 @@ def _validate_backend_capabilities(
         )
 
 
+def _unsafe_deploy_options_allowed(manager: LifecycleManager) -> bool:
+    cfg = getattr(manager, "resolved_cfg", None)
+    return bool(getattr(cfg, "allow_unsafe_deploy_options", False))
+
+
+def _validate_safe_deploy_options(
+    *,
+    body: _DeploymentRequestBase,
+    backend_name: str,
+    backend: Backend,
+    manager: LifecycleManager,
+) -> None:
+    if _unsafe_deploy_options_allowed(manager):
+        return
+    if body.image_tag is not None and body.image_tag != backend.image_default:
+        raise HTTPException(
+            400,
+            "custom engine images are disabled by default; set "
+            "[server].allow_unsafe_deploy_options=true only on trusted "
+            "leaders if you need --image",
+        )
+    if body.extra_args:
+        raise HTTPException(
+            400,
+            "raw engine extra_args are disabled by default; set "
+            "[server].allow_unsafe_deploy_options=true only on trusted "
+            "leaders if you need advanced engine flags",
+        )
+    if backend_name == "trtllm":
+        raise HTTPException(
+            400,
+            "trtllm deployments are disabled by default because the backend "
+            "enables Hugging Face remote code loading; set "
+            "[server].allow_unsafe_deploy_options=true only if you trust the "
+            "model repository and deployment surface",
+        )
+
+
+def _validate_profile_safe_deploy_options(
+    *,
+    profile: profile_store.ServiceProfile,
+    backend: Backend,
+    manager: LifecycleManager,
+) -> None:
+    if _unsafe_deploy_options_allowed(manager):
+        return
+    body = CreateDeploymentRequest(
+        model_name=profile.model_name,
+        hf_repo=profile.hf_repo,
+        revision=profile.revision,
+        backend=profile.backend,
+        image_tag=profile.image_tag,
+        gpu_ids=profile.gpu_ids,
+        tensor_parallel=profile.tensor_parallel,
+        max_model_len=profile.max_model_len,
+        dtype=profile.dtype,
+        pinned=profile.pinned,
+        idle_timeout_s=profile.idle_timeout_s,
+        target_concurrency=profile.target_concurrency,
+        max_loras=profile.max_loras,
+        extra_args=dict(profile.extra_args),
+        node_label=profile.node_label,
+    )
+    _validate_safe_deploy_options(
+        body=body,
+        backend_name=profile.backend,
+        backend=backend,
+        manager=manager,
+    )
+
+
 def _profile_to_plan(profile: profile_store.ServiceProfile) -> DeploymentPlan:
     return DeploymentPlan(
         model_name=profile.model_name,
@@ -188,6 +259,12 @@ async def create_deployment(
 ):
     try:
         plan, _backend = _plan_from_request(body, backends)
+        _validate_safe_deploy_options(
+            body=body,
+            backend_name=plan.backend,
+            backend=_backend,
+            manager=manager,
+        )
         dep = await manager.load(plan)
     except ValueError as e:
         raise HTTPException(400, str(e)) from e
@@ -284,10 +361,13 @@ def delete_model(name: str, conn: sqlite3.Connection = Depends(get_conn)):
     model = model_store.get_by_name(conn, name)
     if model is None:
         raise HTTPException(404, f"model {name!r} not found")
-    blocking = [
+    model_deployments = [
         dep for dep in dep_store.list_all(conn)
         if dep.model_id == model.id
-        and (
+    ]
+    blocking = [
+        dep for dep in model_deployments
+        if (
             dep.status in dep_store.ACTIVE_STATUSES
             or dep.status == "stopping"
             or (dep.status == "failed" and dep.container_id is not None)
@@ -298,6 +378,13 @@ def delete_model(name: str, conn: sqlite3.Connection = Depends(get_conn)):
         raise HTTPException(
             409,
             f"model {name!r} has deployments that must be stopped first: {ids}",
+        )
+    stopped_dep_ids = [dep.id for dep in model_deployments]
+    if stopped_dep_ids:
+        placeholders = ",".join(["?"] * len(stopped_dep_ids))
+        conn.execute(
+            f"UPDATE usage_events SET deployment_id=NULL WHERE deployment_id IN ({placeholders})",  # nosec
+            stopped_dep_ids,
         )
     model_store.delete(conn, model.id)
 
@@ -310,11 +397,18 @@ def list_service_profiles(conn: sqlite3.Connection = Depends(get_conn)):
 @router.post("/service-profiles", status_code=status.HTTP_201_CREATED)
 def create_service_profile(
     body: CreateServiceProfileRequest,
+    manager: LifecycleManager = Depends(get_manager),
     backends: dict[str, Backend] = Depends(get_backends),
     conn: sqlite3.Connection = Depends(get_conn),
 ):
     try:
         plan, _backend = _plan_from_request(body, backends)
+        _validate_safe_deploy_options(
+            body=body,
+            backend_name=plan.backend,
+            backend=_backend,
+            manager=manager,
+        )
         profile = profile_store.create(
             conn,
             name=body.name,
@@ -368,6 +462,11 @@ async def deploy_service_profile(
         raise HTTPException(400, f"backend {profile.backend!r} not supported")
     try:
         plan = _profile_to_plan(profile)
+        _validate_profile_safe_deploy_options(
+            profile=profile,
+            backend=backend,
+            manager=manager,
+        )
         _validate_backend_capabilities(plan=plan, backend=backend, backend_name=profile.backend)
         dep = await manager.load(plan)
     except ValueError as e:

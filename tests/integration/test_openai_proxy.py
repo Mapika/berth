@@ -103,7 +103,6 @@ def app_with_active_deployment(tmp_path, monkeypatch):
             r = await c.post("/admin/deployments", json={
                 "model_name": "llama-1b",
                 "hf_repo": "meta-llama/Llama-3.2-1B-Instruct",
-                "image_tag": "img:v1",
                 "gpu_ids": [0],
                 "max_model_len": 8192,
             })
@@ -332,7 +331,6 @@ async def test_proxy_forwards_upstream_500(tmp_path, monkeypatch):
         r = await c.post("/admin/deployments", json={
             "model_name": "llama-1b",
             "hf_repo": "meta-llama/Llama-3.2-1B-Instruct",
-            "image_tag": "img:v1",
             "gpu_ids": [0],
             "max_model_len": 8192,
         })

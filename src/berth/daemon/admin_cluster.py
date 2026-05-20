@@ -160,6 +160,7 @@ def admin_config(request: Request):
             ),
             "leader_url_override": cfg.leader_url_override,
             "leader_only": cfg.leader_only,
+            "allow_unsafe_deploy_options": cfg.allow_unsafe_deploy_options,
         },
         "sources": cfg.source,
         "config_file": str(_cfg.CONFIG_FILE),

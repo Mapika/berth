@@ -112,6 +112,23 @@ def test_leader_only_resolution_flag_env_file(_isolated_serve_home, monkeypatch)
     assert r.source["leader_only"] == "flag"
 
 
+def test_unsafe_deploy_options_default_off_and_opt_in(_isolated_serve_home, monkeypatch):
+    monkeypatch.setattr(config, "autodetect_outbound_ip", lambda: None)
+
+    r = config.resolve_config(env={})
+    assert r.allow_unsafe_deploy_options is False
+    assert r.source["allow_unsafe_deploy_options"] == "default"
+
+    config.save_config_file({"server": {"allow_unsafe_deploy_options": True}})
+    r = config.resolve_config(env={})
+    assert r.allow_unsafe_deploy_options is True
+    assert r.source["allow_unsafe_deploy_options"] == "file"
+
+    r = config.resolve_config(env={"BERTH_ALLOW_UNSAFE_DEPLOY_OPTIONS": "false"})
+    assert r.allow_unsafe_deploy_options is False
+    assert r.source["allow_unsafe_deploy_options"] == "env"
+
+
 def test_save_config_file_round_trip(_isolated_serve_home):
     config.save_config_file({
         "public": {"host": "a.com", "port": 8443},

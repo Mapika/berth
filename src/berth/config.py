@@ -125,6 +125,12 @@ class ResolvedConfig:
     # (`--node <label>` or service-profile node_label). Useful for hosting
     # the leader on a small VPS while GPU work runs on enrolled agents.
     leader_only: bool = False
+    # Security hardening for internet-facing leaders. When False, admin
+    # deploy requests may only use known backend default images and cannot
+    # pass raw engine flags that could enable remote-code execution or widen
+    # container capabilities. Operators can opt in for lab environments via
+    # [server].allow_unsafe_deploy_options=true.
+    allow_unsafe_deploy_options: bool = False
     source: dict[str, str] = field(default_factory=dict)
 
     @property
@@ -257,6 +263,7 @@ def resolve_config(
     cli_public_cert: str | None = None,
     cli_public_key: str | None = None,
     cli_leader_only: bool | None = None,
+    cli_allow_unsafe_deploy_options: bool | None = None,
     env: Mapping[str, str] | None = None,
 ) -> ResolvedConfig:
     """Resolve effective config from flags → env → file → autodetect/default.
@@ -370,6 +377,16 @@ def resolve_config(
         if not isinstance(leader_only_raw, bool)
         else leader_only_raw
     )
+    unsafe_deploy_raw = _pick(
+        "allow_unsafe_deploy_options", cli_allow_unsafe_deploy_options,
+        "SERVE_ALLOW_UNSAFE_DEPLOY_OPTIONS",
+        server_file, "allow_unsafe_deploy_options", False,
+    )
+    allow_unsafe_deploy_options = (
+        str(unsafe_deploy_raw).lower() in {"1", "true", "yes"}
+        if not isinstance(unsafe_deploy_raw, bool)
+        else unsafe_deploy_raw
+    )
     leader_override = _env_get(env_map, "SERVE_LEADER_URL")
     if leader_override:
         # Tag with whichever name the operator actually set.
@@ -401,5 +418,6 @@ def resolve_config(
         forwarded_allow_ips=str(forwarded_allow_ips),
         leader_url_override=leader_override,
         leader_only=bool(leader_only),
+        allow_unsafe_deploy_options=bool(allow_unsafe_deploy_options),
         source=source,
     )

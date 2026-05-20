@@ -123,13 +123,12 @@ async def test_proxy_round_trip_over_real_http(tmp_path, monkeypatch):
             # Register a deployment that targets the running fake engine
             r = await c.post(
                 f"http://127.0.0.1:{daemon_port}/admin/deployments",
-                json={
-                    "model_name": "llama-1b",
-                    "hf_repo": "meta-llama/Llama-3.2-1B-Instruct",
-                    "image_tag": "img:v1",
-                    "gpu_ids": [0],
-                    "max_model_len": 8192,
-                },
+                    json={
+                        "model_name": "llama-1b",
+                        "hf_repo": "meta-llama/Llama-3.2-1B-Instruct",
+                        "gpu_ids": [0],
+                        "max_model_len": 8192,
+                    },
             )
             assert r.status_code == 201
 

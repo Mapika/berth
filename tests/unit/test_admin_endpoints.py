@@ -1,3 +1,4 @@
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
 import httpx
@@ -9,6 +10,7 @@ from berth.daemon.app import build_app
 from berth.lifecycle.docker_client import ContainerHandle
 from berth.store import api_keys as key_store
 from berth.store import db
+from berth.store import usage_events as usage_store
 
 
 @pytest.fixture
@@ -41,7 +43,7 @@ def app(tmp_path, monkeypatch):
         gpus=[GPUInfo(index=0, name="H100", total_mb=80 * 1024)],
         _islands={0: frozenset({0})},
     )
-    return build_app(
+    app = build_app(
         conn=conn,
         docker_client=docker_client,
         backends={"vllm": VLLMBackend()},
@@ -49,6 +51,11 @@ def app(tmp_path, monkeypatch):
         topology=topology,
         serve_home=tmp_path,
     )
+    # Most legacy endpoint tests exercise raw image/extra-arg plumbing.
+    # Security-default behavior is covered explicitly below.
+    app.state.manager.resolved_cfg = SimpleNamespace(allow_unsafe_deploy_options=True)
+    app.state.resolved_cfg = app.state.manager.resolved_cfg
+    return app
 
 
 @pytest.mark.asyncio
@@ -77,6 +84,71 @@ async def test_create_deployment(app):
     assert r.status_code == 201
     body = r.json()
     assert body["status"] == "ready"
+
+
+@pytest.mark.asyncio
+async def test_safe_mode_allows_default_vllm_deploy(app):
+    app.state.manager.resolved_cfg = SimpleNamespace(allow_unsafe_deploy_options=False)
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test", timeout=30) as c:
+        r = await c.post(
+            "/admin/deployments",
+            json={
+                "model_name": "safe-llama",
+                "hf_repo": "meta-llama/Llama-3.2-1B-Instruct",
+                "backend": "vllm",
+                "gpu_ids": [0],
+                "max_model_len": 8192,
+            },
+        )
+    assert r.status_code == 201, r.text
+
+
+@pytest.mark.asyncio
+async def test_safe_mode_rejects_risky_deploy_options(app):
+    from berth.backends.trtllm import TRTLLMBackend
+
+    app.state.manager.resolved_cfg = SimpleNamespace(allow_unsafe_deploy_options=False)
+    app.state.backends["trtllm"] = TRTLLMBackend()
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test", timeout=30) as c:
+        r = await c.post(
+            "/admin/deployments",
+            json={
+                "model_name": "custom-image",
+                "hf_repo": "org/model",
+                "backend": "vllm",
+                "image_tag": "attacker/image:latest",
+                "gpu_ids": [0],
+            },
+        )
+        assert r.status_code == 400
+        assert "custom engine images are disabled" in r.text
+
+        r = await c.post(
+            "/admin/deployments",
+            json={
+                "model_name": "raw-flags",
+                "hf_repo": "org/model",
+                "backend": "vllm",
+                "gpu_ids": [0],
+                "extra_args": {"--trust-remote-code": ""},
+            },
+        )
+        assert r.status_code == 400
+        assert "extra_args are disabled" in r.text
+
+        r = await c.post(
+            "/admin/deployments",
+            json={
+                "model_name": "trt",
+                "hf_repo": "org/model",
+                "backend": "trtllm",
+                "gpu_ids": [0],
+            },
+        )
+        assert r.status_code == 400
+        assert "trtllm deployments are disabled" in r.text
 
 
 @pytest.mark.asyncio
@@ -231,6 +303,40 @@ async def test_delete_model_rejects_active_deployment(app):
         r = await c.delete("/admin/models/llama-1b")
     assert r.status_code == 409
     assert "must be stopped first" in r.text
+
+
+@pytest.mark.asyncio
+async def test_delete_model_after_stopped_deployment_with_usage_history(app):
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test", timeout=30) as c:
+        r = await c.post(
+            "/admin/deployments",
+            json={
+                "model_name": "llama-1b",
+                "hf_repo": "meta-llama/Llama-3.2-1B-Instruct",
+                "image_tag": "vllm/vllm-openai:v0.7.3",
+                "gpu_ids": [0],
+                "max_model_len": 8192,
+            },
+        )
+        assert r.status_code == 201, r.text
+        dep_id = r.json()["id"]
+        usage_id = usage_store.record(
+            app.state.conn,
+            model_name="llama-1b",
+            base_name="llama-1b",
+            deployment_id=dep_id,
+        )
+
+        r = await c.delete(f"/admin/deployments/{dep_id}")
+        assert r.status_code == 204, r.text
+        r = await c.delete("/admin/models/llama-1b")
+        assert r.status_code == 204, r.text
+
+    row = app.state.conn.execute(
+        "SELECT deployment_id FROM usage_events WHERE id=?", (usage_id,),
+    ).fetchone()
+    assert row["deployment_id"] is None
 
 
 @pytest.mark.asyncio

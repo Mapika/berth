@@ -191,6 +191,7 @@ def build_apps(
         event_bus=event_bus,
         configs_dir=configs_dir,
         agent_registry=agent_registry,
+        resolved_cfg=resolved_cfg,
     )
 
     from berth.lifecycle.health_monitor import HealthMonitor

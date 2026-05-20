@@ -98,7 +98,7 @@ def _remote_vram_reservation_mb(
             return 0
         per_gpu = node.total_vram_mb / node.gpu_count
         selected = [int(per_gpu) for _ in gpu_ids]
-    return int(math.ceil(sum(selected) * gpu_memory_utilization))
+    return math.ceil(sum(selected) * gpu_memory_utilization)
 
 
 async def _dispatch_start(
@@ -159,6 +159,7 @@ class LifecycleManager:
         event_bus: EventBus | None = None,
         configs_dir: Path | None = None,
         agent_registry: AgentRegistry | None = None,
+        resolved_cfg: object | None = None,
     ):
         self._conn = conn
         self._docker = docker_client
@@ -169,6 +170,7 @@ class LifecycleManager:
         self._load_timeout_s = load_timeout_s
         self._events = event_bus
         self._registry = agent_registry
+        self.resolved_cfg = resolved_cfg
         self._lock = asyncio.Lock()
         self._adapter_locks: dict[int, asyncio.Lock] = {}
 

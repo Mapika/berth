@@ -94,7 +94,6 @@ async def test_proxy_retries_when_first_candidate_node_is_unreachable(
         r = await c.post("/admin/deployments", json={
             "model_name": "llama-1b",
             "hf_repo": "meta-llama/Llama-3.2-1B-Instruct",
-            "image_tag": "img:v1",
             "gpu_ids": [0],
             "max_model_len": 8192,
         })
@@ -205,7 +204,6 @@ async def test_proxy_503_to_client_when_all_candidates_unreachable(
         await c.post("/admin/deployments", json={
             "model_name": "llama-1b",
             "hf_repo": "meta-llama/Llama-3.2-1B-Instruct",
-            "image_tag": "img:v1",
             "gpu_ids": [0],
             "max_model_len": 8192,
         })
