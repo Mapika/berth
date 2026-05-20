@@ -5,6 +5,7 @@ import pwd
 import shutil
 import signal
 import subprocess  # nosec
+import tempfile
 import time
 from pathlib import Path
 from typing import Any, cast
@@ -19,7 +20,7 @@ _DANGEROUS_HOMES = {
     Path("/etc"),
     Path("/home"),
     Path("/opt"),
-    Path("/tmp"),
+    Path(tempfile.gettempdir()).resolve(strict=False),
     Path("/usr"),
     Path("/var"),
     Path("/var/lib"),
