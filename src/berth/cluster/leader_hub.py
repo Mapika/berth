@@ -14,6 +14,7 @@ from berth.cluster.agent_registry import AgentRegistry
 from berth.cluster.protocol import (
     Heartbeat,
     Hello,
+    ReportAdopted,
     Welcome,
     decode_frame,
     encode_frame,
@@ -23,6 +24,52 @@ from berth.daemon.metrics_aggregator import MetricsAggregator
 from berth.store import nodes as nodes_store
 
 log = logging.getLogger(__name__)
+
+
+def reconcile_adopted(conn, *, node_id: int, endpoints: list[dict]) -> None:
+    """Make this node's source='adopted' rows equal `endpoints` (full state).
+
+    Upserts present entries (creating the model row if needed), marks them
+    ready/failed by `alive`, and deletes rows whose container_id is absent
+    from the report. An endpoint whose GPUs collide with a *managed* ready
+    deployment is skipped (logged); its row, if any, is removed."""
+    from berth.store import deployments as dep_store
+    from berth.store import models as model_store
+
+    managed_gpus: set[int] = set()
+    for d in dep_store.list_all(conn):
+        if d.source == "managed" and d.status in ("pending", "loading", "ready"):
+            managed_gpus.update(d.gpu_ids)
+
+    keep_cids: set[str] = set()
+    for ep in endpoints:
+        if managed_gpus.intersection(ep.get("gpu_ids") or []):
+            log.warning(
+                "adopted endpoint %s on node %s conflicts with managed GPUs %s; skipping",
+                ep.get("container_id"), node_id,
+                sorted(managed_gpus.intersection(ep["gpu_ids"])),
+            )
+            continue
+        model = model_store.get_by_name(conn, ep["model_name"])
+        if model is None:
+            try:
+                model = model_store.add(
+                    conn, name=ep["model_name"], hf_repo=ep["model_name"])
+            except model_store.AlreadyExists:
+                model = model_store.get_by_name(conn, ep["model_name"])
+        dep_store.upsert_adopted(
+            conn, model_id=model.id, node_id=node_id,
+            container_id=ep["container_id"], address=ep["address"],
+            port=int(ep["port"]), gpu_ids=list(ep.get("gpu_ids") or []),
+            vram_reserved_mb=int(ep.get("vram_reserved_mb") or 0),
+            image_tag=str(ep.get("image_tag") or "external"),
+            status="ready" if ep.get("alive") else "failed",
+        )
+        keep_cids.add(ep["container_id"])
+
+    for d in dep_store.list_adopted_for_node(conn, node_id):
+        if d.container_id not in keep_cids:
+            dep_store.delete_adopted(conn, d.id)
 
 
 FingerprintResolver = Callable[[WebSocket], str | None]
@@ -297,6 +344,13 @@ class LeaderHub:
                     continue
                 if isinstance(frame, Heartbeat):
                     self._handle_heartbeat(node_id=node.id, frame=frame)
+                    continue
+                if isinstance(frame, ReportAdopted):
+                    try:
+                        reconcile_adopted(
+                            self._conn, node_id=node.id, endpoints=frame.endpoints)
+                    except Exception:
+                        log.exception("adopted reconcile failed for node %s", node.id)
                     continue
                 await link.inbound(frame)
         finally:
