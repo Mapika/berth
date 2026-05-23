@@ -13,12 +13,12 @@ import httpx
 import websockets
 import yaml
 
+from berth.cluster import adopted as adopted_mod
 from berth.cluster.metrics_collector import (
     InFlightCounter,
     LatencyRecorder,
     build_snapshot,
 )
-from berth.cluster import adopted as adopted_mod
 from berth.cluster.protocol import (
     Frame,
     Heartbeat,
