@@ -34,6 +34,7 @@ class Deployment:
     max_lora_rank: int = 0  # 0 = unset; treat as engine default (16)
     image_digest: str | None = None  # docker image content-id (sha256:...)
     node_id: int = 0  # which cluster node owns this deployment (migration 014)
+    source: str = "managed"  # 'managed' | 'adopted' (migration 016)
 
 
 def _row_to_dep(row: sqlite3.Row) -> Deployment:
@@ -43,6 +44,7 @@ def _row_to_dep(row: sqlite3.Row) -> Deployment:
     max_lora_rank_value = row_get(row, "max_lora_rank", 0)
     image_digest_value = row_get(row, "image_digest")
     node_id_value = row_get(row, "node_id", 0)
+    source_value = row_get(row, "source", "managed")
     return Deployment(
         id=row["id"],
         model_id=row["model_id"],
@@ -66,6 +68,7 @@ def _row_to_dep(row: sqlite3.Row) -> Deployment:
         max_lora_rank=max_lora_rank_value or 0,
         image_digest=image_digest_value,
         node_id=int(node_id_value or 0),
+        source=source_value or "managed",
     )
 
 
@@ -268,4 +271,84 @@ def set_image_digest(conn: sqlite3.Connection, dep_id: int, digest: str) -> None
     conn.execute(
         "UPDATE deployments SET image_digest = ? WHERE id = ?",
         (digest, dep_id),
+    )
+
+
+def upsert_adopted(
+    conn: sqlite3.Connection,
+    *,
+    model_id: int,
+    node_id: int,
+    container_id: str,
+    address: str,
+    port: int,
+    gpu_ids: list[int],
+    vram_reserved_mb: int,
+    image_tag: str,
+    status: Status = "ready",
+) -> Deployment:
+    """Create or update the adopted deployment for (node_id, container_id).
+
+    Keyed on (node_id, container_id) so a repeated full-state report updates
+    the existing row instead of duplicating it."""
+    gpu_csv = ",".join(str(g) for g in gpu_ids)
+    existing = conn.execute(
+        "SELECT id FROM deployments "
+        "WHERE source='adopted' AND node_id=? AND container_id=?",
+        (node_id, container_id),
+    ).fetchone()
+    if existing is not None:
+        conn.execute(
+            """
+            UPDATE deployments
+            SET model_id=?, backend='adopted', image_tag=?, gpu_ids=?,
+                tensor_parallel=?, max_model_len=NULL, dtype='auto',
+                container_name=?, container_port=?, container_address=?,
+                vram_reserved_mb=?, status=?, last_error=NULL
+            WHERE id=?
+            """,
+            (model_id, image_tag, gpu_csv, max(1, len(gpu_ids)),
+             container_id, port, address, vram_reserved_mb, status,
+             existing["id"]),
+        )
+        dep_id = existing["id"]
+    else:
+        cur = conn.execute(
+            """
+            INSERT INTO deployments
+                (model_id, backend, image_tag, gpu_ids, tensor_parallel,
+                 max_model_len, dtype, pinned, idle_timeout_s,
+                 vram_reserved_mb, node_id, source,
+                 container_id, container_name, container_port,
+                 container_address, status)
+            VALUES (?, 'adopted', ?, ?, ?, NULL, 'auto', 0, NULL, ?, ?,
+                    'adopted', ?, ?, ?, ?, ?)
+            """,
+            (model_id, image_tag, gpu_csv, max(1, len(gpu_ids)),
+             vram_reserved_mb, node_id, container_id, container_id,
+             port, address, status),
+        )
+        if cur.lastrowid is None:
+            raise RuntimeError("adopted deployment insert returned no id")
+        dep_id = cur.lastrowid
+    result = get_by_id(conn, dep_id)
+    if result is None:
+        raise RuntimeError(f"adopted upsert lost row id={dep_id}")
+    return result
+
+
+def list_adopted_for_node(
+    conn: sqlite3.Connection, node_id: int
+) -> list[Deployment]:
+    rows = conn.execute(
+        "SELECT * FROM deployments WHERE source='adopted' AND node_id=? "
+        "ORDER BY id",
+        (node_id,),
+    ).fetchall()
+    return [_row_to_dep(r) for r in rows]
+
+
+def delete_adopted(conn: sqlite3.Connection, dep_id: int) -> None:
+    conn.execute(
+        "DELETE FROM deployments WHERE id=? AND source='adopted'", (dep_id,)
     )
