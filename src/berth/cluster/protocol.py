@@ -113,11 +113,23 @@ class LogCancel:
     type: str = "log_cancel"
 
 
+@dataclass
+class ReportAdopted:
+    """Agent → leader: the FULL current set of adopted endpoints on this node.
+
+    Full-state (not incremental): the leader makes its source='adopted' rows
+    for the node equal this list — entries absent here are removed and their
+    GPUs freed. Sent after Hello on connect and whenever the local set or any
+    `alive` flag changes."""
+    endpoints: list[dict[str, Any]]
+    type: str = "report_adopted"
+
+
 Frame = (
     Hello | Welcome | Heartbeat | GpuStats
     | StartDeployment | StopDeployment | OpResult
     | HttpRequest | HttpChunk | HttpCancel
-    | LogStream | LogChunk | LogCancel
+    | LogStream | LogChunk | LogCancel | ReportAdopted
 )
 
 
@@ -135,6 +147,7 @@ _REGISTRY: dict[str, type] = {
     "log_stream": LogStream,
     "log_chunk": LogChunk,
     "log_cancel": LogCancel,
+    "report_adopted": ReportAdopted,
 }
 
 
