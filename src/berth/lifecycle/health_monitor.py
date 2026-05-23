@@ -58,6 +58,8 @@ class HealthMonitor:
         async with self._client_factory() as client:
             for d in ready:
                 seen.add(d.id)
+                if getattr(d, "source", "managed") == "adopted":
+                    continue
                 backend = self._backends.get(d.backend)
                 if backend is None:
                     continue

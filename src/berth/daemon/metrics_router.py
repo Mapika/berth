@@ -40,6 +40,8 @@ async def metrics(request: Request) -> str:
     backends_dict = request.app.state.backends
     engine_urls: list[tuple[int, str]] = []
     for d in dep_store.list_ready(conn):
+        if getattr(d, "source", "managed") == "adopted":
+            continue
         backend = backends_dict.get(d.backend)
         if backend is None or d.container_address is None:
             continue

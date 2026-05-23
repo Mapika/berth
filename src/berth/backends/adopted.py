@@ -9,7 +9,8 @@ members are irrelevant for adopted rows:
 - Adapters cannot be hot-loaded into an adopted deployment (adapter_name
   is always None for adopted rows, so ensure_adapter_loaded is never called).
 - Health checks for adopted deployments are handled by the agent, not by
-  berth's HealthMonitor (which skips source='adopted' rows).
+  berth's HealthMonitor (which skips source='adopted' rows, as do the
+  reaper and manager._stop_locked).
 
 The sentinel raises NotImplementedError on all non-routing accessors so any
 accidental call site is immediately obvious rather than silently wrong.

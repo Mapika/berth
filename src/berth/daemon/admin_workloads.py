@@ -230,6 +230,11 @@ def _plan_from_request(
     from berth.backends.selection import load_selection, pick_backend
 
     backend_name = body.backend or pick_backend(load_selection(), body.model_name)
+    if backend_name == "adopted":
+        raise HTTPException(
+            400,
+            "adopted is a reserved internal backend and cannot be deployed manually",
+        )
     if backend_name not in backends:
         raise HTTPException(400, f"backend {backend_name!r} not supported")
     backend = backends[backend_name]

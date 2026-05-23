@@ -5,6 +5,7 @@ from unittest.mock import AsyncMock, MagicMock
 import httpx
 import pytest
 
+from berth.backends.adopted import AdoptedBackend
 from berth.backends.base import ContainerBackend
 from berth.backends.manifest import EngineManifest, Headroom
 from berth.lifecycle.health_monitor import HealthMonitor
@@ -208,3 +209,48 @@ async def test_health_monitor_prunes_stale_counter_entries(conn):
 
     await monitor.tick_once()
     assert dep_id not in monitor._failures
+
+
+@pytest.mark.asyncio
+async def test_health_monitor_skips_adopted_deployment(conn):
+    """Adopted (source='adopted') ready deployments must be silently skipped.
+
+    The HealthMonitor must not call backend.health_path (which raises
+    NotImplementedError on AdoptedBackend) and must leave the row in 'ready'.
+    """
+    m = model_store.add(conn, name="adopted-model", hf_repo="org/ext")
+    # Use upsert_adopted so source='adopted' is set correctly.
+    d = dep_store.upsert_adopted(
+        conn,
+        model_id=m.id,
+        node_id=0,
+        container_id="ext-cid",
+        address="127.0.0.1",
+        port=8080,
+        gpu_ids=[0],
+        vram_reserved_mb=0,
+        image_tag="external:latest",
+        status="ready",
+    )
+    dep_id = d.id
+
+    manager = MagicMock()
+    manager._emit = AsyncMock()
+
+    # Use AdoptedBackend as the sentinel — any call to health_path raises.
+    monitor = HealthMonitor(
+        conn=conn,
+        backends={"adopted": AdoptedBackend()},
+        manager=manager,
+        interval_s=0.01,
+        max_consecutive_failures=1,
+        client_factory=_make_client_factory(503),
+    )
+
+    # tick_once must not raise NotImplementedError and must not mark failed.
+    await monitor.tick_once()
+
+    refreshed = dep_store.get_by_id(conn, dep_id)
+    assert refreshed.status == "ready", "adopted deployment must not be marked failed"
+    assert dep_id not in monitor._failures
+    manager._emit.assert_not_called()
