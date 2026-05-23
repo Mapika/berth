@@ -9,14 +9,18 @@ def _e(cid, port=1):
 
 
 def test_alive_stays_true_on_single_failure():
-    entries = [_e("a")]; fails = {}; alive = {}
+    entries = [_e("a")]
+    fails = {}
+    alive = {}
     _recompute_alive(entries, fails, alive, probe=lambda a, p: True)
     changed = _recompute_alive(entries, fails, alive, probe=lambda a, p: False)
     assert alive["a"] is True and changed is False and fails["a"] == 1
 
 
 def test_two_failures_flip_to_down_then_recover():
-    entries = [_e("a")]; fails = {}; alive = {"a": True}
+    entries = [_e("a")]
+    fails = {}
+    alive = {"a": True}
     _recompute_alive(entries, fails, alive, probe=lambda a, p: False)
     changed = _recompute_alive(entries, fails, alive, probe=lambda a, p: False)
     assert alive["a"] is False and changed is True
@@ -25,6 +29,7 @@ def test_two_failures_flip_to_down_then_recover():
 
 
 def test_removed_endpoint_is_pruned():
-    entries = [_e("a")]; fails = {"a": 0}; alive = {"a": True}
+    fails = {"a": 0}
+    alive = {"a": True}
     changed = _recompute_alive([], fails, alive, probe=lambda a, p: True)
     assert "a" not in alive and "a" not in fails and changed is True

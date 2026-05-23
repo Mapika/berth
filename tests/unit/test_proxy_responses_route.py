@@ -1,5 +1,7 @@
 from __future__ import annotations
+
 from berth.daemon import openai_proxy
+
 
 def test_responses_route_registered():
     paths = {r.path for r in openai_proxy.router.routes}
