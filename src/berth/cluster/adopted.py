@@ -7,6 +7,8 @@ from typing import Any
 import httpx
 import yaml
 
+from berth.lifecycle.docker_client import DockerClient
+
 
 class AdoptError(Exception):
     """Raised for invalid adopt requests (collision, unreachable endpoint)."""
@@ -75,6 +77,7 @@ def probe_served_model(address: str, port: int, *, timeout: float = 5.0) -> str:
     url = f"http://{address}:{port}/v1/models"
     try:
         r = httpx.get(url, timeout=timeout)
+        r.raise_for_status()
         data = r.json().get("data") or []
         if not data:
             raise AdoptError(f"{url} returned no models")
@@ -83,7 +86,7 @@ def probe_served_model(address: str, port: int, *, timeout: float = 5.0) -> str:
         raise AdoptError(f"endpoint {address}:{port} not reachable: {e}") from e
 
 
-def introspect_container(dc, name: str) -> tuple[str, str, int, list[int], str]:
+def introspect_container(dc: DockerClient, name: str) -> tuple[str, str, int, list[int], str]:
     """Resolve a running docker container by name to
     (container_id, host_address, host_port, gpu_ids, image_tag).
 

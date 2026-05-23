@@ -43,9 +43,25 @@ def test_add_entry_rejects_gpu_overlap(tmp_path):
 def test_probe_returns_served_model(monkeypatch):
     def fake_get(url, timeout):
         assert url.endswith("/v1/models")
-        return httpx.Response(200, json={"data": [{"id": "served-x"}]})
+        return httpx.Response(
+            200,
+            json={"data": [{"id": "served-x"}]},
+            request=httpx.Request("GET", url),
+        )
     monkeypatch.setattr(adopted.httpx, "get", fake_get)
     assert adopted.probe_served_model("127.0.0.1", 30011) == "served-x"
+
+
+def test_probe_raises_on_error_status(monkeypatch):
+    def fake_get(url, timeout):
+        return httpx.Response(
+            503,
+            json={"error": "overloaded"},
+            request=httpx.Request("GET", url),
+        )
+    monkeypatch.setattr(adopted.httpx, "get", fake_get)
+    with pytest.raises(adopted.AdoptError, match="not reachable"):
+        adopted.probe_served_model("127.0.0.1", 30011)
 
 
 def test_probe_raises_when_unreachable(monkeypatch):
