@@ -82,6 +82,41 @@ def register_adopted_endpoints(disp, entries: list[adopted_mod.AdoptedEndpoint])
             container_id=e.container_id, address=e.address, port=e.port)
 
 
+def _probe_endpoint(address: str, port: int, *, timeout: float = 5.0) -> bool:
+    """True if the adopted endpoint answers /v1/models with 2xx."""
+    import httpx
+    try:
+        r = httpx.get(f"http://{address}:{port}/v1/models", timeout=timeout)
+        return r.status_code < 400
+    except httpx.HTTPError:
+        return False
+
+
+def _recompute_alive(entries, fails_by_cid, alive_by_cid, *, probe=_probe_endpoint,
+                     threshold: int = 2) -> bool:
+    """Probe each entry; update alive/fail state. Returns True if any endpoint's
+    alive flag flipped. Stays alive until `threshold` consecutive failures."""
+    changed = False
+    seen = set()
+    for e in entries:
+        cid = e.container_id
+        seen.add(cid)
+        if probe(e.address, e.port):
+            fails_by_cid[cid] = 0
+            new_alive = True
+        else:
+            fails_by_cid[cid] = fails_by_cid.get(cid, 0) + 1
+            new_alive = fails_by_cid[cid] < threshold
+        if new_alive != alive_by_cid.get(cid, True):
+            changed = True
+        alive_by_cid[cid] = new_alive
+    for cid in [c for c in alive_by_cid if c not in seen]:
+        alive_by_cid.pop(cid, None)
+        fails_by_cid.pop(cid, None)
+        changed = True
+    return changed
+
+
 log = logging.getLogger(__name__)
 StatusCallback = Callable[[str, dict[str, Any]], None]
 
@@ -660,11 +695,13 @@ async def run_agent(
                     node_id=welcome.node_id,
                 )
 
+                alive_by_cid: dict[str, bool] = {}
+                fails_by_cid: dict[str, int] = {}
                 _adopted = adopted_mod.load(berth_home)
                 if _adopted:
                     register_adopted_endpoints(disp, _adopted)
                     await sender.send(encode_frame(
-                        build_adopted_report(_adopted, alive_by_cid={})))
+                        build_adopted_report(_adopted, alive_by_cid)))
 
                 import time as _t
                 agent_started_at = _t.time()
@@ -697,8 +734,23 @@ async def run_agent(
                         log.info("adopted.yaml changed, re-reporting %d endpoint(s)",
                                  len(entries))
                         await sender.send(encode_frame(
-                            build_adopted_report(entries, alive_by_cid={})))
+                            build_adopted_report(entries, alive_by_cid)))
                 wa = asyncio.create_task(watch_adopted())
+
+                async def health_probe(sender=sender, disp=disp):
+                    while True:
+                        await asyncio.sleep(15.0)
+                        entries = adopted_mod.load(berth_home)
+                        if not entries:
+                            continue
+                        changed = await asyncio.to_thread(
+                            _recompute_alive, entries, fails_by_cid, alive_by_cid)
+                        if changed:
+                            register_adopted_endpoints(disp, entries)
+                            log.info("adopted liveness changed, re-reporting")
+                            await sender.send(encode_frame(
+                                build_adopted_report(entries, alive_by_cid)))
+                wp = asyncio.create_task(health_probe())
 
                 try:
                     async for raw in ws:
@@ -717,6 +769,9 @@ async def run_agent(
                     wa.cancel()
                     with suppress(asyncio.CancelledError):
                         await wa
+                    wp.cancel()
+                    with suppress(asyncio.CancelledError):
+                        await wp
         except (OSError, websockets.WebSocketException) as e:
             log.warning(
                 "agent connection lost: %s; reconnecting in %.1fs",
