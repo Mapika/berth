@@ -75,6 +75,11 @@ def reconcile_adopted(conn, *, node_id: int, endpoints: list[dict]) -> None:
                     conn, name=ep["served_model_name"], hf_repo=ep["served_model_name"])
             except model_store.AlreadyExists:
                 model = model_store.get_by_name(conn, ep["served_model_name"])
+        if model is None:
+            log.warning(
+                "could not resolve model %r for adopted endpoint on node %s",
+                ep["served_model_name"], node_id)
+            continue
         ep_gpu_ids = list(ep.get("gpu_ids") or [])
         vram_mb = _effective_vram_mb(
             conn, node_id, ep_gpu_ids,

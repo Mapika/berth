@@ -1,8 +1,7 @@
 from berth.cluster.leader_hub import reconcile_adopted
-from berth.store import db
+from berth.store import db, node_gpus
 from berth.store import deployments as dep_store
 from berth.store import models as model_store
-from berth.store import node_gpus
 from berth.store import nodes as nodes_store
 
 

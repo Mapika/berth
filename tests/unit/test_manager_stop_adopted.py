@@ -1,10 +1,10 @@
 import asyncio
 
+from berth.lifecycle.manager import LifecycleManager
 from berth.store import db
 from berth.store import deployment_adapters as da_store
 from berth.store import deployments as dep_store
 from berth.store import models as model_store
-from berth.lifecycle.manager import LifecycleManager
 
 
 class _Docker:

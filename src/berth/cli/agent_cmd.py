@@ -430,10 +430,11 @@ def adopt(
         typer.echo("--gpus must be comma-separated integers, e.g. '0,7'", err=True)
         raise typer.Exit(1) from None
     if container:
+        from berth.config import DOCKER_NETWORK_NAME
         from berth.lifecycle.docker_client import DockerClient
         try:
             cid, addr, prt, c_gpus, image_tag = adopted_mod.introspect_container(
-                DockerClient(), container)
+                DockerClient(network_name=DOCKER_NETWORK_NAME), container)
         except Exception as e:
             typer.echo(f"adopt failed: {e}", err=True)
             raise typer.Exit(1) from e

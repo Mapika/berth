@@ -99,7 +99,7 @@ def introspect_container(dc: DockerClient, name: str) -> tuple[str, str, int, li
         if bindings:
             host_port = int(bindings[0]["HostPort"])
             addr = bindings[0].get("HostIp") or "127.0.0.1"
-            host_addr = "127.0.0.1" if addr in ("0.0.0.0", "") else addr
+            host_addr = "127.0.0.1" if addr in ("0.0.0.0", "") else addr  # nosec
             break
     if host_port is None:
         raise AdoptError(f"container {name!r} has no published host port")
