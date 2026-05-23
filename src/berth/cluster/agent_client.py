@@ -83,7 +83,7 @@ def register_adopted_endpoints(disp, entries: list[adopted_mod.AdoptedEndpoint])
 
 
 def _probe_endpoint(address: str, port: int, *, timeout: float = 5.0) -> bool:
-    """True if the adopted endpoint answers /v1/models with 2xx."""
+    """True if the adopted endpoint answers /v1/models with a non-4xx/5xx status (< 400)."""
     import httpx
     try:
         r = httpx.get(f"http://{address}:{port}/v1/models", timeout=timeout)
@@ -722,7 +722,7 @@ async def run_agent(
 
                 hb = asyncio.create_task(heartbeat())
 
-                async def watch_adopted(sender=sender, disp=disp):
+                async def watch_adopted(sender=sender, disp=disp, alive_by_cid=alive_by_cid):
                     from watchfiles import Change, awatch
 
                     def _adopted_only(change: Change, path: str) -> bool:
@@ -737,7 +737,10 @@ async def run_agent(
                             build_adopted_report(entries, alive_by_cid)))
                 wa = asyncio.create_task(watch_adopted())
 
-                async def health_probe(sender=sender, disp=disp):
+                async def health_probe(
+                    sender=sender, disp=disp,
+                    fails_by_cid=fails_by_cid, alive_by_cid=alive_by_cid,
+                ):
                     while True:
                         await asyncio.sleep(15.0)
                         entries = adopted_mod.load(berth_home)
