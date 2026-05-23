@@ -1,6 +1,7 @@
 import asyncio
 
 from berth.store import db
+from berth.store import deployment_adapters as da_store
 from berth.store import deployments as dep_store
 from berth.store import models as model_store
 from berth.lifecycle.manager import LifecycleManager
@@ -33,3 +34,4 @@ def test_stop_adopted_does_not_touch_docker(tmp_path):
     asyncio.run(mgr.stop(dep.id))
     assert docker.stopped == []                      # process untouched
     assert dep_store.get_by_id(conn, dep.id).status == "stopped"
+    assert da_store.count_for_deployment(conn, dep.id) == 0
