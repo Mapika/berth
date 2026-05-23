@@ -26,3 +26,6 @@ ui/tsconfig.tsbuildinfo
 console-*.log
 page-*.yml
 /*.png
+
+# AI-workflow specs/plans — never commit
+docs/superpowers/
