@@ -46,3 +46,14 @@ def test_reconcile_skips_gpu_conflict_with_managed(tmp_path):
     dep_store.update_status(conn, managed.id, "ready")
     reconcile_adopted(conn, node_id=3, endpoints=[_ep()])  # also wants gpu 7
     assert dep_store.list_adopted_for_node(conn, 3) == []
+
+
+def test_reconcile_registers_model_under_served_name(tmp_path):
+    conn = _conn(tmp_path)
+    reconcile_adopted(conn, node_id=3, endpoints=[_ep(
+        model_name="operator-label", served_model_name="real/served-name")])
+    # Routing/registry uses the SERVED name, not the operator's label.
+    assert model_store.get_by_name(conn, "real/served-name") is not None
+    assert model_store.get_by_name(conn, "operator-label") is None
+    dep = dep_store.find_ready_by_model_name(conn, "real/served-name")
+    assert dep is not None and dep.container_id == "cid-1"

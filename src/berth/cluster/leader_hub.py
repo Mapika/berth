@@ -21,6 +21,8 @@ from berth.cluster.protocol import (
 )
 from berth.cluster.remote_agent import RemoteAgentLink
 from berth.daemon.metrics_aggregator import MetricsAggregator
+from berth.store import deployments as dep_store
+from berth.store import models as model_store
 from berth.store import nodes as nodes_store
 
 log = logging.getLogger(__name__)
@@ -33,9 +35,6 @@ def reconcile_adopted(conn, *, node_id: int, endpoints: list[dict]) -> None:
     ready/failed by `alive`, and deletes rows whose container_id is absent
     from the report. An endpoint whose GPUs collide with a *managed* ready
     deployment is skipped (logged); its row, if any, is removed."""
-    from berth.store import deployments as dep_store
-    from berth.store import models as model_store
-
     managed_gpus: set[int] = set()
     for d in dep_store.list_all(conn):
         if d.source == "managed" and d.status in ("pending", "loading", "ready"):
@@ -47,16 +46,16 @@ def reconcile_adopted(conn, *, node_id: int, endpoints: list[dict]) -> None:
             log.warning(
                 "adopted endpoint %s on node %s conflicts with managed GPUs %s; skipping",
                 ep.get("container_id"), node_id,
-                sorted(managed_gpus.intersection(ep["gpu_ids"])),
+                sorted(managed_gpus.intersection(ep.get("gpu_ids", []))),
             )
             continue
-        model = model_store.get_by_name(conn, ep["model_name"])
+        model = model_store.get_by_name(conn, ep["served_model_name"])
         if model is None:
             try:
                 model = model_store.add(
-                    conn, name=ep["model_name"], hf_repo=ep["model_name"])
+                    conn, name=ep["served_model_name"], hf_repo=ep["served_model_name"])
             except model_store.AlreadyExists:
-                model = model_store.get_by_name(conn, ep["model_name"])
+                model = model_store.get_by_name(conn, ep["served_model_name"])
         dep_store.upsert_adopted(
             conn, model_id=model.id, node_id=node_id,
             container_id=ep["container_id"], address=ep["address"],
