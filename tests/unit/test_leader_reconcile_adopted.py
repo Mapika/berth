@@ -2,12 +2,23 @@ from berth.cluster.leader_hub import reconcile_adopted
 from berth.store import db
 from berth.store import deployments as dep_store
 from berth.store import models as model_store
+from berth.store import node_gpus
+from berth.store import nodes as nodes_store
 
 
 def _conn(tmp_path):
     conn = db.connect(tmp_path / "t.db")
     db.init_schema(conn)
     return conn
+
+
+def _seed_node(conn) -> int:
+    return nodes_store.insert(
+        conn, label="agent-node", fingerprint="sha256:test",
+        reachable_as=None, first_seen=0.0, last_seen=0.0,
+        agent_version=None, cpu_count=0, total_ram_mb=0,
+        gpu_count=0, total_vram_mb=0,
+    )
 
 
 def _ep(**over):
@@ -57,3 +68,56 @@ def test_reconcile_registers_model_under_served_name(tmp_path):
     assert model_store.get_by_name(conn, "operator-label") is None
     dep = dep_store.find_ready_by_model_name(conn, "real/served-name")
     assert dep is not None and dep.container_id == "cid-1"
+
+
+def test_reconcile_defaults_vram_to_full_gpu_size(tmp_path):
+    """When an adopted endpoint reports vram_reserved_mb=0, the leader fills it
+    in from the node's known per-GPU VRAM so placement treats that GPU as
+    fully occupied."""
+    conn = _conn(tmp_path)
+    node_id = _seed_node(conn)
+    node_gpus.upsert(
+        conn, node_id=node_id, gpu_index=7, name="NVIDIA H100",
+        total_vram_mb=275040, driver_version="550.54.15",
+    )
+    reconcile_adopted(conn, node_id=node_id, endpoints=[_ep(gpu_ids=[7], vram_reserved_mb=0)])
+    rows = dep_store.list_adopted_for_node(conn, node_id)
+    assert len(rows) == 1
+    assert rows[0].vram_reserved_mb == 275040
+
+
+def test_reconcile_respects_explicit_vram(tmp_path):
+    """When an adopted endpoint reports a non-zero vram_reserved_mb, the leader
+    keeps it as-is (operator override wins)."""
+    conn = _conn(tmp_path)
+    node_id = _seed_node(conn)
+    node_gpus.upsert(
+        conn, node_id=node_id, gpu_index=7, name="NVIDIA H100",
+        total_vram_mb=275040, driver_version="550.54.15",
+    )
+    reconcile_adopted(conn, node_id=node_id, endpoints=[_ep(gpu_ids=[7], vram_reserved_mb=1000)])
+    rows = dep_store.list_adopted_for_node(conn, node_id)
+    assert len(rows) == 1
+    assert rows[0].vram_reserved_mb == 1000
+
+
+def test_reconcile_defaults_vram_sum_for_multi_gpu(tmp_path):
+    """For a multi-GPU endpoint with vram_reserved_mb=0, the leader sums the
+    total_vram_mb of all the endpoint's gpu_ids."""
+    conn = _conn(tmp_path)
+    node_id = _seed_node(conn)
+    node_gpus.upsert(
+        conn, node_id=node_id, gpu_index=6, name="NVIDIA H100",
+        total_vram_mb=275040, driver_version="550.54.15",
+    )
+    node_gpus.upsert(
+        conn, node_id=node_id, gpu_index=7, name="NVIDIA H100",
+        total_vram_mb=275040, driver_version="550.54.15",
+    )
+    reconcile_adopted(
+        conn, node_id=node_id,
+        endpoints=[_ep(gpu_ids=[6, 7], vram_reserved_mb=0)],
+    )
+    rows = dep_store.list_adopted_for_node(conn, node_id)
+    assert len(rows) == 1
+    assert rows[0].vram_reserved_mb == 550080

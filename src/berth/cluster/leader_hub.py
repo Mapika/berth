@@ -23,9 +23,28 @@ from berth.cluster.remote_agent import RemoteAgentLink
 from berth.daemon.metrics_aggregator import MetricsAggregator
 from berth.store import deployments as dep_store
 from berth.store import models as model_store
+from berth.store import node_gpus as node_gpus_store
 from berth.store import nodes as nodes_store
 
 log = logging.getLogger(__name__)
+
+
+def _effective_vram_mb(
+    conn,
+    node_id: int,
+    gpu_ids: list[int],
+    reported_mb: int,
+) -> int:
+    """Return the VRAM reservation to record for an adopted endpoint.
+
+    If the operator supplied a non-zero value, honour it (operator wins).
+    Otherwise look up the node's per-GPU totals and sum them for the
+    endpoint's GPUs so placement treats those GPUs as fully occupied.
+    Falls back to 0 when no node_gpus info is available."""
+    if reported_mb:
+        return reported_mb
+    gpu_map = {g.gpu_index: g.total_vram_mb for g in node_gpus_store.list_for_node(conn, node_id)}
+    return sum(gpu_map.get(idx, 0) for idx in gpu_ids)
 
 
 def reconcile_adopted(conn, *, node_id: int, endpoints: list[dict]) -> None:
@@ -56,11 +75,16 @@ def reconcile_adopted(conn, *, node_id: int, endpoints: list[dict]) -> None:
                     conn, name=ep["served_model_name"], hf_repo=ep["served_model_name"])
             except model_store.AlreadyExists:
                 model = model_store.get_by_name(conn, ep["served_model_name"])
+        ep_gpu_ids = list(ep.get("gpu_ids") or [])
+        vram_mb = _effective_vram_mb(
+            conn, node_id, ep_gpu_ids,
+            int(ep.get("vram_reserved_mb") or 0),
+        )
         dep_store.upsert_adopted(
             conn, model_id=model.id, node_id=node_id,
             container_id=ep["container_id"], address=ep["address"],
-            port=int(ep["port"]), gpu_ids=list(ep.get("gpu_ids") or []),
-            vram_reserved_mb=int(ep.get("vram_reserved_mb") or 0),
+            port=int(ep["port"]), gpu_ids=ep_gpu_ids,
+            vram_reserved_mb=vram_mb,
             image_tag=str(ep.get("image_tag") or "external"),
             status="ready" if ep.get("alive") else "failed",
         )
