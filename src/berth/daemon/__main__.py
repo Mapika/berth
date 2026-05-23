@@ -12,6 +12,7 @@ import structlog
 import uvicorn
 
 from berth import config
+from berth.backends.adopted import AdoptedBackend
 from berth.backends.base import Backend
 from berth.backends.sglang import SGLangBackend
 from berth.backends.trtllm import TRTLLMBackend
@@ -124,6 +125,11 @@ async def run_daemon(cfg: config.ResolvedConfig, sock_path: Path) -> None:
         "vllm": VLLMBackend(manifest["vllm"]),
         "sglang": SGLangBackend(manifest["sglang"]),
         "trtllm": TRTLLMBackend(manifest["trtllm"]),
+        # Adopted deployments run on externally-hosted engines. The proxy
+        # reads backend.openai_base to build the upstream path; '/v1' is
+        # the standard OpenAI-compatible prefix served by all supported
+        # engines. No image is ever pulled or container started for these.
+        "adopted": AdoptedBackend(),
     }
 
     # Cluster-CA-signed server cert covers both listeners (cluster cert
