@@ -32,6 +32,8 @@ class Reaper:
     async def tick_once(self) -> None:
         now = self._now()
         for d in self._list_ready():
+            if getattr(d, "source", "managed") == "adopted":
+                continue  # berth doesn't own adopted endpoints' lifecycle
             if d.pinned:
                 continue
             if d.status != "ready":

@@ -453,6 +453,56 @@ process keeps trying to reconnect; stop it on the agent host
 (`Ctrl-C` or your service manager). The local node (`label=local`)
 cannot be removed.
 
+## Adopting an externally-hosted model
+
+An agent can adopt an already-running OpenAI-compatible inference server on its host. The model becomes routable through the leader's gateway without berth launching, stopping, or managing the server — berth registers the endpoint and routes `/v1/*` requests to it. This is useful for integrating legacy services, third-party providers, or manual deployments.
+
+### Register an adopted endpoint
+
+By **docker container name** (berth introspects the published port, GPU device-requests, and `/v1/models` list):
+
+```bash
+berth agent adopt --container my-inference-server
+```
+
+By **host and port** (you supply details):
+
+```bash
+berth agent adopt --port 30011 --model nvidia/MiniMax-M2.7-NVFP4 \
+  --host 127.0.0.1 --gpus 0 --vram-mb 5000
+```
+
+The **served name** is the routing name clients pass to the leader's gateway, determined in this order:
+
+- If `--served-model-name S` is given, that is the served name.
+- Otherwise berth queries the endpoint's `/v1/models` and uses the first model's `id`.
+
+The `--model` flag is the local registry/label; when no `--served-model-name` is given it is not necessarily the routing name. Clients reach the model at the leader gateway using the served name.
+
+### List adopted endpoints
+
+```bash
+berth agent adopted
+```
+
+Shows all adopted endpoints on the current agent host.
+
+### Remove an adopted endpoint
+
+```bash
+berth agent unadopt nvidia/MiniMax-M2.7-NVFP4
+```
+
+The server keeps running — the route is dropped only. If you remove the adoption from the report (or `unadopt`), berth stops routing but does not stop the external process.
+
+### Notes
+
+- **Model name.** Adopted models are routable at the leader's gateway under their **served name** (`--served-model-name`, else the first `/v1/models` `id`; see above). SDK clients call the leader with that served name, and the request is proxied through the agent to the external server.
+- **Lifecycle.** berth never starts, stops, restarts, or idle-evicts an adopted server. The operator or another orchestration system is responsible for keeping it running. berth only registers the endpoint and routes `/v1/*` requests to it. `unadopt` removes the route only.
+- **Liveness.** berth does **not** currently actively health-probe adopted endpoints; they are reported alive on (re)connect. If the upstream server is down, requests to it fail at proxy time and surface as errors to the client. Active liveness probing of adopted endpoints is a planned enhancement.
+- **GPU reservation.** Adopted endpoints reserve their declared GPU(s) in berth's scheduler, preventing other models from being placed on those GPUs. If you change the GPU allocation on the external server, update the adoption with `berth agent adopt --gpus` or re-adopt. Note: berth's automatic placement/scheduler runs for leader-local deployments; on remote agent nodes GPU assignment is operator-driven, so an adopted endpoint's reserved GPUs are recorded for accounting/visibility but the operator is responsible for not double-assigning them there.
+- **Persistence.** The adopted set is stored in `~/.berth/adopted.yaml` on the agent and reported to the leader on every connect (and re-reported when that file changes), so adoptions survive agent restarts.
+
 ## Tuning
 
 Most defaults are sensible for a small fleet. If you need to change

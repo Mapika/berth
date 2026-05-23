@@ -762,6 +762,12 @@ class LifecycleManager:
         if dep is None:
             return
         dep_store.update_status(self._conn, dep.id, "stopping")
+        if dep.source == "adopted":
+            # berth never started this process; just drop the route + row.
+            da_store.detach_all(self._conn, dep.id)
+            dep_store.update_status(self._conn, dep.id, "stopped")
+            await self._emit("deployment.stopped", dep_id=dep_id)
+            return
         # Decide whether the container lives on this host or on a remote
         # agent. node_id 0 (or matching the local node) → local docker;
         # otherwise dispatch the stop through the AgentLink for that node.

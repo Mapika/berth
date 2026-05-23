@@ -14,15 +14,85 @@ from berth.cluster.agent_registry import AgentRegistry
 from berth.cluster.protocol import (
     Heartbeat,
     Hello,
+    ReportAdopted,
     Welcome,
     decode_frame,
     encode_frame,
 )
 from berth.cluster.remote_agent import RemoteAgentLink
 from berth.daemon.metrics_aggregator import MetricsAggregator
+from berth.store import deployments as dep_store
+from berth.store import models as model_store
+from berth.store import node_gpus as node_gpus_store
 from berth.store import nodes as nodes_store
 
 log = logging.getLogger(__name__)
+
+
+def _effective_vram_mb(
+    conn,
+    node_id: int,
+    gpu_ids: list[int],
+    reported_mb: int,
+) -> int:
+    """Return the VRAM reservation to record for an adopted endpoint.
+
+    If the operator supplied a non-zero value, honour it (operator wins).
+    Otherwise look up the node's per-GPU totals and sum them for the
+    endpoint's GPUs so placement treats those GPUs as fully occupied.
+    Falls back to 0 when no node_gpus info is available."""
+    if reported_mb:
+        return reported_mb
+    gpu_map = {g.gpu_index: g.total_vram_mb for g in node_gpus_store.list_for_node(conn, node_id)}
+    return sum(gpu_map.get(idx, 0) for idx in gpu_ids)
+
+
+def reconcile_adopted(conn, *, node_id: int, endpoints: list[dict]) -> None:
+    """Make this node's source='adopted' rows equal `endpoints` (full state).
+
+    Upserts present entries (creating the model row if needed), marks them
+    ready/failed by `alive`, and deletes rows whose container_id is absent
+    from the report. An endpoint whose GPUs collide with a *managed* ready
+    deployment is skipped (logged); its row, if any, is removed."""
+    managed_gpus: set[int] = set()
+    for d in dep_store.list_all(conn):
+        if d.source == "managed" and d.status in ("pending", "loading", "ready"):
+            managed_gpus.update(d.gpu_ids)
+
+    keep_cids: set[str] = set()
+    for ep in endpoints:
+        if managed_gpus.intersection(ep.get("gpu_ids") or []):
+            log.warning(
+                "adopted endpoint %s on node %s conflicts with managed GPUs %s; skipping",
+                ep.get("container_id"), node_id,
+                sorted(managed_gpus.intersection(ep.get("gpu_ids", []))),
+            )
+            continue
+        model = model_store.get_by_name(conn, ep["served_model_name"])
+        if model is None:
+            try:
+                model = model_store.add(
+                    conn, name=ep["served_model_name"], hf_repo=ep["served_model_name"])
+            except model_store.AlreadyExists:
+                model = model_store.get_by_name(conn, ep["served_model_name"])
+        ep_gpu_ids = list(ep.get("gpu_ids") or [])
+        vram_mb = _effective_vram_mb(
+            conn, node_id, ep_gpu_ids,
+            int(ep.get("vram_reserved_mb") or 0),
+        )
+        dep_store.upsert_adopted(
+            conn, model_id=model.id, node_id=node_id,
+            container_id=ep["container_id"], address=ep["address"],
+            port=int(ep["port"]), gpu_ids=ep_gpu_ids,
+            vram_reserved_mb=vram_mb,
+            image_tag=str(ep.get("image_tag") or "external"),
+            status="ready" if ep.get("alive") else "failed",
+        )
+        keep_cids.add(ep["container_id"])
+
+    for d in dep_store.list_adopted_for_node(conn, node_id):
+        if d.container_id not in keep_cids:
+            dep_store.delete_adopted(conn, d.id)
 
 
 FingerprintResolver = Callable[[WebSocket], str | None]
@@ -297,6 +367,13 @@ class LeaderHub:
                     continue
                 if isinstance(frame, Heartbeat):
                     self._handle_heartbeat(node_id=node.id, frame=frame)
+                    continue
+                if isinstance(frame, ReportAdopted):
+                    try:
+                        reconcile_adopted(
+                            self._conn, node_id=node.id, endpoints=frame.endpoints)
+                    except Exception:
+                        log.exception("adopted reconcile failed for node %s", node.id)
                     continue
                 await link.inbound(frame)
         finally:

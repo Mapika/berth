@@ -92,6 +92,7 @@ dependencies = [
     { name = "structlog" },
     { name = "typer" },
     { name = "uvicorn", extra = ["standard"] },
+    { name = "watchfiles" },
     { name = "websockets" },
 ]
 
@@ -127,6 +128,7 @@ requires-dist = [
     { name = "typer", specifier = ">=0.12" },
     { name = "types-pyyaml", marker = "extra == 'dev'", specifier = ">=6.0.12" },
     { name = "uvicorn", extras = ["standard"], specifier = ">=0.27" },
+    { name = "watchfiles", specifier = ">=1.0" },
     { name = "websockets", specifier = ">=12" },
 ]
 provides-extras = ["dev"]

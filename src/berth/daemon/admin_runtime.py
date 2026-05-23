@@ -217,4 +217,5 @@ def list_backends(backends: dict[str, Backend] = Depends(get_backends)):
             "supports_adapters": getattr(b, "supports_adapters", False),
         }
         for name, b in sorted(backends.items())
+        if name != "adopted"
     ]

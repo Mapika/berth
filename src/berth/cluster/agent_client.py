@@ -13,6 +13,7 @@ import httpx
 import websockets
 import yaml
 
+from berth.cluster import adopted as adopted_mod
 from berth.cluster.metrics_collector import (
     InFlightCounter,
     LatencyRecorder,
@@ -29,6 +30,7 @@ from berth.cluster.protocol import (
     LogChunk,
     LogStream,
     OpResult,
+    ReportAdopted,
     StartDeployment,
     StopDeployment,
     Welcome,
@@ -63,6 +65,22 @@ def build_heartbeat_frame(
             uptime_s=uptime_s,
         ),
     )
+
+
+def build_adopted_report(
+    entries: list[adopted_mod.AdoptedEndpoint], alive_by_cid: dict[str, bool]
+) -> ReportAdopted:
+    return ReportAdopted(endpoints=[
+        e.to_report_dict(alive=alive_by_cid.get(e.container_id, True))
+        for e in entries
+    ])
+
+
+def register_adopted_endpoints(disp, entries: list[adopted_mod.AdoptedEndpoint]) -> None:
+    for e in entries:
+        disp.register_endpoint(
+            container_id=e.container_id, address=e.address, port=e.port)
+
 
 log = logging.getLogger(__name__)
 StatusCallback = Callable[[str, dict[str, Any]], None]
@@ -642,6 +660,12 @@ async def run_agent(
                     node_id=welcome.node_id,
                 )
 
+                _adopted = adopted_mod.load(berth_home)
+                if _adopted:
+                    register_adopted_endpoints(disp, _adopted)
+                    await sender.send(encode_frame(
+                        build_adopted_report(_adopted, alive_by_cid={})))
+
                 import time as _t
                 agent_started_at = _t.time()
 
@@ -660,6 +684,22 @@ async def run_agent(
                         await asyncio.sleep(5.0)
 
                 hb = asyncio.create_task(heartbeat())
+
+                async def watch_adopted(sender=sender, disp=disp):
+                    from watchfiles import Change, awatch
+
+                    def _adopted_only(change: Change, path: str) -> bool:
+                        return path.endswith("adopted.yaml")
+
+                    async for _ in awatch(str(berth_home), watch_filter=_adopted_only):
+                        entries = adopted_mod.load(berth_home)
+                        register_adopted_endpoints(disp, entries)
+                        log.info("adopted.yaml changed, re-reporting %d endpoint(s)",
+                                 len(entries))
+                        await sender.send(encode_frame(
+                            build_adopted_report(entries, alive_by_cid={})))
+                wa = asyncio.create_task(watch_adopted())
+
                 try:
                     async for raw in ws:
                         try:
@@ -674,6 +714,9 @@ async def run_agent(
                     hb.cancel()
                     with suppress(asyncio.CancelledError):
                         await hb
+                    wa.cancel()
+                    with suppress(asyncio.CancelledError):
+                        await wa
         except (OSError, websockets.WebSocketException) as e:
             log.warning(
                 "agent connection lost: %s; reconnecting in %.1fs",

@@ -967,3 +967,44 @@ async def test_create_stream_token_returns_path_bound_ticket(app):
     body = r.json()
     assert body["path"] == "/admin/events"
     assert body["token"]
+
+
+# ---------------------------------------------------------------------------
+# Adopted-backend sentinel guard tests (Fix B, C, D)
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_list_backends_excludes_adopted_sentinel(app):
+    """GET /backends must not include 'adopted' and must not raise
+    NotImplementedError when the AdoptedBackend sentinel is registered."""
+    from berth.backends.adopted import AdoptedBackend
+
+    app.state.backends["adopted"] = AdoptedBackend()
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as c:
+        r = await c.get("/admin/backends")
+    assert r.status_code == 200, r.text
+    names = [b["name"] for b in r.json()]
+    assert "adopted" not in names, "adopted sentinel must be hidden from /backends listing"
+    assert "vllm" in names
+
+
+@pytest.mark.asyncio
+async def test_deploy_with_backend_adopted_returns_400(app):
+    """POST /deployments with backend='adopted' must return 400, not 500."""
+    from berth.backends.adopted import AdoptedBackend
+
+    app.state.backends["adopted"] = AdoptedBackend()
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test", timeout=30) as c:
+        r = await c.post(
+            "/admin/deployments",
+            json={
+                "model_name": "ext-model",
+                "hf_repo": "org/ext",
+                "backend": "adopted",
+                "gpu_ids": [0],
+            },
+        )
+    assert r.status_code == 400, r.text
+    assert "reserved" in r.json()["detail"].lower()
