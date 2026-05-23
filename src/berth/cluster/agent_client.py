@@ -66,8 +66,9 @@ def build_heartbeat_frame(
         ),
     )
 
+
 def build_adopted_report(
-    entries: list, alive_by_cid: dict[str, bool]
+    entries: list[adopted_mod.AdoptedEndpoint], alive_by_cid: dict[str, bool]
 ) -> ReportAdopted:
     return ReportAdopted(endpoints=[
         e.to_report_dict(alive=alive_by_cid.get(e.container_id, True))
@@ -75,7 +76,7 @@ def build_adopted_report(
     ])
 
 
-def register_adopted_endpoints(disp, entries: list) -> None:
+def register_adopted_endpoints(disp, entries: list[adopted_mod.AdoptedEndpoint]) -> None:
     for e in entries:
         disp.register_endpoint(
             container_id=e.container_id, address=e.address, port=e.port)
@@ -685,10 +686,16 @@ async def run_agent(
                 hb = asyncio.create_task(heartbeat())
 
                 async def watch_adopted(sender=sender, disp=disp):
-                    from watchfiles import awatch
-                    async for _ in awatch(str(berth_home)):
+                    from watchfiles import Change, awatch
+
+                    def _adopted_only(change: Change, path: str) -> bool:
+                        return path.endswith("adopted.yaml")
+
+                    async for _ in awatch(str(berth_home), watch_filter=_adopted_only):
                         entries = adopted_mod.load(berth_home)
                         register_adopted_endpoints(disp, entries)
+                        log.info("adopted.yaml changed, re-reporting %d endpoint(s)",
+                                 len(entries))
                         await sender.send(encode_frame(
                             build_adopted_report(entries, alive_by_cid={})))
                 wa = asyncio.create_task(watch_adopted())
