@@ -18,6 +18,7 @@ import typer
 import yaml
 
 from berth.cli import app
+from berth.cluster import adopted as adopted_mod
 from berth.cluster.host_info import collect_host_info
 from berth.config import _env_get, ensure_private_dir, write_private_file
 
@@ -404,3 +405,84 @@ def status():
     typer.echo(f"node_id  : {cfg['node_id']}")
     typer.echo(f"leader   : {cfg['leader_url']}")
     typer.echo(f"cert     : {cfg['agent_cert_path']}")
+
+
+@agent_app.command("adopt")
+def adopt(
+    container: str = typer.Option(None, "--container",
+        help="Adopt a running docker container by name (introspect port+GPUs)."),
+    port: int = typer.Option(None, "--port",
+        help="Adopt a raw OpenAI-compatible server on this host:port."),
+    model: str = typer.Option(None, "--model",
+        help="Model name (required with --port; used as the registry name)."),
+    name: str = typer.Option(None, "--name", help="Local label (default: model)."),
+    host: str = typer.Option("127.0.0.1", "--host"),
+    gpus: str = typer.Option("", "--gpus", help="Comma-separated GPU ids, e.g. '7'."),
+    served_model_name: str = typer.Option(None, "--served-model-name"),
+    vram_mb: int = typer.Option(0, "--vram-mb",
+        help="VRAM to reserve for these GPUs (0 = leave scheduler to treat as full)."),
+):
+    """Register an already-running OpenAI-compatible server as a deployment."""
+    home = _berth_home()
+    gpu_ids = [int(g) for g in gpus.split(",") if g.strip()]
+    if container:
+        from berth.lifecycle.docker_client import DockerClient
+        try:
+            cid, addr, prt, c_gpus, image_tag = adopted_mod.introspect_container(
+                DockerClient(), container)
+        except Exception as e:
+            typer.echo(f"adopt failed: {e}", err=True)
+            raise typer.Exit(1) from e
+        gpu_ids = gpu_ids or c_gpus
+        addr_eff, port_eff = addr, prt
+    elif port:
+        if not model:
+            typer.echo("--model is required with --port", err=True)
+            raise typer.Exit(1)
+        cid = f"adopted-{model}-{port}"
+        addr_eff, port_eff, image_tag = host, port, "external"
+    else:
+        typer.echo("provide --container OR --port/--model", err=True)
+        raise typer.Exit(1)
+
+    try:
+        served = served_model_name or adopted_mod.probe_served_model(addr_eff, port_eff)
+    except adopted_mod.AdoptError as e:
+        typer.echo(f"adopt failed: {e}", err=True)
+        raise typer.Exit(1) from e
+
+    model_name = model or served
+    entry = adopted_mod.AdoptedEndpoint(
+        name=name or model_name, model_name=model_name,
+        served_model_name=served, address=addr_eff, port=port_eff,
+        container_id=cid, gpu_ids=gpu_ids, vram_reserved_mb=vram_mb,
+        image_tag=image_tag,
+    )
+    try:
+        adopted_mod.add_entry(home, entry)
+    except adopted_mod.AdoptError as e:
+        typer.echo(f"adopt failed: {e}", err=True)
+        raise typer.Exit(1) from e
+    typer.echo(
+        f"adopted {entry.name} -> {addr_eff}:{port_eff} "
+        f"(model {served}, gpu {gpu_ids}). Takes effect on the running agent."
+    )
+
+
+@agent_app.command("unadopt")
+def unadopt(name: str = typer.Argument(...)):
+    """Remove an adopted endpoint; the route drops on the next agent report."""
+    home = _berth_home()
+    before = {e.name for e in adopted_mod.load(home)}
+    if name not in before:
+        typer.echo(f"no adopted endpoint named {name!r}", err=True)
+        raise typer.Exit(1)
+    adopted_mod.remove_entry(home, name)
+    typer.echo(f"unadopted {name}")
+
+
+@agent_app.command("adopted")
+def adopted_ls():
+    """List adopted endpoints recorded on this host."""
+    for e in adopted_mod.load(_berth_home()):
+        typer.echo(f"{e.name}\t{e.address}:{e.port}\t{e.served_model_name}\tgpu={e.gpu_ids}")
