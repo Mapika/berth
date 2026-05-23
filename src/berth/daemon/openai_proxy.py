@@ -641,6 +641,14 @@ async def embeddings(
     return await _proxy(request, "/embeddings", key=key)
 
 
+@router.post("/v1/responses")
+async def responses(
+    request: Request,
+    key: _api_keys_store.ApiKey | None = Depends(require_auth_dep),
+):
+    return await _proxy(request, "/responses", key=key)
+
+
 @router.get("/v1/models")
 def models(
     request: Request,
