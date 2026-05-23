@@ -8,6 +8,7 @@ def test_user_unit_has_execstart_and_home():
     assert "Environment=BERTH_HOME=/home/x/.berth" in u
     assert "Restart=on-failure" in u
     assert "User=" not in u
+    assert "WantedBy=default.target" in u
 
 
 def test_system_unit_sets_user():
@@ -15,3 +16,4 @@ def test_system_unit_sets_user():
                            berth_home="/home/x/.berth", system=True, run_user="x")
     assert "User=x" in u
     assert "ExecStart=/opt/b/bin/berth agent start" in u
+    assert "WantedBy=multi-user.target" in u

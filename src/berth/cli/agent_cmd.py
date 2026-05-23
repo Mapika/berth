@@ -5,6 +5,8 @@ import contextlib
 import hashlib
 import logging
 import os
+import shutil
+import subprocess  # nosec
 import sys
 import time
 from collections import deque
@@ -338,12 +340,13 @@ def install_service(
     system: bool = typer.Option(False, "--system",
         help="Install a system unit (needs root); default is a --user unit."),
     user: bool = typer.Option(False, "--user", help="Install a user unit (default)."),
-    berth_home: Path = typer.Option(None, "--berth-home",
+    berth_home: Path | None = typer.Option(None, "--berth-home",
         help="BERTH_HOME for the service (default: resolved agent home)."),
 ):
     """Install + enable a systemd unit that runs `berth agent start`."""
-    import shutil
-    import subprocess  # nosec
+    if system and user:
+        typer.echo("pass only one of --system / --user", err=True)
+        raise typer.Exit(1)
 
     home = str(berth_home or _berth_home())
     berth_bin = shutil.which("berth") or sys.argv[0]
