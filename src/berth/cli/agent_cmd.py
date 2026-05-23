@@ -424,7 +424,11 @@ def adopt(
 ):
     """Register an already-running OpenAI-compatible server as a deployment."""
     home = _berth_home()
-    gpu_ids = [int(g) for g in gpus.split(",") if g.strip()]
+    try:
+        gpu_ids = [int(g) for g in gpus.split(",") if g.strip()]
+    except ValueError:
+        typer.echo("--gpus must be comma-separated integers, e.g. '0,7'", err=True)
+        raise typer.Exit(1) from None
     if container:
         from berth.lifecycle.docker_client import DockerClient
         try:
@@ -439,10 +443,10 @@ def adopt(
         if not model:
             typer.echo("--model is required with --port", err=True)
             raise typer.Exit(1)
-        cid = f"adopted-{model}-{port}"
+        cid = f"adopted-{model.replace('/', '-')}-{port}"
         addr_eff, port_eff, image_tag = host, port, "external"
     else:
-        typer.echo("provide --container OR --port/--model", err=True)
+        typer.echo("provide --container OR both --port and --model", err=True)
         raise typer.Exit(1)
 
     try:
