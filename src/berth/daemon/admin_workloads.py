@@ -303,8 +303,15 @@ async def stop_deployment(
     manager: LifecycleManager = Depends(get_manager),
     conn: sqlite3.Connection = Depends(get_conn),
 ):
-    if dep_store.get_by_id(conn, dep_id) is None:
+    dep = dep_store.get_by_id(conn, dep_id)
+    if dep is None:
         raise HTTPException(404, f"no deployment with id {dep_id}")
+    if dep.source == "adopted":
+        raise HTTPException(
+            409,
+            f"deployment {dep_id} is an adopted endpoint owned by its agent; "
+            f"run `berth agent unadopt <name>` on node {dep.node_id} to remove it",
+        )
     await manager.stop(dep_id)
 
 
