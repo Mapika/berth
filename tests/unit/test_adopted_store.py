@@ -37,10 +37,11 @@ def test_upsert_adopted_creates_then_updates(tmp_path):
 
     dep2 = dep_store.upsert_adopted(
         conn, model_id=m.id, node_id=3, container_id="cid-1",
-        address="127.0.0.1", port=30011, gpu_ids=[7],
+        address="127.0.0.1", port=30012, gpu_ids=[7],
         vram_reserved_mb=268000, image_tag="lmsysorg/sglang:latest",
     )
     assert dep2.id == dep.id
+    assert dep2.container_port == 30012
     assert len(dep_store.list_adopted_for_node(conn, 3)) == 1
 
 

@@ -292,6 +292,9 @@ def upsert_adopted(
     Keyed on (node_id, container_id) so a repeated full-state report updates
     the existing row instead of duplicating it."""
     gpu_csv = ",".join(str(g) for g in gpu_ids)
+    # Adopted rows have no separate human-friendly name, so container_name
+    # deliberately mirrors container_id (in both the UPDATE and INSERT paths
+    # below). This is intentional, not a copy-paste bug.
     existing = conn.execute(
         "SELECT id FROM deployments "
         "WHERE source='adopted' AND node_id=? AND container_id=?",
