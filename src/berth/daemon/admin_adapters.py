@@ -344,12 +344,14 @@ async def hot_unload_adapter(
     dep = dep_store.get_by_id(conn, dep_id)
     if dep is None:
         raise HTTPException(404, f"deployment {dep_id} not found")
-    adapter = ad_store.get_by_name(conn, adapter_name)
-    if adapter is None:
-        raise HTTPException(404, f"adapter {adapter_name!r} not registered")
     backend = backends.get(dep.backend)
     if backend is None:
         raise HTTPException(409, f"backend {dep.backend!r} not registered")
+    if not backend.supports_adapters:
+        raise HTTPException(409, f"backend {dep.backend!r} does not support adapters")
+    adapter = ad_store.get_by_name(conn, adapter_name)
+    if adapter is None:
+        raise HTTPException(404, f"adapter {adapter_name!r} not registered")
     await _engine_unload_adapter(backend, dep, adapter.name)
     da_store.detach(conn, dep.id, adapter.id)
 
