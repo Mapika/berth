@@ -5,6 +5,8 @@ import contextlib
 import hashlib
 import logging
 import os
+import shutil
+import subprocess  # nosec
 import sys
 import time
 from collections import deque
@@ -308,6 +310,78 @@ def _do_register(
     }
     (home / "agent.yaml").write_text(yaml.safe_dump(cfg))
     typer.echo(f"registered as node_id={data['node_id']}")
+
+
+def _render_agent_unit(*, berth_bin: str, berth_home: str, system: bool,
+                       run_user: str | None) -> str:
+    user_line = f"User={run_user}\n" if (system and run_user) else ""
+    return f"""[Unit]
+Description=berth agent
+After=network-online.target docker.service
+Wants=network-online.target
+
+[Service]
+Type=exec
+{user_line}Environment=BERTH_HOME={berth_home}
+ExecStart={berth_bin} agent start
+Restart=on-failure
+RestartSec=5
+NoNewPrivileges=true
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy={"multi-user.target" if system else "default.target"}
+"""
+
+
+@agent_app.command("install-service")
+def install_service(
+    system: bool = typer.Option(False, "--system",
+        help="Install a system unit (needs root); default is a --user unit."),
+    user: bool = typer.Option(False, "--user", help="Install a user unit (default)."),
+    berth_home: Path | None = typer.Option(None, "--berth-home",
+        help="BERTH_HOME for the service (default: resolved agent home)."),
+):
+    """Install + enable a systemd unit that runs `berth agent start`."""
+    if system and user:
+        typer.echo("pass only one of --system / --user", err=True)
+        raise typer.Exit(1)
+
+    home = str(berth_home or _berth_home())
+    berth_bin = shutil.which("berth") or sys.argv[0]
+    is_system = system and not user
+
+    run_user = None
+    if is_system:
+        run_user = os.environ.get("SUDO_USER") or (
+            None if os.geteuid() == 0 else os.environ.get("USER"))
+        if not run_user:
+            typer.echo(
+                "--system needs a non-root account for the unit's User= "
+                "(run via sudo, or use --user).", err=True)
+            raise typer.Exit(1)
+        unit_dir = Path("/etc/systemd/system")
+    else:
+        unit_dir = Path.home() / ".config" / "systemd" / "user"
+
+    unit = _render_agent_unit(berth_bin=berth_bin, berth_home=home,
+                              system=is_system, run_user=run_user)
+    unit_dir.mkdir(parents=True, exist_ok=True)
+    unit_path = unit_dir / "berth-agent.service"
+    unit_path.write_text(unit)
+    typer.echo(f"wrote {unit_path}")
+
+    sysctl = shutil.which("systemctl")
+    if not sysctl:
+        typer.echo("systemctl not found; enable the unit manually.", err=True)
+        return
+    scope = [] if is_system else ["--user"]
+    subprocess.run([sysctl, *scope, "daemon-reload"], check=False)  # nosec
+    subprocess.run([sysctl, *scope, "enable", "--now", "berth-agent"], check=False)  # nosec
+    typer.echo("berth-agent enabled and started.")
+    if not is_system:
+        typer.echo("tip: `loginctl enable-linger $USER` keeps it running after logout.")
 
 
 @agent_app.command("register")
