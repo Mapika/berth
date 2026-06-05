@@ -327,6 +327,12 @@ def bootstrap(
         False, "--force",
         help="Overwrite an existing config.toml.",
     ),
+    quiet: bool = typer.Option(
+        False, "--quiet", "-q",
+        help="Print only the status block and first admin key; skip the "
+        "manual 'Next steps' runbook. Used by setup-leader-vps.sh, which "
+        "performs those steps automatically.",
+    ),
 ):
     """Provision a fresh VPS to a ready-to-start leader configuration.
 
@@ -377,6 +383,13 @@ def bootstrap(
     else:
         typer.echo("Keys already exist; skipped first-key mint.")
         typer.echo("")
+
+    # The "Next steps" runbook is for operators running bootstrap by hand. When
+    # invoked by setup-leader-vps.sh (which performs every one of these steps
+    # automatically), --quiet suppresses it so only the status block and admin
+    # key above are shown.
+    if quiet:
+        return
 
     typer.echo("─" * 70)
     typer.echo("Next steps:")
