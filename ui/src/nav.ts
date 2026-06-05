@@ -1,7 +1,6 @@
 import type { ComponentType } from 'react'
-// Phase 1: Overview and Deployments are temporarily aliased to the existing
-// Dashboard so the shell compiles before Phase 2 splits Dashboard apart.
-import Dashboard from './views/Dashboard'
+import Overview from './views/overview/Overview'
+import Deployments from './views/serving/Deployments'
 import Models from './views/Models'
 import Adapters from './views/Adapters'
 import Routes from './views/serving/Routes'
@@ -13,9 +12,6 @@ import Logs from './views/Logs'
 import Requests from './views/Requests'
 import Cluster from './views/Cluster'
 import Settings from './views/Settings'
-
-const Overview = Dashboard
-const Deployments = Dashboard
 
 export type Tab = { id: string; label: string; component: ComponentType }
 export type Section = { id: string; label: string; tabs: Tab[] }
