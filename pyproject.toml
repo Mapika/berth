@@ -7,7 +7,7 @@ license-files = ["LICENSE"]
 requires-python = ">=3.11"
 dependencies = [
     "fastapi>=0.136.3",
-    "uvicorn[standard]>=0.48.0",
+    "uvicorn[standard]>=0.49.0",
     "httpx>=0.27",
     "typer>=0.12",
     "docker>=7.1",
