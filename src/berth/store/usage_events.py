@@ -183,26 +183,58 @@ def series_in_window(
                 b["tokens_in"] = int(r["tokens_in"])
                 b["tokens_out"] = int(r["tokens_out"])
 
-    select_grp = f"{col} AS grp," if col else ""
-    group_grp = "grp, " if col else ""
-    rows = conn.execute(
-        f"""
-        SELECT
-            {select_grp}
-            CAST(
-                (CAST(strftime('%s', 'now') AS INTEGER)
-                 - CAST(strftime('%s', ts) AS INTEGER)) / ?
-                AS INTEGER
-            ) AS bucket_idx,
-            COUNT(*) AS count,
-            COALESCE(SUM(tokens_in), 0) AS tokens_in,
-            COALESCE(SUM(tokens_out), 0) AS tokens_out
-        FROM usage_events
-        WHERE ts > datetime('now', ?)
-        GROUP BY {group_grp}bucket_idx
-        """,
-        (bucket_s, f"-{window_s} seconds"),
-    ).fetchall()
+    # Fully literal SQL per group_by case — no string interpolation of column
+    # names into the query (avoids SQL-injection surface entirely; the group
+    # column is an internal whitelist, never user input). Only the bucket width
+    # and window are bound parameters.
+    params = (bucket_s, f"-{window_s} seconds")
+    if col is None:
+        rows = conn.execute(
+            """
+            SELECT
+                CAST((CAST(strftime('%s', 'now') AS INTEGER)
+                      - CAST(strftime('%s', ts) AS INTEGER)) / ? AS INTEGER) AS bucket_idx,
+                COUNT(*) AS count,
+                COALESCE(SUM(tokens_in), 0) AS tokens_in,
+                COALESCE(SUM(tokens_out), 0) AS tokens_out
+            FROM usage_events
+            WHERE ts > datetime('now', ?)
+            GROUP BY bucket_idx
+            """,
+            params,
+        ).fetchall()
+    elif col == "model_name":
+        rows = conn.execute(
+            """
+            SELECT
+                model_name AS grp,
+                CAST((CAST(strftime('%s', 'now') AS INTEGER)
+                      - CAST(strftime('%s', ts) AS INTEGER)) / ? AS INTEGER) AS bucket_idx,
+                COUNT(*) AS count,
+                COALESCE(SUM(tokens_in), 0) AS tokens_in,
+                COALESCE(SUM(tokens_out), 0) AS tokens_out
+            FROM usage_events
+            WHERE ts > datetime('now', ?)
+            GROUP BY grp, bucket_idx
+            """,
+            params,
+        ).fetchall()
+    else:  # col == "api_key_id"
+        rows = conn.execute(
+            """
+            SELECT
+                api_key_id AS grp,
+                CAST((CAST(strftime('%s', 'now') AS INTEGER)
+                      - CAST(strftime('%s', ts) AS INTEGER)) / ? AS INTEGER) AS bucket_idx,
+                COUNT(*) AS count,
+                COALESCE(SUM(tokens_in), 0) AS tokens_in,
+                COALESCE(SUM(tokens_out), 0) AS tokens_out
+            FROM usage_events
+            WHERE ts > datetime('now', ?)
+            GROUP BY grp, bucket_idx
+            """,
+            params,
+        ).fetchall()
 
     if col is None:
         out = _empty_buckets()
