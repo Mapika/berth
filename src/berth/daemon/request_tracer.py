@@ -12,6 +12,7 @@ import asyncio
 import time
 import uuid
 from collections import deque
+from collections.abc import Callable
 from dataclasses import asdict, dataclass, field
 from typing import Any
 
@@ -63,9 +64,16 @@ class RequestTracer:
     lock needed. The deque's append/popleft are atomic.
     """
 
-    def __init__(self, capacity: int = _MAX_TRACES) -> None:
+    def __init__(
+        self,
+        capacity: int = _MAX_TRACES,
+        on_finalize: Callable[[RequestTrace], None] | None = None,
+    ) -> None:
         self._buffer: deque[RequestTrace] = deque(maxlen=capacity)
         self._subscribers: list[_Subscriber] = []
+        # Optional sink invoked once per finalized request (used to persist
+        # request_metrics). Failure-isolated: a sink error never breaks serving.
+        self._on_finalize = on_finalize
 
     def start(self, *, method: str, path: str) -> RequestTrace:
         trace = RequestTrace(
@@ -88,6 +96,12 @@ class RequestTracer:
         for k, v in fields.items():
             setattr(trace, k, v)
         self._publish(trace, "completed")
+        if self._on_finalize is not None:
+            try:
+                self._on_finalize(trace)
+            except Exception:
+                import logging
+                logging.getLogger(__name__).exception("tracer on_finalize failed")
 
     def snapshot(self) -> list[dict[str, Any]]:
         return [t.to_dict() for t in self._buffer]

@@ -10,6 +10,7 @@ from berth.daemon.app import build_app
 from berth.lifecycle.docker_client import ContainerHandle
 from berth.store import api_keys as key_store
 from berth.store import db
+from berth.store import request_metrics as rm_store
 from berth.store import usage_events as usage_store
 
 
@@ -1050,3 +1051,46 @@ async def test_usage_series_rejects_bad_params(app):
     assert bad_window.status_code == 400, bad_window.text
     assert too_many.status_code == 400, too_many.text
     assert bad_group.status_code == 400, bad_group.text
+
+
+@pytest.mark.asyncio
+async def test_metrics_history_summary(app):
+    for ms in (100, 200, 300):
+        rm_store.record(app.state.conn, model_name="m", status_code=200,
+                        dispatched=True, latency_ms=ms)
+    rm_store.record(app.state.conn, model_name="m", status_code=500, is_error=True,
+                    dispatched=True, latency_ms=900)
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as c:
+        r = await c.get("/admin/metrics/history?window_s=3600&summary=true")
+    assert r.status_code == 200, r.text
+    s = r.json()["summary"]
+    assert s["count"] == 4 and s["error_count"] == 1
+
+
+@pytest.mark.asyncio
+async def test_metrics_history_buckets_and_group_by_model(app):
+    rm_store.record(app.state.conn, model_name="a", status_code=200,
+                    dispatched=True, latency_ms=120)
+    rm_store.record(app.state.conn, model_name="b", status_code=500, is_error=True,
+                    dispatched=True, latency_ms=800)
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as c:
+        hist = await c.get("/admin/metrics/history?window_s=3600&bucket_s=3600")
+        grouped = await c.get(
+            "/admin/metrics/history?window_s=3600&summary=true&group_by=model")
+    assert hist.status_code == 200, hist.text
+    assert hist.json()["buckets"][-1]["count"] == 2
+    groups = grouped.json()["groups"]
+    by = {g["label"]: g for g in groups}
+    assert by["b"]["summary"]["error_rate"] == 1.0
+
+
+@pytest.mark.asyncio
+async def test_metrics_history_rejects_bad_params(app):
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as c:
+        bad = await c.get("/admin/metrics/history?window_s=0&bucket_s=60")
+        grp = await c.get("/admin/metrics/history?window_s=3600&bucket_s=60&group_by=bogus")
+    assert bad.status_code == 400, bad.text
+    assert grp.status_code == 400, grp.text

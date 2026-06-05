@@ -3,7 +3,9 @@ import { api, queryKeys } from '../../api'
 import HealthStrip from './HealthStrip'
 import StatTile from './StatTile'
 import TrafficChart from './TrafficChart'
+import LatencyChart from './LatencyChart'
 import TopModels from './TopModels'
+import ModelBreakdown from './ModelBreakdown'
 import DeploymentsGlance from './DeploymentsGlance'
 import { aggregateSnapshot, recentRates } from './useOverviewStats'
 
@@ -34,6 +36,23 @@ export default function Overview() {
     queryFn: () => api.getUsageByModel(86400, 3600),
     refetchInterval: 30000,
   })
+  // Latency/error history (persisted): 24h summary for the tiles + breakdown,
+  // 24h hourly buckets for the chart.
+  const metricsSummary = useQuery({
+    queryKey: queryKeys.metricsSummary(86400, 'none'),
+    queryFn: () => api.getMetricsSummary(86400),
+    refetchInterval: 15000,
+  })
+  const metricsHistory = useQuery({
+    queryKey: queryKeys.metricsHistory(86400, 3600),
+    queryFn: () => api.getMetricsHistory(86400, 3600),
+    refetchInterval: 30000,
+  })
+  const metricsByModel = useQuery({
+    queryKey: queryKeys.metricsSummary(86400, 'model'),
+    queryFn: () => api.getMetricsByModel(86400),
+    refetchInterval: 30000,
+  })
 
   const all = deps.data ?? []
   const active = all.filter(d => d.status === 'ready' || d.status === 'loading')
@@ -42,6 +61,9 @@ export default function Overview() {
   const rates = recentRates(liveBuckets, 60)
   const volSpark = liveBuckets.slice(-30).map(b => b.count)
   const tokSpark = liveBuckets.slice(-30).map(b => b.tokens_out)
+  const ms = metricsSummary.data?.summary
+  const snapGpus = (snap.data?.nodes ?? []).reduce((n, x) => n + x.gpus.length, 0)
+  const gpuCount = snapGpus || (gpus.data ?? []).length
 
   return (
     <div className="space-y-14">
@@ -63,7 +85,7 @@ export default function Overview() {
               </div>
             )
           })()}
-          <div className="label">{(gpus.data ?? []).length} gpu / {active.length} active</div>
+          <div className="label">{gpuCount} gpu / {active.length} active</div>
         </div>
       </header>
 
@@ -81,17 +103,17 @@ export default function Overview() {
           />
           <StatTile
             title="latency"
-            value={unit(stats.latencyP50.toFixed(0), 'ms p50')}
-            sub={`p95 ${stats.latencyP95.toFixed(0)} ms`}
-            badge="live · 60s"
+            value={unit(ms?.latency_p50_ms != null ? String(ms.latency_p50_ms) : '—', 'ms p50')}
+            sub={`p95 ${ms?.latency_p95_ms ?? '—'} ms`}
+            badge="24h"
           />
           <StatTile
             title="errors"
-            value={unit((stats.errorRate * 100).toFixed(1), '%')}
+            value={unit(ms ? (ms.error_rate * 100).toFixed(1) : '—', '%')}
             sub={
-              <span className="text-accent">{stats.errorsWindow} recent → see traffic</span>
+              <span className="text-accent">{ms?.error_count ?? 0} in 24h → see traffic</span>
             }
-            badge="live · 60s"
+            badge="24h"
             onClick={() => { location.hash = '#/observe/requests' }}
           />
           <StatTile
@@ -114,15 +136,28 @@ export default function Overview() {
         <TrafficChart buckets={history.data?.buckets ?? []} />
       </section>
 
+      <section className="space-y-4">
+        <div className="flex items-baseline justify-between">
+          <div className="label">latency &amp; errors over time</div>
+          <div className="text-mute text-[10px] tracking-wider uppercase">last 24h</div>
+        </div>
+        <LatencyChart buckets={metricsHistory.data?.buckets ?? []} />
+      </section>
+
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-x-12 gap-y-10">
         <section className="space-y-4">
           <div className="label">top models · 24h</div>
           <TopModels groups={byModel.data?.groups ?? []} />
         </section>
-        <section>
-          <DeploymentsGlance />
+        <section className="space-y-4">
+          <div className="label">latency &amp; errors by model · 24h</div>
+          <ModelBreakdown groups={metricsByModel.data?.groups ?? []} />
         </section>
       </div>
+
+      <section>
+        <DeploymentsGlance />
+      </section>
     </div>
   )
 }
