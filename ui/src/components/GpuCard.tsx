@@ -1,4 +1,5 @@
 import type { Deployment, GpuSnapshot, Model } from '../api'
+import { GpuMeter } from './GpuMeter'
 
 export function fmtMb(mb: number | null | undefined): string {
   if (!mb) return '-'
@@ -32,7 +33,7 @@ function idleCountdown(d: Deployment): string | null {
   return `${Math.round(remaining / 60)}m`
 }
 
-function DeploymentChip({ d, modelName }: { d: Deployment; modelName: string }) {
+export function DeploymentChip({ d, modelName }: { d: Deployment; modelName: string }) {
   const idle = idleCountdown(d)
   const vram = d.vram_used_mb && d.vram_used_mb > 0 ? d.vram_used_mb : d.vram_reserved_mb
   return (
@@ -64,48 +65,28 @@ export function GpuCard({
   deployments: Deployment[]
   models: Model[]
 }) {
-  const pct = (g.memory_used_mb / g.memory_total_mb) * 100
   const onCard = deployments.filter(d =>
     (d.gpu_ids ?? []).includes(g.index) &&
     (d.status === 'ready' || d.status === 'loading'),
   )
   return (
-    <div className="space-y-4">
-      <div className="flex items-baseline justify-between">
-        <div className="label">gpu {g.index}</div>
-        <div className="text-mute text-[11px] tnum">{pct.toFixed(0)}%</div>
-      </div>
-      <div className="flex items-baseline gap-2 tnum">
-        <div className="text-3xl font-light tracking-tightish">
-          {(g.memory_used_mb / 1024).toFixed(1)}
-        </div>
-        <div className="text-mute text-[12px]">/ {(g.memory_total_mb / 1024).toFixed(0)} GB</div>
-      </div>
-      <div className="h-px bg-rule relative overflow-hidden">
-        <div
-          className="absolute inset-y-0 left-0 bg-accent transition-[width] duration-500"
-          style={{ width: `${pct}%` }}
-        />
-      </div>
-      <div className="flex items-center gap-6 text-mute text-[11px] tnum">
-        <span>util {g.gpu_util_pct}%</span>
-        <span>{g.power_w} w</span>
-        <span className="ml-auto">
-          {onCard.length === 0
-            ? <span className="text-mute">idle</span>
-            : <span className="text-dim">{onCard.length} loaded</span>}
-        </span>
-      </div>
-      {onCard.length > 0 && (
+    <GpuMeter
+      label={`gpu ${g.index}`}
+      usedMb={g.memory_used_mb}
+      totalMb={g.memory_total_mb}
+      utilPct={g.gpu_util_pct}
+      powerW={g.power_w}
+      right={onCard.length === 0
+        ? <span className="text-mute">idle</span>
+        : <span className="text-dim">{onCard.length} loaded</span>}
+      loaded={onCard.length > 0 && (
         <div className="pt-2 border-t border-rule-soft space-y-0.5">
           {onCard.map(d => {
             const m = models.find(m => m.id === d.model_id)
-            return (
-              <DeploymentChip key={d.id} d={d} modelName={m?.name ?? `#${d.id}`} />
-            )
+            return <DeploymentChip key={d.id} d={d} modelName={m?.name ?? `#${d.id}`} />
           })}
         </div>
       )}
-    </div>
+    />
   )
 }
