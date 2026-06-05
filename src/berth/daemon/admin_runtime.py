@@ -8,9 +8,10 @@ from fastapi import Depends, HTTPException, Request
 from fastapi.responses import StreamingResponse
 
 from berth.backends.base import Backend
-from berth.daemon.admin import get_backends, router
+from berth.daemon.admin import get_backends, get_conn, router
 from berth.store import deployments as dep_store
 from berth.store import nodes as nodes_store
+from berth.store import usage_events as _usage_events
 
 
 @router.get("/requests")
@@ -70,6 +71,35 @@ def predictor_stats(request: Request):
             "base_prewarms_skipped_no_plan": 0,
         }
     return task.stats_snapshot()
+
+
+@router.get("/usage/series")
+def usage_series(
+    window_s: int = 86400,
+    bucket_s: int = 3600,
+    group_by: str | None = None,
+    conn: sqlite3.Connection = Depends(get_conn),
+):
+    """Read-only aggregate request volume + tokens over time, bucketed.
+
+    Powers the Overview dashboard's volume/throughput tiles and the
+    traffic-over-time / top-models history. Bounded by the daemon's usage
+    retention window. group_by may be 'model' or 'key' (or omitted/'none').
+    """
+    if window_s <= 0 or bucket_s <= 0:
+        raise HTTPException(400, "window_s and bucket_s must be positive")
+    if window_s // bucket_s > 1024:
+        raise HTTPException(400, "too many buckets requested (cap is 1024)")
+    if group_by not in (None, "none", "model", "key"):
+        raise HTTPException(400, "group_by must be one of: model, key")
+    gb = None if group_by in (None, "none") else group_by
+    data = _usage_events.series_in_window(
+        conn, window_s=window_s, bucket_s=bucket_s, group_by=gb,
+    )
+    base = {"window_s": window_s, "bucket_s": bucket_s, "group_by": gb}
+    if gb:
+        return {**base, "groups": data}
+    return {**base, "buckets": data}
 
 
 @router.get("/deployments/current/logs")

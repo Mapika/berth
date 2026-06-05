@@ -1,6 +1,6 @@
 import type { MetricsSnapshotNode, Node } from '../../api'
 import { fmtMb, fmtRelative, statusColor, statusDot } from './format'
-import { Sparkline } from './Sparkline'
+import { Sparkline } from '../../components/Sparkline'
 
 export function NodeCard({
   node,

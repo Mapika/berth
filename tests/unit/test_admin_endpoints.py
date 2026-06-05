@@ -1008,3 +1008,45 @@ async def test_deploy_with_backend_adopted_returns_400(app):
         )
     assert r.status_code == 400, r.text
     assert "reserved" in r.json()["detail"].lower()
+
+
+@pytest.mark.asyncio
+async def test_usage_series_ungrouped(app):
+    """/admin/usage/series returns zero-filled buckets and counts seeded events."""
+    usage_store.record(app.state.conn, model_name="qwen", base_name="qwen", tokens_out=12)
+    usage_store.record(app.state.conn, model_name="qwen", base_name="qwen", tokens_out=8)
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as c:
+        r = await c.get("/admin/usage/series?window_s=3600&bucket_s=3600")
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["group_by"] is None
+    assert body["buckets"][-1]["count"] == 2
+    assert body["buckets"][-1]["tokens_out"] == 20
+
+
+@pytest.mark.asyncio
+async def test_usage_series_group_by_model(app):
+    usage_store.record(app.state.conn, model_name="a", base_name="a")
+    usage_store.record(app.state.conn, model_name="a", base_name="a")
+    usage_store.record(app.state.conn, model_name="b", base_name="b")
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as c:
+        r = await c.get("/admin/usage/series?window_s=3600&bucket_s=3600&group_by=model")
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["group_by"] == "model"
+    assert [g["label"] for g in body["groups"]] == ["a", "b"]
+    assert body["groups"][0]["total"] == 2
+
+
+@pytest.mark.asyncio
+async def test_usage_series_rejects_bad_params(app):
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as c:
+        bad_window = await c.get("/admin/usage/series?window_s=0&bucket_s=60")
+        too_many = await c.get("/admin/usage/series?window_s=10000000&bucket_s=1")
+        bad_group = await c.get("/admin/usage/series?window_s=3600&bucket_s=60&group_by=bogus")
+    assert bad_window.status_code == 400, bad_window.text
+    assert too_many.status_code == 400, too_many.text
+    assert bad_group.status_code == 400, bad_group.text

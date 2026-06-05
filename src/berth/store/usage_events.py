@@ -136,6 +136,143 @@ def list_recent(
     return [_row(r) for r in rows]
 
 
+def series_in_window(
+    conn: sqlite3.Connection,
+    *,
+    window_s: int,
+    bucket_s: int,
+    group_by: str | None = None,
+) -> list[dict]:
+    """Time-bucketed request volume + tokens over the past `window_s` seconds.
+
+    Mirrors `key_usage.bucketed_usage`: buckets are `bucket_s` wide, zero-filled,
+    returned oldest-first so the UI can plot left-to-right.
+
+    - ``group_by=None``  -> a flat list of bucket dicts:
+      ``[{bucket_idx, ts_offset_s, count, tokens_in, tokens_out}, ...]``.
+    - ``group_by='model'|'key'`` -> one entry per group, sorted by total desc:
+      ``[{key, label, total, tokens_in, tokens_out, buckets:[...]}, ...]`` where
+      each group carries its own zero-filled bucket list.
+
+    Bounded by retention: rows older than the daemon's retention window have
+    already been rolled up into usage_aggregates and dropped, so the effective
+    history can be shorter than `window_s`.
+    """
+    bucket_s = max(1, int(bucket_s))
+    num_buckets = max(1, int(window_s) // bucket_s)
+    col = {None: None, "model": "model_name", "key": "api_key_id"}[group_by]
+
+    def _empty_buckets() -> list[dict]:
+        # bucket_idx 0 = most recent; emit oldest -> newest.
+        return [
+            {
+                "bucket_idx": i,
+                "ts_offset_s": i * bucket_s,
+                "count": 0,
+                "tokens_in": 0,
+                "tokens_out": 0,
+            }
+            for i in range(num_buckets - 1, -1, -1)
+        ]
+
+    def _fill(buckets: list[dict], by_idx: dict) -> None:
+        for b in buckets:
+            r = by_idx.get(b["bucket_idx"])
+            if r is not None:
+                b["count"] = int(r["count"])
+                b["tokens_in"] = int(r["tokens_in"])
+                b["tokens_out"] = int(r["tokens_out"])
+
+    # Fully literal SQL per group_by case — no string interpolation of column
+    # names into the query (avoids SQL-injection surface entirely; the group
+    # column is an internal whitelist, never user input). Only the bucket width
+    # and window are bound parameters.
+    params = (bucket_s, f"-{window_s} seconds")
+    if col is None:
+        rows = conn.execute(
+            """
+            SELECT
+                CAST((CAST(strftime('%s', 'now') AS INTEGER)
+                      - CAST(strftime('%s', ts) AS INTEGER)) / ? AS INTEGER) AS bucket_idx,
+                COUNT(*) AS count,
+                COALESCE(SUM(tokens_in), 0) AS tokens_in,
+                COALESCE(SUM(tokens_out), 0) AS tokens_out
+            FROM usage_events
+            WHERE ts > datetime('now', ?)
+            GROUP BY bucket_idx
+            """,
+            params,
+        ).fetchall()
+    elif col == "model_name":
+        rows = conn.execute(
+            """
+            SELECT
+                model_name AS grp,
+                CAST((CAST(strftime('%s', 'now') AS INTEGER)
+                      - CAST(strftime('%s', ts) AS INTEGER)) / ? AS INTEGER) AS bucket_idx,
+                COUNT(*) AS count,
+                COALESCE(SUM(tokens_in), 0) AS tokens_in,
+                COALESCE(SUM(tokens_out), 0) AS tokens_out
+            FROM usage_events
+            WHERE ts > datetime('now', ?)
+            GROUP BY grp, bucket_idx
+            """,
+            params,
+        ).fetchall()
+    else:  # col == "api_key_id"
+        rows = conn.execute(
+            """
+            SELECT
+                api_key_id AS grp,
+                CAST((CAST(strftime('%s', 'now') AS INTEGER)
+                      - CAST(strftime('%s', ts) AS INTEGER)) / ? AS INTEGER) AS bucket_idx,
+                COUNT(*) AS count,
+                COALESCE(SUM(tokens_in), 0) AS tokens_in,
+                COALESCE(SUM(tokens_out), 0) AS tokens_out
+            FROM usage_events
+            WHERE ts > datetime('now', ?)
+            GROUP BY grp, bucket_idx
+            """,
+            params,
+        ).fetchall()
+
+    if col is None:
+        out = _empty_buckets()
+        _fill(out, {int(r["bucket_idx"]): r for r in rows})
+        return out
+
+    groups: dict[str, dict] = {}
+    for r in rows:
+        raw = r["grp"]
+        gkey = "" if raw is None else str(raw)
+        g = groups.setdefault(gkey, {
+            "key": gkey,
+            "label": "—" if raw is None else str(raw),
+            "total": 0,
+            "tokens_in": 0,
+            "tokens_out": 0,
+            "_by_idx": {},
+        })
+        g["total"] += int(r["count"])
+        g["tokens_in"] += int(r["tokens_in"])
+        g["tokens_out"] += int(r["tokens_out"])
+        g["_by_idx"][int(r["bucket_idx"])] = r
+
+    result: list[dict] = []
+    for g in sorted(groups.values(), key=lambda x: x["total"], reverse=True):
+        buckets = _empty_buckets()
+        _fill(buckets, g["_by_idx"])
+        result.append({
+            "key": g["key"],
+            "label": g["label"],
+            "total": g["total"],
+            "tokens_in": g["tokens_in"],
+            "tokens_out": g["tokens_out"],
+            "buckets": buckets,
+        })
+    return result
+
+
 def purge_older_than(
     conn: sqlite3.Connection, *, before_iso: str,
 ) -> int:

@@ -32,6 +32,8 @@ export const queryKeys = {
   node: (nodeId: number) => ['node', nodeId] as const,
   keyUsage: (keyId: number, scope: 'spark' | 'detail') =>
     ['key-usage', keyId, scope] as const,
+  usageSeries: (windowS: number, bucketS: number, groupBy: string) =>
+    ['usage-series', windowS, bucketS, groupBy] as const,
 }
 
 export async function eventSourceUrl(path: string): Promise<string> {
@@ -360,6 +362,13 @@ export const api = {
   getConfig: () => jfetch<DaemonConfig>('GET', '/admin/config'),
   getMetricsSnapshot: () =>
     jfetch<MetricsSnapshot>('GET', '/admin/metrics/snapshot'),
+  getUsageSeries: (windowS = 86400, bucketS = 3600) =>
+    jfetch<UsageSeries>('GET', `/admin/usage/series?window_s=${windowS}&bucket_s=${bucketS}`),
+  getUsageByModel: (windowS = 86400, bucketS = 3600) =>
+    jfetch<UsageSeriesGrouped>(
+      'GET',
+      `/admin/usage/series?window_s=${windowS}&bucket_s=${bucketS}&group_by=model`,
+    ),
 }
 
 export type MetricsSnapshotGpu = {
@@ -391,6 +400,35 @@ export type MetricsSnapshotNode = {
 }
 
 export type MetricsSnapshot = { nodes: MetricsSnapshotNode[] }
+
+// Usage-series (Overview volume/throughput + history). Bounded by retention.
+export type UsageBucket = {
+  bucket_idx: number
+  ts_offset_s: number
+  count: number
+  tokens_in: number
+  tokens_out: number
+}
+export type UsageSeries = {
+  window_s: number
+  bucket_s: number
+  group_by: null
+  buckets: UsageBucket[]
+}
+export type UsageGroup = {
+  key: string
+  label: string
+  total: number
+  tokens_in: number
+  tokens_out: number
+  buckets: UsageBucket[]
+}
+export type UsageSeriesGrouped = {
+  window_s: number
+  bucket_s: number
+  group_by: 'model' | 'key'
+  groups: UsageGroup[]
+}
 
 // Cluster types.
 
