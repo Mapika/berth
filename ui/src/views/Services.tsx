@@ -24,7 +24,9 @@ const emptyRouteForm: RouteFormState = {
   priority: '100',
 }
 
-export default function Services() {
+export type ServicesMode = 'both' | 'routes' | 'profiles'
+
+export default function Services({ mode = 'both' }: { mode?: ServicesMode }) {
   const qc = useQueryClient()
   const profiles = useQuery({ queryKey: queryKeys.profiles, queryFn: api.listProfiles })
   const routes = useQuery({ queryKey: queryKeys.routes, queryFn: api.listRoutes })
@@ -116,44 +118,55 @@ export default function Services() {
     onError: () => setDryRunResult(null),
   })
 
+  const showProfiles = mode === 'both' || mode === 'profiles'
+  const showRoutes = mode === 'both' || mode === 'routes'
+  const title = mode === 'routes' ? 'routes' : mode === 'profiles' ? 'profiles' : 'services'
+  const count = mode === 'routes'
+    ? `${routeList.length} routes`
+    : mode === 'profiles'
+      ? `${profileList.length} profiles`
+      : `${profileList.length} profiles / ${routeList.length} routes`
+
   return (
     <div className="space-y-14">
       <header className="flex items-baseline justify-between">
-        <h2 className="text-2xl font-light tracking-tightish caret">services</h2>
-        <div className="label">
-          {profileList.length} profiles / {routeList.length} routes
-        </div>
+        <h2 className="text-2xl font-light tracking-tightish caret">{title}</h2>
+        <div className="label">{count}</div>
       </header>
 
-      <ProfileSection
-        profiles={profileList}
-        models={models.data ?? []}
-        backends={backends.data ?? []}
-        nodes={nodes.data?.nodes ?? []}
-        form={profileForm}
-        setForm={setProfileForm}
-        formError={profileFormError}
-        actionError={profileActionError}
-        createProfile={createProfile}
-        deployProfile={deployProfile}
-        deleteProfile={deleteProfile}
-      />
+      {showProfiles && (
+        <ProfileSection
+          profiles={profileList}
+          models={models.data ?? []}
+          backends={backends.data ?? []}
+          nodes={nodes.data?.nodes ?? []}
+          form={profileForm}
+          setForm={setProfileForm}
+          formError={profileFormError}
+          actionError={profileActionError}
+          createProfile={createProfile}
+          deployProfile={deployProfile}
+          deleteProfile={deleteProfile}
+        />
+      )}
 
-      <RoutesSection
-        profiles={profileList}
-        routes={routeList}
-        hasProfiles={hasProfiles}
-        form={routeForm}
-        setForm={setRouteForm}
-        routeError={routeError}
-        createRoute={createRoute}
-        deleteRoute={deleteRoute}
-        dryRunModel={dryRunModel}
-        setDryRunModel={setDryRunModel}
-        dryRunResult={dryRunResult}
-        setDryRunResult={setDryRunResult}
-        dryRun={dryRun}
-      />
+      {showRoutes && (
+        <RoutesSection
+          profiles={profileList}
+          routes={routeList}
+          hasProfiles={hasProfiles}
+          form={routeForm}
+          setForm={setRouteForm}
+          routeError={routeError}
+          createRoute={createRoute}
+          deleteRoute={deleteRoute}
+          dryRunModel={dryRunModel}
+          setDryRunModel={setDryRunModel}
+          dryRunResult={dryRunResult}
+          setDryRunResult={setDryRunResult}
+          dryRun={dryRun}
+        />
+      )}
     </div>
   )
 }
