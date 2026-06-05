@@ -15,8 +15,15 @@ log = logging.getLogger(__name__)
 # Raw rows are kept this long for exact sub-hour percentiles + drill-down;
 # older data lives only in the hourly rollup.
 RAW_RETENTION_H = 48
+_RAW_WINDOW_S = RAW_RETENTION_H * 3600
 
 _GROUP_COL = {"model": "model_name", "route": "route_name"}
+
+
+def _use_rollup(window_s: int, group_by: str | None) -> bool:
+    # Long windows read the hourly rollup. The rollup only stores per-model
+    # (and all-models) rows, so route grouping always uses raw (≤ retention).
+    return window_s > _RAW_WINDOW_S and group_by in (None, "model")
 
 
 def record(
@@ -121,9 +128,61 @@ def _group_key(row: sqlite3.Row, col: str) -> str:
     return row[col] or "—"
 
 
+def _hourly_rows_in_window(conn: sqlite3.Connection, window_s: int) -> list[sqlite3.Row]:
+    return conn.execute(
+        """
+        SELECT bucket_start, model_name, count, error_count, dispatched_count,
+               latency_p50_ms, latency_p95_ms, ttft_p50_ms, ttft_p95_ms,
+               CAST((CAST(strftime('%s','now') AS INTEGER)
+                     - CAST(strftime('%s', bucket_start) AS INTEGER)) AS INTEGER) AS age_s
+        FROM request_metrics_hourly
+        WHERE bucket_start > datetime('now', ?)
+        """,
+        (f"-{window_s} seconds",),
+    ).fetchall()
+
+
+def _weighted(rows: list[sqlite3.Row], col: str) -> int | None:
+    # count-weighted mean of a per-bucket percentile column (an approximation:
+    # percentiles can't be recombined exactly across buckets).
+    num = sum((r[col] or 0) * r["count"] for r in rows if r[col] is not None)
+    den = sum(r["count"] for r in rows if r[col] is not None)
+    return round(num / den) if den else None
+
+
+def _summarize_hourly(rows: list[sqlite3.Row]) -> dict:
+    count = sum(r["count"] for r in rows)
+    error_count = sum(r["error_count"] for r in rows)
+    return {
+        "count": count,
+        "error_count": error_count,
+        "dispatched_count": sum(r["dispatched_count"] for r in rows),
+        "error_rate": (error_count / count) if count else 0.0,
+        "latency_p50_ms": _weighted(rows, "latency_p50_ms"),
+        "latency_p95_ms": _weighted(rows, "latency_p95_ms"),
+        "ttft_p50_ms": _weighted(rows, "ttft_p50_ms"),
+        "ttft_p95_ms": _weighted(rows, "ttft_p95_ms"),
+    }
+
+
 def summary(
     conn: sqlite3.Connection, *, window_s: int, group_by: str | None = None,
 ) -> object:
+    if _use_rollup(window_s, group_by):
+        hourly = _hourly_rows_in_window(conn, window_s)
+        if group_by is None:
+            return _summarize_hourly([r for r in hourly if r["model_name"] is None])
+        hkeyed: dict[str, list] = {}
+        for r in hourly:
+            if r["model_name"] is None:
+                continue
+            hkeyed.setdefault(r["model_name"], []).append(r)
+        items = [(sum(x["count"] for x in v),
+                  {"key": k, "label": k, "summary": _summarize_hourly(v)})
+                 for k, v in hkeyed.items()]
+        items.sort(key=lambda t: t[0], reverse=True)
+        return [g for _, g in items]
+
     rows = _raw_rows_in_window(conn, window_s)
     if group_by is None:
         return _summarize(rows)
@@ -139,10 +198,58 @@ def summary(
     return [g for _, g in items]
 
 
+def _hourly_history(
+    conn: sqlite3.Connection, window_s: int, group_by: str | None,
+) -> list[dict]:
+    # Long-window history from the rollup: hourly granularity (percentiles are
+    # already exact per hour and must not be recombined).
+    bucket_s = 3600
+    num_buckets = max(1, int(window_s) // bucket_s)
+    hourly = _hourly_rows_in_window(conn, window_s)
+
+    def empty() -> list[dict]:
+        return [
+            {"bucket_idx": i, "ts_offset_s": i * bucket_s,
+             "count": 0, "error_count": 0, "error_rate": 0.0,
+             "latency_p50_ms": None, "latency_p95_ms": None}
+            for i in range(num_buckets - 1, -1, -1)
+        ]
+
+    def fill(buckets: list[dict], rowset: list[sqlite3.Row]) -> list[dict]:
+        by_idx = {min(int(r["age_s"]) // bucket_s, num_buckets - 1): r for r in rowset}
+        for b in buckets:
+            r = by_idx.get(b["bucket_idx"])
+            if r:
+                b["count"] = r["count"]
+                b["error_count"] = r["error_count"]
+                b["error_rate"] = (r["error_count"] / r["count"]) if r["count"] else 0.0
+                b["latency_p50_ms"] = r["latency_p50_ms"]
+                b["latency_p95_ms"] = r["latency_p95_ms"]
+        return buckets
+
+    if group_by is None:
+        return fill(empty(), [r for r in hourly if r["model_name"] is None])
+
+    keyed: dict[str, list] = {}
+    for r in hourly:
+        if r["model_name"] is None:
+            continue
+        keyed.setdefault(r["model_name"], []).append(r)
+    items = [
+        (sum(x["count"] for x in v),
+         {"key": k, "label": k, "summary": _summarize_hourly(v), "buckets": fill(empty(), v)})
+        for k, v in keyed.items()
+    ]
+    items.sort(key=lambda t: t[0], reverse=True)
+    return [g for _, g in items]
+
+
 def history(
     conn: sqlite3.Connection, *, window_s: int, bucket_s: int,
     group_by: str | None = None,
 ) -> list[dict]:
+    if _use_rollup(window_s, group_by):
+        return _hourly_history(conn, window_s, group_by)
     bucket_s = max(1, int(bucket_s))
     num_buckets = max(1, int(window_s) // bucket_s)
     rows = _raw_rows_in_window(conn, window_s)

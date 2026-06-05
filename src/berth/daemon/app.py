@@ -226,6 +226,11 @@ def build_apps(
     # aggregated into usage_aggregates and removed from usage_events.
     # Keeps the predictor's hot table bounded for long-running boxes.
     rollup_task = UsageRollupTask(conn=conn, config=predictor_cfg)
+    # Hourly rollup: request_metrics raw rows older than RAW_RETENTION_H get
+    # aggregated (with exact per-bucket percentiles) into request_metrics_hourly;
+    # hourly rows past retention_days are purged.
+    from berth.lifecycle.metrics_rollup_task import MetricsRollupTask
+    metrics_rollup_task = MetricsRollupTask(conn=conn, config=predictor_cfg)
 
     @asynccontextmanager
     async def lifespan(_app: FastAPI):
@@ -238,6 +243,7 @@ def build_apps(
         health_monitor.start()
         predictor_task.start()
         rollup_task.start()
+        metrics_rollup_task.start()
         import asyncio as _asyncio
 
         async def _local_metrics_tick() -> None:
@@ -305,6 +311,7 @@ def build_apps(
         except (Exception, _asyncio.CancelledError):
             pass
         await rollup_task.stop()
+        await metrics_rollup_task.stop()
         await predictor_task.stop()
         await health_monitor.stop()
         await reaper.stop()
