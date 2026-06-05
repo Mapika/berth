@@ -11,6 +11,7 @@ from berth.backends.base import Backend
 from berth.daemon.admin import get_backends, get_conn, router
 from berth.store import deployments as dep_store
 from berth.store import nodes as nodes_store
+from berth.store import request_metrics as _request_metrics
 from berth.store import usage_events as _usage_events
 
 
@@ -100,6 +101,35 @@ def usage_series(
     if gb:
         return {**base, "groups": data}
     return {**base, "buckets": data}
+
+
+@router.get("/metrics/history")
+def metrics_history(
+    window_s: int = 86400,
+    bucket_s: int = 3600,
+    group_by: str | None = None,
+    summary: bool = False,
+    conn: sqlite3.Connection = Depends(get_conn),
+):
+    """Read-only latency/error history for the Overview dashboard. Per-bucket
+    latency percentiles + error rate (raw rows for short windows, hourly rollup
+    for long). group_by may be 'model' or 'route' (or omitted/'none')."""
+    if window_s <= 0 or bucket_s <= 0:
+        raise HTTPException(400, "window_s and bucket_s must be positive")
+    if window_s // bucket_s > 1024:
+        raise HTTPException(400, "too many buckets requested (cap is 1024)")
+    if group_by not in (None, "none", "model", "route"):
+        raise HTTPException(400, "group_by must be one of: model, route")
+    gb = None if group_by in (None, "none") else group_by
+    if summary:
+        data = _request_metrics.summary(conn, window_s=window_s, group_by=gb)
+        return {"window_s": window_s, "group_by": gb,
+                ("groups" if gb else "summary"): data}
+    data = _request_metrics.history(
+        conn, window_s=window_s, bucket_s=bucket_s, group_by=gb,
+    )
+    return {"window_s": window_s, "bucket_s": bucket_s, "group_by": gb,
+            ("groups" if gb else "buckets"): data}
 
 
 @router.get("/deployments/current/logs")

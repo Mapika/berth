@@ -34,6 +34,10 @@ export const queryKeys = {
     ['key-usage', keyId, scope] as const,
   usageSeries: (windowS: number, bucketS: number, groupBy: string) =>
     ['usage-series', windowS, bucketS, groupBy] as const,
+  metricsHistory: (windowS: number, bucketS: number) =>
+    ['metrics-history', windowS, bucketS] as const,
+  metricsSummary: (windowS: number, groupBy: string) =>
+    ['metrics-summary', windowS, groupBy] as const,
 }
 
 export async function eventSourceUrl(path: string): Promise<string> {
@@ -369,6 +373,18 @@ export const api = {
       'GET',
       `/admin/usage/series?window_s=${windowS}&bucket_s=${bucketS}&group_by=model`,
     ),
+  getMetricsHistory: (windowS = 86400, bucketS = 3600) =>
+    jfetch<MetricsHistory>(
+      'GET', `/admin/metrics/history?window_s=${windowS}&bucket_s=${bucketS}`,
+    ),
+  getMetricsSummary: (windowS = 86400) =>
+    jfetch<{ summary: MetricsSummary }>(
+      'GET', `/admin/metrics/history?window_s=${windowS}&summary=true`,
+    ),
+  getMetricsByModel: (windowS = 86400) =>
+    jfetch<{ groups: MetricsGroup[] }>(
+      'GET', `/admin/metrics/history?window_s=${windowS}&summary=true&group_by=model`,
+    ),
 }
 
 export type MetricsSnapshotGpu = {
@@ -428,6 +444,39 @@ export type UsageSeriesGrouped = {
   bucket_s: number
   group_by: 'model' | 'key'
   groups: UsageGroup[]
+}
+
+// Latency/error history (Overview latency/error tiles, chart, breakdown).
+export type MetricsBucket = {
+  bucket_idx: number
+  ts_offset_s: number
+  count: number
+  error_count: number
+  error_rate: number
+  latency_p50_ms: number | null
+  latency_p95_ms: number | null
+}
+export type MetricsSummary = {
+  count: number
+  error_count: number
+  dispatched_count: number
+  error_rate: number
+  latency_p50_ms: number | null
+  latency_p95_ms: number | null
+  ttft_p50_ms: number | null
+  ttft_p95_ms: number | null
+}
+export type MetricsHistory = {
+  window_s: number
+  bucket_s: number
+  group_by: null
+  buckets: MetricsBucket[]
+}
+export type MetricsGroup = {
+  key: string
+  label: string
+  summary: MetricsSummary
+  buckets?: MetricsBucket[]
 }
 
 // Cluster types.
