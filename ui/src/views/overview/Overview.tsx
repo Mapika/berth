@@ -1,14 +1,47 @@
 import { useQuery } from '@tanstack/react-query'
 import { api, queryKeys } from '../../api'
 import HealthStrip from './HealthStrip'
+import StatTile from './StatTile'
+import TrafficChart from './TrafficChart'
+import TopModels from './TopModels'
+import DeploymentsGlance from './DeploymentsGlance'
+import { aggregateSnapshot, recentRates } from './useOverviewStats'
+
+function unit(value: string, u: string) {
+  return <>{value}<span className="text-mute text-[13px]"> {u}</span></>
+}
 
 export default function Overview() {
   const deps = useQuery({ queryKey: queryKeys.deployments, queryFn: api.listDeployments, refetchInterval: 2000 })
   const gpus = useQuery({ queryKey: queryKeys.gpus, queryFn: api.listGpus, refetchInterval: 2000 })
   const nodes = useQuery({ queryKey: queryKeys.nodes, queryFn: api.listNodes, refetchInterval: 5000 })
+  const snap = useQuery({ queryKey: queryKeys.metricsSnapshot, queryFn: api.getMetricsSnapshot, refetchInterval: 2000 })
+
+  // Live volume/throughput: last hour in 60s buckets, refreshed often.
+  const live = useQuery({
+    queryKey: queryKeys.usageSeries(3600, 60, 'none'),
+    queryFn: () => api.getUsageSeries(3600, 60),
+    refetchInterval: 5000,
+  })
+  // History: last 24h in 1h buckets.
+  const history = useQuery({
+    queryKey: queryKeys.usageSeries(86400, 3600, 'none'),
+    queryFn: () => api.getUsageSeries(86400, 3600),
+    refetchInterval: 30000,
+  })
+  const byModel = useQuery({
+    queryKey: queryKeys.usageSeries(86400, 3600, 'model'),
+    queryFn: () => api.getUsageByModel(86400, 3600),
+    refetchInterval: 30000,
+  })
 
   const all = deps.data ?? []
   const active = all.filter(d => d.status === 'ready' || d.status === 'loading')
+  const stats = aggregateSnapshot(snap.data)
+  const liveBuckets = live.data?.buckets ?? []
+  const rates = recentRates(liveBuckets, 60)
+  const volSpark = liveBuckets.slice(-30).map(b => b.count)
+  const tokSpark = liveBuckets.slice(-30).map(b => b.tokens_out)
 
   return (
     <div className="space-y-14">
@@ -36,7 +69,60 @@ export default function Overview() {
 
       <HealthStrip />
 
-      {/* request stats — Phase 4 (StatTiles, TrafficChart, TopModels, DeploymentsGlance) */}
+      <section className="space-y-6">
+        <div className="label">request stats</div>
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-y-8 gap-x-6">
+          <StatTile
+            title="volume"
+            value={unit(rates.reqPerMin.toFixed(rates.reqPerMin < 10 ? 1 : 0), 'req/min')}
+            sub={`${stats.inFlight} in flight`}
+            spark={volSpark}
+            badge="live"
+          />
+          <StatTile
+            title="latency"
+            value={unit(stats.latencyP50.toFixed(0), 'ms p50')}
+            sub={`p95 ${stats.latencyP95.toFixed(0)} ms`}
+            badge="live · 60s"
+          />
+          <StatTile
+            title="errors"
+            value={unit((stats.errorRate * 100).toFixed(1), '%')}
+            sub={
+              <span className="text-accent">{stats.errorsWindow} recent → see traffic</span>
+            }
+            badge="live · 60s"
+            onClick={() => { location.hash = '#/observe/requests' }}
+          />
+          <StatTile
+            title="throughput"
+            value={unit(rates.tokPerSec.toFixed(0), 'tok/s')}
+            sub={`${rates.totalOut.toLocaleString()} out tok · 1h`}
+            spark={tokSpark}
+            badge="live"
+          />
+        </div>
+      </section>
+
+      <section className="space-y-4">
+        <div className="flex items-baseline justify-between">
+          <div className="label">traffic over time</div>
+          <div className="text-mute text-[10px] tracking-wider uppercase">
+            last 24h · bounded by retention
+          </div>
+        </div>
+        <TrafficChart buckets={history.data?.buckets ?? []} />
+      </section>
+
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-x-12 gap-y-10">
+        <section className="space-y-4">
+          <div className="label">top models · 24h</div>
+          <TopModels groups={byModel.data?.groups ?? []} />
+        </section>
+        <section>
+          <DeploymentsGlance />
+        </section>
+      </div>
     </div>
   )
 }
