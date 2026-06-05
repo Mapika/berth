@@ -1,413 +1,165 @@
 # berth
 
+berth is a small control plane for serving models on your own GPU boxes.
+
+It gives a host one OpenAI-compatible endpoint and takes care of the tedious
+parts behind it: starting engine containers, stopping them, health checks,
+routing requests, metrics, keeping state, and cleaning up when something falls
+over. vLLM, SGLang, and TensorRT-LLM do the actual inference. berth is the layer
+around them.
+
+I wanted something that sat between "run this container by hand" and "stand up a
+Kubernetes cluster." One GPU box shouldn't need an orchestration stack to serve a
+few models reliably.
+
 [![CI](https://github.com/Mapika/berth/actions/workflows/ci.yml/badge.svg)](https://github.com/Mapika/berth/actions/workflows/ci.yml)
 [![Release](https://github.com/Mapika/berth/actions/workflows/release.yml/badge.svg)](https://github.com/Mapika/berth/actions/workflows/release.yml)
 ![Python](https://img.shields.io/badge/python-3.11%2B-blue)
 ![License](https://img.shields.io/badge/license-Apache--2.0-blue)
 
-berth is a small inference control plane for GPU boxes.
-
-It gives a host one OpenAI-compatible endpoint and manages the boring parts
-behind it: start containers, stop them, check health, route requests, expose
-metrics, keep state, and clean up after failures. vLLM, SGLang, and TensorRT-LLM
-still do the inference. berth is the layer around them.
-
-The taste of the project is deliberately narrow:
-
-- Engines should be swappable.
-- Public model names should be routes, not accidents of whatever is currently
-  running.
-- One GPU box should not need Kubernetes just to serve a few models reliably.
-- If something cannot fit on the GPU, fail before turning the host into an OOM
-  experiment.
-
-This is not trying to be a full ML platform. It is the thing I wanted between
-"run this container by hand" and "stand up a cluster stack".
-
 ![berth dashboard](docs/assets/ui-dashboard.png)
 
-## When To Use It
+## Quick start
 
-Use berth if:
+You'll need Linux, an NVIDIA GPU, Docker 24+ with GPU access, and Python 3.11+.
 
-- You have one GPU box, or a few GPU boxes, and want one API endpoint.
-- You want vLLM/SGLang/TRT-LLM to stay replaceable.
-- You care about explicit routes, API keys, metrics, logs, and predictable
-  cleanup.
-- You would rather fail a launch than discover overload through a host OOM.
+```bash
+git clone https://github.com/Mapika/berth && cd berth
+uv tool install --editable .
+berth doctor                 # checks Docker, GPUs, ports, images
+```
 
-Do not use it if:
+Start the daemon and put a model on a GPU:
 
-- You need Kubernetes-scale scheduling.
-- You are training or fine-tuning.
-- You need multi-host tensor parallelism.
-- You want a managed cloud abstraction.
+```bash
+berth setup                  # starts the daemon, mints an admin key, prints the URL
+berth pull Qwen/Qwen2.5-0.5B-Instruct --name qwen
+berth run qwen --gpu 0       # vLLM by default; --engine sglang or trtllm to switch
+berth ps
+```
 
-## What Works
+Then call it like any other OpenAI endpoint:
 
-- Single-node NVIDIA hosts
-- Docker-backed lifecycle for engine containers
-- vLLM and SGLang tested end to end through the router on a real GPU
-- TensorRT-LLM backend adapter present
-- OpenAI-compatible `/v1/chat/completions`, `/v1/completions`,
-  `/v1/embeddings`, and `/v1/models`
-- Model registry, deployments, service profiles, and explicit route rules
-- LoRA adapter registry, download, hot-load, and unload paths
-- API keys, admin keys, and request/token rate limits
-- Prometheus metrics, GPU stats, request tracing, lifecycle events, logs, and
-  `berth top`
-- Web UI bundled into the Python package, including cluster, services, keys,
-  logs, requests, and playground views
+```bash
+export BERTH_TOKEN=sk-...     # the admin key berth setup printed
+curl -k https://127.0.0.1:11500/v1/chat/completions \
+  -H "Authorization: Bearer $BERTH_TOKEN" \
+  -H 'Content-Type: application/json' \
+  -d '{"model":"qwen","messages":[{"role":"user","content":"Say hi"}]}'
+```
 
-There is also a secure-by-default multi-node path: a leader serves the public
-API, and GPU agents dial back over mTLS WebSocket. Remote deployments start,
-stop, proxy, and stream logs through that tunnel. I still think the best
-starting point is one box; the multi-node path is there when the second box is
-actually useful.
+The web UI is at `https://127.0.0.1:11500/`. Paste the admin key and you get
+deployments, GPUs, routes, keys, logs, requests, and a playground.
 
-## Non-Goals
+## What it does
 
-- Training
-- Multi-host tensor parallelism
-- Being a new inference engine
-- Making adapters or LoRA the center of the project
-- Replacing Kubernetes for people who already need Kubernetes
+- One OpenAI-compatible API: `/v1/chat/completions`, `/v1/completions`,
+  `/v1/embeddings`, `/v1/responses`, and `/v1/models`.
+- vLLM and SGLang tested end to end on real GPUs, with a TensorRT-LLM adapter in
+  the tree. The engines stay swappable.
+- GPU-aware placement. Before starting a model berth estimates its VRAM cost and
+  only puts it where it fits. If nothing fits it evicts idle deployments; if it
+  still can't fit it fails the launch instead of racing the host into an OOM.
+- Public model names are routes, not whatever happens to be running. Service
+  profiles save repeatable launch settings; routes map a public name to one.
+- Adopt a server you already started. Point berth at a running
+  OpenAI-compatible container or port and it routes to it without taking over its
+  lifecycle.
+- LoRA adapters: register, download, hot-load, and unload against a ready
+  backend.
+- API keys, admin keys, and per-key request and token rate limits.
+- Prometheus metrics, GPU stats, request tracing, lifecycle events, logs, and a
+  `berth top` terminal view.
+- A web UI bundled into the package and served by the daemon, so there's nothing
+  extra to deploy.
+- A secure multi-node path for when one box isn't enough: a leader serves the
+  API and GPU agents dial back over an mTLS WebSocket. See the
+  [multi-node guide](docs/multi-node.md).
 
-## Requirements
+## When it fits
 
-- Linux
-- NVIDIA GPU
-- Docker 24+ with NVIDIA GPU access
-- Python 3.11+
-- [`uv`](https://docs.astral.sh/uv/) recommended
+Reach for berth if you have one GPU box, or a few, and want a single API in front
+of them; if you want vLLM/SGLang/TRT-LLM to stay replaceable; and if you care
+about explicit routes, keys, metrics, logs, and predictable cleanup. It's
+happiest when you'd rather fail a launch than find overload through a host OOM.
 
-## Compatibility
-
-This is the test surface I actively care about right now:
-
-| Area | Current posture |
-|---|---|
-| OS | Linux |
-| GPU | NVIDIA |
-| Container runtime | Docker 24+ with NVIDIA GPU access |
-| Python | 3.11+ |
-| Engines | vLLM and SGLang tested end to end; TensorRT-LLM adapter present |
-| State | SQLite under `~/.berth` |
-| Multi-node | Leader plus mTLS WebSocket agents; tunneled data plane |
-| UI | Bundled Vite/React build served by the daemon |
+It's the wrong tool if you need Kubernetes-scale scheduling, you're training or
+fine-tuning, you need multi-host tensor parallelism, or you want a managed cloud
+abstraction. It isn't trying to be a full ML platform or a new inference engine.
 
 ## Install
 
-From source:
+The usual path installs the `berth` CLI with uv:
 
 ```bash
-git clone https://github.com/Mapika/berth
-cd berth
-uv tool install --editable .
-berth doctor
-```
-
-From a GitHub release wheel:
-
-```bash
+uv tool install --editable .            # from a source checkout
+# or a pinned release wheel, no clone needed:
 uv tool install \
   https://github.com/Mapika/berth/releases/download/v0.5.0/berth-0.5.0-py3-none-any.whl
 berth doctor
 ```
 
-The project is not published to PyPI yet. Releases are GitHub artifacts for
-now.
+It isn't on PyPI yet; releases are GitHub artifacts for now.
 
-For a public leader VPS, clone the repo on a fresh Ubuntu/Debian host after DNS
-is pointed at it:
+<details>
+<summary><b>A public leader on a VPS (one command)</b></summary>
+
+On a fresh Ubuntu/Debian host, once DNS points at it:
 
 ```bash
 sudo ./scripts/setup-leader-vps.sh example.com
 ```
 
-That installs `/usr/local/bin/berth` as the operator command. After setup, the
-common path is short:
+This installs `berth` as the operator command, provisions TLS through HAProxy and
+Caddy, bootstraps the CA, database, and first admin key, and starts the systemd
+service. Full notes in [docs/deploy.md](docs/deploy.md).
+</details>
+
+<details>
+<summary><b>A development checkout</b></summary>
 
 ```bash
-berth status
-berth nodes enroll gpu-host-1
-berth key create teammate --tier admin
-berth wipe   # prompts, then resets local berth state
-```
-
-For development:
-
-```bash
-git clone https://github.com/Mapika/berth
-cd berth
-uv venv
-source .venv/bin/activate
+git clone https://github.com/Mapika/berth && cd berth
+uv venv && source .venv/bin/activate
 uv pip install -e ".[dev]"
 berth doctor
 ```
+</details>
 
-For 0.4 upgrade notes, see [docs/upgrade-0.4.md](docs/upgrade-0.4.md).
-
-Daemon in a container:
+<details>
+<summary><b>The daemon in a container</b></summary>
 
 ```bash
-git clone https://github.com/Mapika/berth
-cd berth
 docker build -f docker/daemon.Dockerfile -t berth:dev .
-docker run -d --name berth \
-  --network host \
+docker run -d --name berth --network host \
   -v ~/.berth:/root/.berth \
   -v /var/run/docker.sock:/var/run/docker.sock \
   berth:dev
 ```
 
-The daemon container does not run inference itself. It talks to the host Docker
-socket and starts separate engine containers.
+The daemon container doesn't run inference itself. It talks to the host Docker
+socket and starts engine containers next to it.
+</details>
 
-## First Run
+## How it works
 
-Start the daemon:
+One daemon process runs three FastAPI apps over shared state (a single SQLite
+database under `~/.berth`):
 
-```bash
-berth daemon start
-berth status
-```
+- a public app for `/v1/*`, `/admin/*`, `/metrics`, and the UI on HTTPS :11500;
+- a cluster app for the agent mTLS WebSocket and enrollment on :11501, so it can
+  be firewalled apart from the public API;
+- a local app over a Unix socket for CLI commands, which don't need a token.
 
-By default the public and cluster listeners bind to localhost only and the
-public listener serves HTTPS with a generated berth CA. For internet-facing
-use, make exposure explicit with `berth deploy bootstrap`, preferably behind
-Caddy/Nginx.
+Engines run as Docker containers on the leader or on an enrolled agent. Remote
+start, stop, proxy, and log streaming go over the agent link. The proxy resolves
+routes and adapters, ranks the ready deployments, retries failures before the
+first byte, and records usage and token counts. State stays in SQLite; engine
+defaults live in `src/berth/backends/backends.yaml`, with per-host overrides in
+`~/.berth/backends.override.yaml`.
 
-Create an admin key:
-
-```bash
-berth key create web --tier admin
-```
-
-Save the printed `secret:` value:
-
-```bash
-export BERTH_TOKEN=sk-...
-export BERTH_URL=https://127.0.0.1:11500
-```
-
-Open the web UI at:
-
-```text
-https://127.0.0.1:11500/
-```
-
-Paste the admin key when prompted. Browsers and SDKs will warn on the generated
-CA unless you trust it locally or configure `[public_tls]`. The curl examples
-below use `-k` for first-run testing against that generated certificate.
-
-Local CLI commands use the daemon Unix socket and do not need the HTTP bearer
-token. TCP admin, `/v1/*`, and `/metrics` requests need a bearer token even
-before the first key exists; create the first key locally with `berth key create`.
-
-## Quick Start
-
-Register and download a small model:
-
-```bash
-berth pull Qwen/Qwen2.5-0.5B-Instruct --name qwen-0_5b
-```
-
-Start it on GPU 0:
-
-```bash
-berth run qwen-0_5b --gpu 0 --engine vllm --pin
-berth ps
-```
-
-Call the OpenAI-compatible API:
-
-```bash
-curl -k "$BERTH_URL/v1/chat/completions" \
-  -H "Authorization: Bearer $BERTH_TOKEN" \
-  -H 'Content-Type: application/json' \
-  -d '{
-    "model": "qwen-0_5b",
-    "messages": [{"role": "user", "content": "Reply with exactly: OK"}],
-    "max_tokens": 8,
-    "temperature": 0
-  }'
-```
-
-Stop it:
-
-```bash
-berth stop
-```
-
-The happy path looks roughly like this:
-
-```text
-$ berth pull Qwen/Qwen2.5-0.5B-Instruct --name qwen-0_5b
-registered qwen-0_5b
-downloaded model files
-
-$ berth run qwen-0_5b --gpu 0 --engine vllm --pin
-deployment 1 loading
-deployment 1 ready
-
-$ berth ps
-ID  MODEL     BACKEND  GPU  STATUS  PIN
-1   qwen-0_5b vllm     0    ready   yes
-
-$ curl -k "$BERTH_URL/v1/chat/completions" ...
-{"choices":[{"message":{"role":"assistant","content":"OK"}}]}
-```
-
-## Service Routes
-
-The direct model commands are enough for one-off runs. Use service profiles
-when you want repeatable launch settings and a stable public model name.
-
-Create a vLLM service profile:
-
-```bash
-curl -k -X POST "$BERTH_URL/admin/service-profiles" \
-  -H "Authorization: Bearer $BERTH_TOKEN" \
-  -H 'Content-Type: application/json' \
-  -d '{
-    "name": "qwen-vllm",
-    "model_name": "qwen-vllm",
-    "hf_repo": "Qwen/Qwen2.5-0.5B-Instruct",
-    "backend": "vllm",
-    "gpu_ids": [0],
-    "max_model_len": 1024,
-    "target_concurrency": 4
-  }'
-```
-
-Deploy it:
-
-```bash
-curl -k -X POST "$BERTH_URL/admin/service-profiles/qwen-vllm/deploy" \
-  -H "Authorization: Bearer $BERTH_TOKEN"
-```
-
-Expose it as a public model name:
-
-```bash
-curl -k -X POST "$BERTH_URL/admin/routes" \
-  -H "Authorization: Bearer $BERTH_TOKEN" \
-  -H 'Content-Type: application/json' \
-  -d '{
-    "name": "chat-default",
-    "match_model": "chat",
-    "profile_name": "qwen-vllm",
-    "priority": 10
-  }'
-```
-
-Call the route:
-
-```bash
-curl -k "$BERTH_URL/v1/chat/completions" \
-  -H "Authorization: Bearer $BERTH_TOKEN" \
-  -H 'Content-Type: application/json' \
-  -d '{
-    "model": "chat",
-    "messages": [{"role": "user", "content": "Hello"}],
-    "max_tokens": 64
-  }'
-```
-
-Switch `"backend": "vllm"` to `"backend": "sglang"` for the same profile shape
-on SGLang.
-
-## Concepts
-
-**Model**
-
-A named Hugging Face repository entry. The model name is what local commands
-and direct `/v1/*` calls usually target.
-
-**Service profile**
-
-A saved launch definition: backend, image, model, args, GPU placement,
-concurrency, context length, timeout policy, and optional `node_label`.
-
-**Deployment**
-
-A running engine container for one model/profile. Deployments move through
-`loading`, `ready`, `stopped`, and `failed`, and can live on the leader or on
-an enrolled agent node.
-
-**Route**
-
-A rule that maps an incoming OpenAI `model` value to a primary service profile
-and optional fallback. The proxy rewrites the upstream model name to the served
-base model or adapter slot.
-
-**Adapter**
-
-A LoRA adapter tied to a base model. It can be downloaded or registered from
-disk, then hot-loaded into a ready backend that supports adapters.
-
-**Node**
-
-The leader host or an enrolled agent host. Nodes report GPU inventory,
-heartbeat, and metrics. Service profiles can target a node by label.
-
-**Backend**
-
-The adapter that knows how to launch a specific engine. Engine-specific argv,
-ports, health paths, metrics paths, and memory headroom live behind this
-interface.
-
-## CLI
-
-```text
-berth doctor              check host requirements
-berth setup               first-run wizard
-berth status              show daemon health
-berth daemon start        start the daemon
-berth daemon stop         stop the daemon
-berth daemon status       show daemon status
-berth pull <repo>         register and download model files
-berth ls                  list registered models
-berth run <name>          start a deployment
-berth pin <name>          keep a deployment loaded
-berth unpin <name>        allow idle eviction
-berth ps                  list deployments
-berth stop [<id>]         stop one deployment or all deployments
-berth top                 terminal dashboard
-berth logs                tail engine container logs
-berth key create          create an API key
-berth key list            list key prefixes
-berth key revoke <id>     revoke a key
-berth adapter ...         manage LoRA adapters
-berth nodes ...           enroll, list, inspect, and remove agent nodes
-berth agent ...           register and run an agent host
-berth config ...          inspect and edit listener/TLS config
-berth backup create       snapshot db, CA, key pepper, and config
-berth predict             inspect predictor candidates and usage history
-berth update-engines      check for newer pinned engine tags
-berth wipe                reset local berth state
-```
-
-Useful `berth run` options:
-
-```text
---engine vllm|sglang|trtllm
---gpu 0
---gpu 0,1
---node gpu-rig-2
---ctx 8192
---max-seqs 32
---idle-timeout 300
---pin
---image <image:tag>
---extra '--some-engine-flag=value'
-```
-
-A non-pinned deployment is evicted once `now - last_request_at` exceeds
-`--idle-timeout` seconds (default 300).
-
-## Architecture
+<details>
+<summary><b>Architecture sketch</b></summary>
 
 ```text
 SDK / browser / Prometheus
@@ -439,29 +191,79 @@ agent hosts
   cluster_app
   /cluster/agent, /admin/nodes/register, /admin/ca.pem
 ```
+</details>
 
-Runtime choices:
+## Going further
 
-- One daemon process builds three FastAPI apps: public, cluster, and local UDS.
-- All three apps share one SQLite connection, lifecycle manager, event bus,
-  request tracer, metrics aggregator, and node registry.
-- The public app serves `/v1/*`, authenticated `/admin/*`, `/metrics`, and the
-  bundled UI. It also owns startup/shutdown background tasks.
-- The cluster app only serves the agent WebSocket, enrollment registration, and
-  CA endpoint, so it can be firewalled separately from the public API.
-- Engine services run as Docker containers on the leader or on an enrolled
-  agent. Remote start, stop, health probe, proxy, and logs go through
-  `AgentLink`.
-- The proxy resolves routes and adapters, ranks ready deployments with node
-  signals and affinity, retries pre-first-byte failures for bare-base requests,
-  and records usage/token counters.
-- State lives in SQLite under `~/.berth`.
-- Engine defaults come from `src/berth/backends/backends.yaml`.
-- Per-host engine overrides live in `~/.berth/backends.override.yaml`.
+- [Multi-node setup](docs/multi-node.md): a leader plus mTLS agents, on the same
+  network or across the internet, with hardening notes.
+- Adopting a running server: `berth agent adopt --container <name>` (or
+  `--port`) hands an existing OpenAI endpoint to the leader's gateway. See the
+  [details](docs/multi-node.md#adopting-an-externally-hosted-model).
+- Service routes: stable public names backed by saved profiles. There are
+  ready-made examples in [examples/](examples/).
+- Production and TLS: [docs/deploy.md](docs/deploy.md), or run behind a reverse
+  proxy with the [Caddy notes](docs/caddy.md).
+- [Predictor and prewarm](docs/predictor.md), and
+  [troubleshooting](docs/troubleshooting.md) for when something misbehaves.
 
-## Files
+## Reference
 
-By default, berth owns `~/.berth`. Override it with `BERTH_HOME`.
+<details>
+<summary><b>CLI commands</b></summary>
+
+```text
+berth doctor              check host requirements
+berth setup               first-run wizard
+berth status              show daemon health
+berth daemon start        start the daemon
+berth daemon stop         stop the daemon
+berth daemon status       show daemon status
+berth pull <repo>         register and download model files
+berth ls                  list registered models
+berth run <name>          start a deployment
+berth pin <name>          keep a deployment loaded
+berth unpin <name>        allow idle eviction
+berth ps                  list deployments
+berth stop [<id>]         stop one deployment or all deployments
+berth top                 terminal dashboard
+berth logs                tail engine container logs
+berth key create          create an API key
+berth key list            list key prefixes
+berth key revoke <id>     revoke a key
+berth adapter ...         manage LoRA adapters
+berth nodes ...           enroll, list, inspect, and remove agent nodes
+berth agent ...           register and run an agent host, or adopt a server
+berth config ...          inspect and edit listener/TLS config
+berth backup create       snapshot db, CA, key pepper, and config
+berth predict             inspect predictor candidates and usage history
+berth update-engines      check for newer pinned engine tags
+berth wipe                reset local berth state
+```
+
+Common `berth run` options:
+
+```text
+--engine vllm|sglang|trtllm
+--gpu 0
+--gpu 0,1
+--node gpu-rig-2
+--ctx 8192
+--max-seqs 32
+--idle-timeout 300
+--pin
+--image <image:tag>
+--extra '--some-engine-flag=value'
+```
+
+A non-pinned deployment is evicted once it's been idle past `--idle-timeout`
+seconds (default 300).
+</details>
+
+<details>
+<summary><b>What lives in ~/.berth</b></summary>
+
+berth owns `~/.berth` by default. Override it with `BERTH_HOME`.
 
 ```text
 ~/.berth/
@@ -477,39 +279,14 @@ By default, berth owns `~/.berth`. Override it with `BERTH_HOME`.
 |-- logs/
 |   `-- daemon.log          daemon stdout and stderr
 |-- models/                 downloaded Hugging Face model files
-|   `-- models--owner--repo/snapshots/revision/
 |-- configs/                per-deployment engine configs
 |-- predictor.yaml          optional prewarm and prediction tuning
 `-- backends.override.yaml  optional engine image and headroom overrides
 ```
+</details>
 
-## Operator Notes
-
-- Run `berth doctor` before chasing ghosts.
-- Use `berth ps` for deployment state.
-- Use `berth logs` when an engine fails to become healthy.
-- Use `/admin/events` or `berth top` for lifecycle visibility.
-- Use the web UI's Requests view when proxy routing or token accounting looks
-  wrong.
-- Use `--pin` for services that should stay loaded.
-- Use `--idle-timeout` for services that should leave the GPU when quiet.
-- Use service profiles when launch arguments need to be repeatable.
-- Use routes when the public model name should not be tied to one backend.
-- Use `berth nodes enroll <label>` when a second GPU host is worth the added
-  moving parts.
-- If something weird happens, see [docs/troubleshooting.md](docs/troubleshooting.md).
-
-## More Docs
-
-- [Deployment guide](docs/deploy.md)
-- [Caddy reverse proxy notes](docs/caddy.md)
-- [Multi-node guide](docs/multi-node.md)
-- [Predictor/prewarm notes](docs/predictor.md)
-- [Troubleshooting](docs/troubleshooting.md)
-- [Release process](docs/release.md)
-- [Examples](examples/)
-
-## Performance Snapshot
+<details>
+<summary><b>Performance snapshot</b></summary>
 
 Single H100 80 GB, Qwen2.5 0.5B and 1.5B, 512-token outputs, Poisson arrivals.
 
@@ -521,61 +298,18 @@ Single H100 80 GB, Qwen2.5 0.5B and 1.5B, 512-token outputs, Poisson arrivals.
 | 16 | 1.5B SGLang | 7904 | 38 | 1608 |
 | 32 | 1.5B vLLM | 13377 | 128 | 2814 |
 
-Treat these as a smoke test with numbers, not a benchmark paper. Engine version,
-model family, context length, quantization, and GPU all matter.
+These are a smoke test with numbers, not a benchmark paper. Engine version, model
+family, context length, quantization, and GPU all change the picture.
+</details>
 
-## GPU Sharing
+## Docs
 
-Two deployments can share a GPU. Before starting one, the daemon estimates its
-VRAM cost from the model config: weights at the chosen dtype, KV cache for
-`--ctx` and `--max-seqs`, plus engine headroom. It only places the deployment on
-GPUs where that fits alongside what is already running. If nothing fits, it
-evicts non-pinned idle deployments in LRU order. If it still cannot fit, it
-fails with a placement error instead of racing the existing services into an
-OOM.
+[Deployment](docs/deploy.md) · [Multi-node](docs/multi-node.md) ·
+[Caddy](docs/caddy.md) · [Predictor](docs/predictor.md) ·
+[Troubleshooting](docs/troubleshooting.md) · [Release process](docs/release.md) ·
+[Examples](examples/)
 
-## Development
-
-```bash
-uv venv
-source .venv/bin/activate
-uv pip install -e ".[dev]"
-uv lock --check
-uv run ruff check src tests
-uv run mypy src
-uv run pytest tests/unit tests/integration
-```
-
-UI build:
-
-```bash
-cd ui
-npm ci
-npm run build
-```
-
-## Out Of Scope For V1
-
-- Multi-host tensor parallel inference
-- Training or fine-tuning
-- Full autotuning of tensor parallelism, dtype, and context length
-- Built-in ACME/certificate management
-- A Kubernetes replacement
-
-For internet-facing use, prefer `scripts/setup-leader-vps.sh` or
-`berth deploy bootstrap` with a TLS-terminating reverse proxy, or configure
-`[public_tls]` with an operator-managed certificate.
-
-## Multi-Node (Secure-by-Default)
-
-A leader serves the OpenAI API and admin API. Additional GPU hosts run a thin
-agent that dials home over mTLS WebSocket. The leader terminates TLS itself, so
-a reverse proxy is optional, and the public and cluster listeners have separate
-trust boundaries.
-
-See **[docs/multi-node.md](docs/multi-node.md)** for the full operator
-guide (same-network and cross-network setup, public-cert configuration,
-internet-exposure hardening, troubleshooting, roadmap).
+Upgrading an older install? See [docs/upgrade-0.4.md](docs/upgrade-0.4.md).
 
 ## License
 
