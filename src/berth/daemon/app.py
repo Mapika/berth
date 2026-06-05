@@ -179,7 +179,10 @@ def build_apps(
     event_bus = EventBus()
     stream_tokens = StreamTokenStore()
     from berth.daemon.request_tracer import RequestTracer
-    request_tracer = RequestTracer()
+    from berth.store import request_metrics as _rm_store
+    request_tracer = RequestTracer(
+        on_finalize=lambda trace: _rm_store.record_from_trace(conn, trace),
+    )
     manager = LifecycleManager(
         conn=conn,
         docker_client=docker_client,
