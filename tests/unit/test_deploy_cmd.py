@@ -261,6 +261,40 @@ def test_cli_sni_443_requires_cluster_domain(tmp_path, monkeypatch):
     assert "cluster-domain" in _ANSI.sub("", res.output)
 
 
+def test_cli_quiet_prints_key_but_skips_runbook(tmp_path, monkeypatch):
+    _isolate(monkeypatch, tmp_path)
+    runner = CliRunner()
+    res = runner.invoke(cli.app, [
+        "deploy", "bootstrap",
+        "--domain", "leader.example.com",
+        "--cluster-domain", "cluster.example.com",
+        "--sni-443", "--leader-only",
+        "--quiet",
+        "--berth-home", str(tmp_path),
+    ])
+    assert res.exit_code == 0, res.output
+    out = _ANSI.sub("", res.output)
+    # The admin key is the one piece that must survive quiet mode.
+    assert "sk-" in out
+    # The status block stays so the operator sees what happened.
+    assert "config :" in out
+    # The redundant manual runbook is suppressed (the wrapper does those steps).
+    assert "Next steps" not in out
+    assert "Install the Caddyfile" not in out
+
+
+def test_cli_default_keeps_runbook(tmp_path, monkeypatch):
+    _isolate(monkeypatch, tmp_path)
+    runner = CliRunner()
+    res = runner.invoke(cli.app, [
+        "deploy", "bootstrap",
+        "--domain", "berth.example.com",
+        "--berth-home", str(tmp_path),
+    ])
+    assert res.exit_code == 0, res.output
+    assert "Next steps" in _ANSI.sub("", res.output)
+
+
 def test_cli_writes_files_and_prints_summary(tmp_path, monkeypatch):
     _isolate(monkeypatch, tmp_path)
     runner = CliRunner()
