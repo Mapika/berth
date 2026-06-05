@@ -74,8 +74,8 @@ uv run --frozen python -m zipfile -l dist/berth-*.whl \
 
 ```bash
 git push origin main
-git tag -a v0.4.0 -m "berth 0.4.0"
-git push origin v0.4.0
+git tag -a v0.5.0 -m "berth 0.5.0"
+git push origin v0.5.0
 ```
 
 Pushing a `v*` tag runs `.github/workflows/release.yml`. That workflow uploads
@@ -89,7 +89,7 @@ ghcr.io/mapika/berth/daemon:<tag>
 
 ```bash
 uv tool install \
-  https://github.com/Mapika/berth/releases/download/v0.4.0/berth-0.4.0-py3-none-any.whl
+  https://github.com/Mapika/berth/releases/download/v0.5.0/berth-0.5.0-py3-none-any.whl
 ```
 
 ## Smoke Test A Built Wheel
@@ -97,6 +97,6 @@ uv tool install \
 ```bash
 tmp=$(mktemp -d)
 uv venv "$tmp/.venv"
-"$tmp/.venv/bin/python" -m pip install dist/berth-0.4.0-py3-none-any.whl
+"$tmp/.venv/bin/python" -m pip install dist/berth-0.5.0-py3-none-any.whl
 "$tmp/.venv/bin/berth" --help
 ```

@@ -111,7 +111,7 @@ From a GitHub release wheel:
 
 ```bash
 uv tool install \
-  https://github.com/Mapika/berth/releases/download/v0.4.0/berth-0.4.0-py3-none-any.whl
+  https://github.com/Mapika/berth/releases/download/v0.5.0/berth-0.5.0-py3-none-any.whl
 berth doctor
 ```
 

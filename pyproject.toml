@@ -1,6 +1,6 @@
 [project]
 name = "berth"
-version = "0.4.0"
+version = "0.5.0"
 description = "berth — single-node inference control plane over vLLM and SGLang"
 license = "Apache-2.0"
 license-files = ["LICENSE"]

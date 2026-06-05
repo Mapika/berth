@@ -1,5 +1,43 @@
 # Changelog
 
+## 0.5.0 - 2026-06-05
+
+### Added
+
+- OpenAI Responses API: `POST /v1/responses` is proxied to the backing engine.
+- Adopt externally-hosted models: `berth agent adopt` / `unadopt` / `adopted`
+  register OpenAI-compatible endpoints you already run. The leader reconciles
+  them from the agent, routes them over `/v1` by served model name, and
+  health-probes them, marking an endpoint down after repeated misses.
+- `berth agent install-service`: install the agent as a systemd unit so it
+  persists across reboots.
+- `berth deploy bootstrap --quiet`: print only the status block and first admin
+  key, skipping the manual runbook. Used by the leader installer.
+
+### Changed
+
+- Installer scripts (`setup-leader-vps.sh`, `install.sh`) now produce quiet,
+  structured output: one status line per step, full detail in a log file,
+  `--verbose` to stream live, and a summary that surfaces the admin key.
+- Python dependencies are refreshed by a weekly `uv lock --upgrade` workflow
+  that opens a single validated PR, instead of Dependabot (which cannot manage
+  `uv.lock`). Dependabot continues to group GitHub Actions and npm updates.
+- Adopted deployments reserve full GPU VRAM by default and are rejected from
+  manual deploy, stop, and adapter operations.
+
+### Fixed
+
+- Leader: route and list adopted deployments correctly — register the adopted
+  backend and skip the adopted sentinel in health/metrics/backends listing.
+- Agent: scope adopted-endpoint watching to `adopted.yaml`, declare the
+  `watchfiles` dependency, and harden the health probe.
+
+### Security
+
+- Bumped starlette to 1.1.0 for PYSEC-2026-161.
+- Hardened public release surfaces and added a SAST baseline (Bandit,
+  pip-audit, gitleaks) to CI.
+
 ## 0.4.0 - 2026-05-20
 
 ### Breaking
