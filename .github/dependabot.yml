@@ -1,8 +1,9 @@
 version: 2
 updates:
   # Pin actions by SHA; Dependabot resolves the latest SHA per tag each week.
-  # Minor + patch bumps are batched into one PR per ecosystem; major bumps
-  # always get their own PR so they can be reviewed individually.
+  # Updates are batched into at most two PRs per ecosystem: minor + patch bumps
+  # in one group, and all major bumps together in a second group so breaking
+  # changes are reviewed apart from the safe ones.
   - package-ecosystem: github-actions
     directory: /
     schedule:
@@ -11,6 +12,9 @@ updates:
       actions-minor:
         patterns: ["*"]
         update-types: ["minor", "patch"]
+      actions-major:
+        patterns: ["*"]
+        update-types: ["major"]
 
   - package-ecosystem: pip
     directory: /
@@ -20,6 +24,9 @@ updates:
       python-minor:
         patterns: ["*"]
         update-types: ["minor", "patch"]
+      python-major:
+        patterns: ["*"]
+        update-types: ["major"]
 
   - package-ecosystem: npm
     directory: /ui
@@ -29,3 +36,6 @@ updates:
       ui-minor:
         patterns: ["*"]
         update-types: ["minor", "patch"]
+      ui-major:
+        patterns: ["*"]
+        update-types: ["major"]
