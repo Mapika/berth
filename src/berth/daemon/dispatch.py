@@ -128,6 +128,10 @@ async def _open_local(
     *,
     engine_client_factory: Callable[[str], httpx.AsyncClient] | None = None,
 ) -> UpstreamOpen:
+    # Adopted deployments carry an operator/agent-supplied address; refuse
+    # to direct-dial known-dangerous SSRF targets (link-local/metadata/etc).
+    from berth.net_guard import assert_dialable_engine
+    assert_dialable_engine(deployment)
     base = (
         f"http://{deployment.container_address}:{deployment.container_port}"
     )

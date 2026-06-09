@@ -55,7 +55,9 @@ def test_build_argv_tp_4():
 def test_container_kwargs_gpu_request():
     kw = SGLangBackend().container_kwargs(_plan(gpu_ids=[2, 3], tensor_parallel=2))
     assert kw["device_requests"][0]["device_ids"] == ["2", "3"]
-    assert kw["ipc_mode"] == "host"
+    # Host IPC is no longer the default (weakens container/host isolation);
+    # the private shm_size covers the single-container case.
+    assert kw.get("ipc_mode") != "host"
     assert kw["shm_size"] == "2g"
 
 

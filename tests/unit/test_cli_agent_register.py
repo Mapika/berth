@@ -78,6 +78,75 @@ def test_register_writes_config(tmp_path, monkeypatch):
     assert mode == 0o600
 
 
+def _mock_register_http(monkeypatch, ca_pem):
+    class _MockResp:
+        status_code = 200
+        def raise_for_status(self): pass
+        def json(self):
+            return {
+                "node_id": 9,
+                "agent_cert": "-----BEGIN CERTIFICATE-----\nA\n-----END CERTIFICATE-----\n",
+                "agent_key": (
+                    "-----BEGIN PRIVATE KEY-----\nB\n-----END PRIVATE KEY-----\n"
+                ),
+            }
+
+    def _get(url, verify=None, timeout=None):
+        class _CAResp:
+            text = ca_pem
+            def raise_for_status(self): pass
+        return _CAResp()
+
+    def _post(url, json, verify=None, timeout=None):
+        return _MockResp()
+
+    monkeypatch.setattr(httpx, "get", _get)
+    monkeypatch.setattr(httpx, "post", _post)
+
+
+def test_register_reads_uri_from_env_without_argv(tmp_path, monkeypatch):
+    # Supplying the URI via env keeps the embedded token out of argv/history.
+    home = tmp_path / "home"
+    home.mkdir()
+    home.chmod(0o755)
+    monkeypatch.setenv("BERTH_HOME", str(home))
+    ca_pem = "-----BEGIN CERTIFICATE-----\nC\n-----END CERTIFICATE-----\n"
+    ca_fp = "sha256:" + hashlib.sha256(ca_pem.encode("utf-8")).hexdigest()
+    _mock_register_http(monkeypatch, ca_pem)
+
+    monkeypatch.setenv(
+        "BERTH_ENROLL_URI",
+        "berth://enroll?leader=https%3A%2F%2Fleader.example%3A11500"
+        f"&token=tok-env&ca_fp={ca_fp}",
+    )
+    # No --uri on the command line at all.
+    r = CliRunner().invoke(app, ["agent", "register"])
+    assert r.exit_code == 0, r.output
+    cfg = yaml.safe_load((home / "agent.yaml").read_text())
+    assert cfg["node_id"] == 9
+
+
+def test_register_prompts_for_uri_when_omitted(tmp_path, monkeypatch):
+    home = tmp_path / "home"
+    home.mkdir()
+    home.chmod(0o755)
+    monkeypatch.setenv("BERTH_HOME", str(home))
+    monkeypatch.delenv("BERTH_ENROLL_URI", raising=False)
+    ca_pem = "-----BEGIN CERTIFICATE-----\nC\n-----END CERTIFICATE-----\n"
+    ca_fp = "sha256:" + hashlib.sha256(ca_pem.encode("utf-8")).hexdigest()
+    _mock_register_http(monkeypatch, ca_pem)
+
+    uri = (
+        "berth://enroll?leader=https%3A%2F%2Fleader.example%3A11500"
+        f"&token=tok-prompt&ca_fp={ca_fp}"
+    )
+    # No --uri flag: the URI is read from the (hidden) prompt via stdin.
+    r = CliRunner().invoke(app, ["agent", "register"], input=uri + "\n")
+    assert r.exit_code == 0, r.output
+    cfg = yaml.safe_load((home / "agent.yaml").read_text())
+    assert cfg["node_id"] == 9
+
+
 def test_register_rejects_removed_leader_token_flags(tmp_path, monkeypatch):
     monkeypatch.setenv("BERTH_HOME", str(tmp_path))
     r = CliRunner().invoke(app, [

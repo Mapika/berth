@@ -33,13 +33,19 @@ def create_backup(
 ) -> None:
     """Tarball db.sqlite (consistent .backup snapshot), ca/, key_pepper, config.toml."""
     dest_path = Path(dest)
-    dest_path.parent.mkdir(parents=True, exist_ok=True)
+    # The backup parent may hold the snapshot and the final tarball, both of
+    # which contain CA keys / pepper. Create it private (0700) so a freshly
+    # made backup dir is never world-traversable.
+    dest_path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
 
     # Take a hot-snapshot of the sqlite file. Using .backup avoids the
     # well-known WAL-tail truncation bug of a naive `cp db.sqlite`.
     snapshot_path = (
         config.BERTH_DIR / f".db-backup-{int(time.time())}.sqlite"
     )
+    # Pre-create the snapshot file with 0600 before sqlite opens it, so the
+    # intermediate DB copy is never world-readable under the process umask.
+    os.close(os.open(snapshot_path, os.O_CREAT | os.O_WRONLY | os.O_TRUNC, 0o600))
     src = sqlite3.connect(config.DB_PATH)
     dst = sqlite3.connect(snapshot_path)
     try:

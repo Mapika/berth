@@ -12,6 +12,11 @@ import docker  # type: ignore[import-untyped]
 log = logging.getLogger(__name__)
 
 
+class ImageDigestMismatch(RuntimeError):
+    """Raised when a running container's image does not match the
+    operator-pinned `pinned_digest`. Refuses to mark the deployment ready."""
+
+
 @dataclass(frozen=True)
 class ContainerHandle:
     id: str
@@ -128,6 +133,45 @@ class DockerClient:
         if image is None:
             return None
         return getattr(image, "id", None)
+
+    def verify_image_digest(self, container_id: str, pinned_digest: str) -> None:
+        """Verify the running container's image matches the operator-pinned
+        content-addressable digest, raising `ImageDigestMismatch` on mismatch.
+
+        Tags (``vllm/vllm-openai:vX.Y.Z``) are mutable: upstream can retag the
+        same name to a different image. When a backend pins a `pinned_digest`
+        (`sha256:...`) in backends.yaml, we refuse to mark the deployment ready
+        unless the image actually launched matches that digest.
+
+        The container's image id is taken from `container.image.id`
+        (see `container_image_id`); `RepoDigests` are also accepted so an
+        operator may pin either the local image id or a registry repo-digest.
+        A missing container or unresolvable image id is itself a mismatch -
+        we cannot prove the running image is the pinned one, so we refuse.
+        """
+        actual_id = self.container_image_id(container_id)
+        candidates: set[str] = set()
+        if actual_id:
+            candidates.add(actual_id)
+        # Also accept registry repo-digests when present (e.g. when the operator
+        # pinned the digest as published by the registry rather than the local id).
+        try:
+            c = self._client.containers.get(container_id)
+            image = getattr(c, "image", None)
+            repo_digests = (getattr(image, "attrs", {}) or {}).get("RepoDigests") or []
+            for rd in repo_digests:
+                # RepoDigests look like "repo@sha256:..."; pin may be the bare digest.
+                if "@" in rd:
+                    candidates.add(rd.split("@", 1)[1])
+                candidates.add(rd)
+        except NotFound:
+            pass
+        if pinned_digest not in candidates:
+            raise ImageDigestMismatch(
+                f"image digest mismatch for container {container_id}: "
+                f"pinned {pinned_digest!r} but running image is "
+                f"{actual_id!r} (refusing to mark ready)"
+            )
 
     def container_pids(self, container_id: str) -> list[int]:
         """All host-side PIDs running inside the container, including

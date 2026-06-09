@@ -386,10 +386,12 @@ def install_service(
 
 @agent_app.command("register")
 def register(
-    uri: str = typer.Option(
-        ..., "--uri",
+    uri: str | None = typer.Option(
+        None, "--uri",
         help="Single-paste enrollment URI from `berth nodes enroll` "
-             "(format: berth://enroll?leader=...&token=...&ca_fp=...).",
+             "(format: berth://enroll?leader=...&token=...&ca_fp=...). "
+             "Omit to be prompted (hidden input) or read from BERTH_ENROLL_URI; "
+             "this keeps the embedded token out of argv and shell history.",
     ),
     reachable_as: str | None = typer.Option(
         None, "--reachable-as",
@@ -399,7 +401,15 @@ def register(
     """Exchange a one-time enrollment token for a durable agent certificate.
 
     The URI bundles the leader URL, token, and CA fingerprint so the
-    agent can detect a swapped CA during bootstrap."""
+    agent can detect a swapped CA during bootstrap.
+
+    The token is a secret, so prefer not to pass it on the command line where it
+    lands in argv and shell history. Omit ``--uri`` to paste it at a hidden
+    prompt, or supply it via the ``BERTH_ENROLL_URI`` environment variable."""
+    if uri is None:
+        uri = os.environ.get("BERTH_ENROLL_URI") or typer.prompt(
+            "Enrollment URI", hide_input=True,
+        )
     leader_url, token_val, ca_fp = parse_enrollment_uri(uri)
     ca_pem = _fetch_ca_pinned(leader_url, ca_fp)
     _do_register(

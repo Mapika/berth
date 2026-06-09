@@ -1,11 +1,32 @@
 from __future__ import annotations
 
+from importlib.resources import files
 from typing import ClassVar, Protocol
 
+import yaml
 from docker.types import Ulimit  # type: ignore[import-untyped]
 
 from berth.backends.manifest import EngineManifest, Headroom, load_manifest
 from berth.lifecycle.plan import DeploymentPlan
+
+
+def _load_pinned_digest(name: str) -> str | None:
+    """Read the optional `pinned_digest` for a backend from backends.yaml.
+
+    The shipped manifest leaves this unset; operators add it to pin an image
+    to an immutable digest. Kept here (rather than on EngineManifest) so the
+    digest-pin feature lives entirely within the backends layer. Best-effort:
+    a malformed/missing file yields None (no enforcement) rather than blocking
+    a deployment on parse failure.
+    """
+    try:
+        text = files("berth.backends").joinpath("backends.yaml").read_text()
+        raw = yaml.safe_load(text) or {}
+        entry = raw.get(name) or {}
+        digest = entry.get("pinned_digest")
+        return str(digest) if digest else None
+    except Exception:
+        return None
 
 
 class Backend(Protocol):
@@ -20,6 +41,8 @@ class Backend(Protocol):
 
     @property
     def image_default(self) -> str: ...
+    @property
+    def pinned_digest(self) -> str | None: ...
     @property
     def health_path(self) -> str: ...
     @property
@@ -61,6 +84,19 @@ class ContainerBackend:
     @property
     def image_default(self) -> str:
         return self.manifest.image_default
+
+    @property
+    def pinned_digest(self) -> str | None:
+        """Optional content-addressable digest (`sha256:...`) an operator has
+        pinned for this engine image in backends.yaml. When set, the running
+        container's image id is verified against it at launch (see
+        DockerClient.verify_image_digest) and a mismatch refuses the load.
+
+        `EngineManifest` intentionally does not carry this field, so it is read
+        from the raw backends.yaml here. Returns None (no enforcement) when
+        absent - the default - keeping behavior unchanged until pinned.
+        """
+        return _load_pinned_digest(self.name)
 
     @property
     def health_path(self) -> str:
@@ -105,6 +141,12 @@ class ContainerBackend:
         return {}
 
     def container_kwargs(self, plan: DeploymentPlan) -> dict[str, object]:
+        # No `ipc_mode: host`: host IPC weakens container/host isolation
+        # (a compromised engine could reach other processes' SysV/POSIX shm).
+        # The explicit private `shm_size` below covers the single-container
+        # case, which is what we run. If a future tensor-parallel path needs
+        # shared-memory IPC across separate containers, make host IPC opt-in
+        # rather than the unconditional default.
         return {
             "device_requests": [
                 {
@@ -113,7 +155,6 @@ class ContainerBackend:
                     "Capabilities": [["gpu"]],
                 }
             ],
-            "ipc_mode": "host",
             "shm_size": "2g",
             "ulimits": [Ulimit(name="memlock", soft=-1, hard=-1)],
         }

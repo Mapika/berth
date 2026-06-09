@@ -292,6 +292,35 @@ leaking internal paths, hostnames, and engine internals to authenticated princip
   bandit + pip-audit + npm audit + gitleaks, provenance + SBOM on releases,
   weekly Dependabot + `uv lock --upgrade`. Dependencies current.
 
+## Remediation status (this branch)
+
+All actionable findings were addressed on `claude/repo-security-review-dn8gpl`:
+
+| # | Severity | Status | Where |
+|---|----------|--------|-------|
+| 1 | High | **Fixed** | `scripts/setup-leader-vps.sh` — log created `install -m 0600`; `sk-…` redaction filter on all logged output |
+| 2 | Medium | **Fixed** | `auth/middleware.py` — `/metrics` now requires admin tier (`require_metrics_key`); tests updated |
+| 3 | Medium | **Fixed** | `daemon/admin.py`, `auth/middleware.py` — auth bypass now keys solely on the explicit `local_control_surface` flag (dropped the `client is None` heuristic) |
+| 4 | Medium | **Fixed** | `lifecycle/docker_client.py` (`verify_image_digest`) + `backends/base.py` (`pinned_digest`) + enforced at launch in `lifecycle/manager.py`; `backends.yaml` documents pinning |
+| 5 | Medium | **Fixed** | `backends/base.py` — removed default `ipc_mode: "host"`; relies on private `shm_size` |
+| 6 | Medium | **Fixed** | new `berth/net_guard.py` applied in `dispatch.py` + `admin_adapters.py` — adopted endpoints can't dial link-local/metadata/multicast |
+| 7 | Medium | **Documented** | `auth/middleware.py` — token-window limits documented as advisory/post-hoc; non-`/v1` routes intentionally unmetered |
+| 8 | Low | **Fixed** | `ui/src/api.ts` — admin token moved from `localStorage` to `sessionStorage` |
+| 9 | Low | **Documented + mitigated** | `ui/src/api.ts` — rationale + operator proxy-logging note; full fix (fetch-SSE) flagged as follow-up |
+| 10 | Low | **Fixed** | `daemon/admin_runtime.py` — `/deployments/current/logs` now async with disconnect detection + stream close |
+| 11 | Low | **Fixed** | `examples/README.md`, `docs/troubleshooting.md` — authenticated `curl` uses `--cacert` |
+| 12 | Low | **Fixed** | `cli/wipe_cmd.py` — refuses to wipe a dir without a berth marker |
+| 13 | Low | **Fixed** | `cli/agent_cmd.py` — enrollment URI via hidden prompt / `BERTH_ENROLL_URI`, off argv |
+| 14 | Low | **Fixed** | `cli/backup_cmd.py` — snapshot pre-created `0600`, dest dir `0700` |
+| 15 | Low | **Fixed (high-value part)** | `admin_adapters.py` — engine `response.text` no longer echoed to clients (logged server-side); remaining `{e}` echoes are admin-tier-only operational detail, left intentionally |
+| 16 | Info | **Won't fix — by design** | The cluster listener also serves the certless enrollment/CA endpoints, so `CERT_REQUIRED` would break agent bootstrap. The app layer already rejects certless WS connections via fingerprint check, so `CERT_OPTIONAL` is correct. |
+| 17 | Info | **Fixed** | `packaging/berth.service` — hardening synced to the installer-generated unit; docker.sock note added |
+| 18 | Info | **Fixed** | `scripts/install.sh` — uv installer pinned to `UV_VERSION` |
+
+New regression tests: `tests/unit/test_net_guard.py`, `tests/unit/test_image_digest_pin.py`,
+plus updated `test_metrics_auth.py`, `test_wipe_cmd.py`, `test_backup_cmd.py`,
+`test_cli_agent_register.py`, and the engine-backend kwargs tests.
+
 ## Recommended remediation order
 
 1. **Finding 1** (High) — fix the install-log key leak; smallest change, highest impact.

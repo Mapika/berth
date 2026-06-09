@@ -23,17 +23,18 @@ _read_gpu_stats = _gpu_stats.read_gpu_stats
 
 
 def _is_uds_request(request: Request) -> bool:
-    """True when the request arrived over the Unix domain socket, not TCP.
+    """True when the request arrived over the local control surface (UDS).
 
-    Uvicorn's UDS server reports scope['client'] as None (no remote address)
-    whereas TCP delivers a (host, port) tuple. We use 'client' rather than
-    'server' because uvicorn fills 'server' with the listening address even
-    on UDS (e.g. ('', 0)).
+    Trust is decided solely by the explicit ``local_control_surface`` flag,
+    which is set True only on the Unix-domain-socket app (build_apps) and
+    defaults False on the public/cluster TCP apps. We deliberately do NOT
+    infer locality from ``scope['client'] is None``: that heuristic is a
+    single load-bearing check whose failure mode is silent (any future
+    listener wiring, ASGI middleware, or proxy integration that leaves
+    'client' unset on a TCP listener would otherwise disable admin auth
+    entirely). The explicit per-app flag fails closed instead.
     """
-    client = request.scope.get("client")
-    return client is None or bool(
-        getattr(request.app.state, "local_control_surface", False)
-    )
+    return bool(getattr(request.app.state, "local_control_surface", False))
 
 
 def _is_stream_ticket_path(path: str) -> bool:

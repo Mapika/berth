@@ -8,7 +8,9 @@ set -euo pipefail
 #   curl -fsSL https://example.com/install.sh | bash -s -- --verbose
 #
 # What it does:
-#   1. Installs `uv` if missing (https://docs.astral.sh/uv/).
+#   1. Installs `uv` if missing (https://docs.astral.sh/uv/), pinned to
+#      $UV_VERSION below. Operators should review this script before piping it
+#      into a shell, and may override the pin via UV_VERSION=x.y.z.
 #   2. `uv tool install` the `berth` package (or editable, if run in a checkout).
 #   3. Runs `berth doctor`.
 #   4. Prints next steps.
@@ -17,6 +19,10 @@ VERBOSE=0
 case "${1:-}" in
   -v|--verbose) VERBOSE=1 ;;
 esac
+
+# Pin the uv installer to a known version rather than tracking latest. The
+# astral installer honours UV_INSTALL_VERSION; operators may override this.
+UV_VERSION="${UV_VERSION:-0.5.11}"
 
 # ── output harness ──────────────────────────────────────────────────────────
 # Unlike the leader installer, steps run in the *current* shell (no subshell):
@@ -84,7 +90,9 @@ fi
 
 ensure_uv() {
   command -v uv >/dev/null 2>&1 && return 0
-  curl -LsSf https://astral.sh/uv/install.sh | sh || return 1
+  # Pin to $UV_VERSION; the installer reads UV_INSTALL_VERSION from the env.
+  curl -LsSf "https://astral.sh/uv/${UV_VERSION}/install.sh" \
+    | env UV_INSTALL_VERSION="$UV_VERSION" sh || return 1
   # shellcheck source=/dev/null
   [ -f "$HOME/.local/share/uv/env" ] && . "$HOME/.local/share/uv/env"
   export PATH="$HOME/.local/bin:$PATH"

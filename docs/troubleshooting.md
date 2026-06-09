@@ -200,7 +200,10 @@ The secret is printed once. Then point a client at it:
 ```bash
 export BERTH_TOKEN=sk-...
 export BERTH_URL=https://127.0.0.1:11500
-curl -k "$BERTH_URL/v1/models" -H "Authorization: Bearer $BERTH_TOKEN"
+# The token is a secret, so verify TLS by pinning berth's CA rather than using
+# `-k` (which would leak the Bearer token to a MITM).
+curl --cacert ~/.berth/ca/ca.crt "$BERTH_URL/v1/models" \
+  -H "Authorization: Bearer $BERTH_TOKEN"
 ```
 
 If a key that used to work suddenly fails everywhere, check that

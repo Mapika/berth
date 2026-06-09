@@ -2,12 +2,14 @@
 from __future__ import annotations
 
 import os
+import sqlite3
 import stat
 import tarfile
 
 from typer.testing import CliRunner
 
 from berth import cli, config
+from berth.cli import backup_cmd
 from berth.store import db
 
 
@@ -60,3 +62,39 @@ def test_backup_archive_is_owner_only(tmp_path, monkeypatch):
 
     assert res.exit_code == 0, res.output
     assert stat.S_IMODE(dest.stat().st_mode) == 0o600
+
+
+def test_backup_snapshot_is_owner_only(tmp_path, monkeypatch):
+    # The intermediate sqlite snapshot holds a full copy of the DB and must be
+    # private (0600), even under a loose umask, before sqlite opens it.
+    monkeypatch.setattr(config, "BERTH_DIR", tmp_path)
+    monkeypatch.setattr(config, "DB_PATH", tmp_path / "db.sqlite")
+    monkeypatch.setattr(config, "CONFIG_FILE", tmp_path / "config.toml")
+
+    (tmp_path / "key_pepper").write_bytes(b"\x00" * 32)
+    conn = db.connect(tmp_path / "db.sqlite")
+    db.init_schema(conn)
+
+    captured: dict = {}
+    real_connect = sqlite3.connect
+
+    def _spy_connect(target, *args, **kwargs):
+        # Record the snapshot's mode at the moment sqlite opens it.
+        if ".db-backup-" in str(target):
+            captured["mode"] = stat.S_IMODE(os.stat(target).st_mode)
+            captured["path"] = target
+        return real_connect(target, *args, **kwargs)
+
+    monkeypatch.setattr(backup_cmd.sqlite3, "connect", _spy_connect)
+
+    dest = tmp_path / "snap.tar.gz"
+    old_umask = os.umask(0o022)
+    try:
+        res = CliRunner().invoke(cli.app, ["backup", "create", str(dest)])
+    finally:
+        os.umask(old_umask)
+
+    assert res.exit_code == 0, res.output
+    assert captured["mode"] == 0o600
+    # Snapshot is removed in the finally block.
+    assert not os.path.exists(captured["path"])
