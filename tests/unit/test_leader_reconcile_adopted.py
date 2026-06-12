@@ -120,3 +120,49 @@ def test_reconcile_defaults_vram_sum_for_multi_gpu(tmp_path):
     rows = dep_store.list_adopted_for_node(conn, node_id)
     assert len(rows) == 1
     assert rows[0].vram_reserved_mb == 550080
+
+
+def test_reconcile_prunes_deployment_with_usage_history(tmp_path):
+    """An adopted deployment that served requests has usage_events rows whose
+    deployment_id references it (migration 006, no ON DELETE action). The
+    prune must detach that history and still delete the row — this exact case
+    silently leaked rows in production (FK error swallowed by the report-level
+    exception handler)."""
+    from berth.store import usage_events
+
+    conn = _conn(tmp_path)
+    reconcile_adopted(conn, node_id=3, endpoints=[_ep()])
+    dep = dep_store.list_adopted_for_node(conn, 3)[0]
+    usage_events.record(
+        conn, model_name="nvidia/MiniMax-M2.7-NVFP4",
+        base_name="nvidia/MiniMax-M2.7-NVFP4", deployment_id=dep.id,
+        tokens_in=10, tokens_out=5)
+
+    reconcile_adopted(conn, node_id=3, endpoints=[])
+    assert dep_store.list_adopted_for_node(conn, 3) == []
+    # History survives, detached.
+    row = conn.execute(
+        "SELECT deployment_id FROM usage_events").fetchone()
+    assert row is not None and row["deployment_id"] is None
+
+
+def test_reconcile_prune_continues_past_undeletable_row(tmp_path, monkeypatch):
+    """One row that fails to delete must not shield the stale rows behind it."""
+    conn = _conn(tmp_path)
+    reconcile_adopted(conn, node_id=3, endpoints=[
+        _ep(), _ep(container_id="cid-2", port=30012, gpu_ids=[6])])
+
+    import sqlite3 as _sqlite3
+    real_delete = dep_store.delete_adopted
+
+    def flaky_delete(c, dep_id):
+        first = dep_store.list_adopted_for_node(c, 3)[0]
+        if dep_id == first.id:
+            raise _sqlite3.IntegrityError("FOREIGN KEY constraint failed")
+        real_delete(c, dep_id)
+
+    monkeypatch.setattr(
+        "berth.cluster.leader_hub.dep_store.delete_adopted", flaky_delete)
+    reconcile_adopted(conn, node_id=3, endpoints=[])
+    survivors = dep_store.list_adopted_for_node(conn, 3)
+    assert [d.container_id for d in survivors] == ["cid-1"]

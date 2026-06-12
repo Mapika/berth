@@ -7,6 +7,8 @@ class _Disp:
         self.registered = {}
     def register_endpoint(self, *, container_id, address, port):
         self.registered[container_id] = (address, port)
+    def unregister_endpoint(self, *, container_id):
+        self.registered.pop(container_id, None)
 
 
 def _entry():
@@ -29,3 +31,13 @@ def test_register_adopted_endpoints_registers_each():
     disp = _Disp()
     register_adopted_endpoints(disp, [_entry()])
     assert disp.registered == {"cid-1": ("127.0.0.1", 30011)}
+
+
+def test_register_adopted_endpoints_unregisters_removed():
+    disp = _Disp()
+    register_adopted_endpoints(disp, [_entry()])
+    # Managed deployments share the dispatcher; they must survive the sync.
+    disp.register_endpoint(
+        container_id="managed-cid", address="127.0.0.1", port=30000)
+    register_adopted_endpoints(disp, [])
+    assert disp.registered == {"managed-cid": ("127.0.0.1", 30000)}

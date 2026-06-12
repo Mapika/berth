@@ -77,9 +77,18 @@ def build_adopted_report(
 
 
 def register_adopted_endpoints(disp, entries: list[adopted_mod.AdoptedEndpoint]) -> None:
+    """Sync the dispatcher's adopted endpoints to `entries` (full state).
+
+    Tracks the previously-registered adopted set on the dispatcher so an
+    unadopted endpoint is also unregistered — without touching endpoints
+    registered for managed deployments, which share the same dispatcher."""
+    new_cids = {e.container_id for e in entries}
+    for cid in getattr(disp, "_adopted_cids", set()) - new_cids:
+        disp.unregister_endpoint(container_id=cid)
     for e in entries:
         disp.register_endpoint(
             container_id=e.container_id, address=e.address, port=e.port)
+    disp._adopted_cids = new_cids
 
 
 def _probe_endpoint(address: str, port: int, *, timeout: float = 5.0) -> bool:
@@ -182,6 +191,9 @@ class AgentFrameDispatcher:
         self, *, container_id: str, address: str, port: int,
     ) -> None:
         self._endpoints[container_id] = (address, port)
+
+    def unregister_endpoint(self, *, container_id: str) -> None:
+        self._endpoints.pop(container_id, None)
 
     async def handle(self, frame: Frame) -> None:
         if isinstance(frame, StartDeployment):

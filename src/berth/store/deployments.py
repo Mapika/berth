@@ -352,6 +352,17 @@ def list_adopted_for_node(
 
 
 def delete_adopted(conn: sqlite3.Connection, dep_id: int) -> None:
+    row = conn.execute(
+        "SELECT id FROM deployments WHERE id=? AND source='adopted'", (dep_id,)
+    ).fetchone()
+    if row is None:
+        return
+    # usage_events.deployment_id references deployments(id) with no ON DELETE
+    # action (migration 006), so a deployment that ever served a request can't
+    # be deleted while its history points at it. Detach the history first —
+    # same outcome as the ON DELETE SET NULL chosen for deployment_plans (009).
     conn.execute(
-        "DELETE FROM deployments WHERE id=? AND source='adopted'", (dep_id,)
+        "UPDATE usage_events SET deployment_id=NULL WHERE deployment_id=?",
+        (dep_id,),
     )
+    conn.execute("DELETE FROM deployments WHERE id=?", (dep_id,))

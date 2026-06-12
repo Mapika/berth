@@ -97,7 +97,15 @@ def reconcile_adopted(conn, *, node_id: int, endpoints: list[dict]) -> None:
 
     for d in dep_store.list_adopted_for_node(conn, node_id):
         if d.container_id not in keep_cids:
-            dep_store.delete_adopted(conn, d.id)
+            # Per-row guard: a single undeletable row (e.g. an unforeseen FK
+            # reference) must not abort the sweep and shield every other
+            # stale row behind it.
+            try:
+                dep_store.delete_adopted(conn, d.id)
+            except sqlite3.Error:
+                log.exception(
+                    "could not delete adopted deployment %s (node %s)",
+                    d.id, node_id)
 
 
 FingerprintResolver = Callable[[WebSocket], str | None]
