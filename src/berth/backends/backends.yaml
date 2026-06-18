@@ -1,9 +1,21 @@
 # Pinned engine images. Update via `berth update-engines` or
 # `berth config set engine.<name>.image <tag>`.
+#
+# Optional digest pinning (defense against mutable tags): add a
+# `pinned_digest: sha256:<64-hex>` field to any backend below to require the
+# launched container's image to match that immutable content digest. When set,
+# DockerClient.verify_image_digest enforces it at launch and refuses to mark the
+# deployment ready on mismatch. Resolve the digest for a tag with, e.g.:
+#   docker pull vllm/vllm-openai:v0.20.2
+#   docker inspect --format '{{index .RepoDigests 0}}' vllm/vllm-openai:v0.20.2
+#   # or, to pin the local image id:
+#   docker inspect --format '{{.Id}}' vllm/vllm-openai:v0.20.2
+# Left unset by default, so behavior is unchanged until an operator pins one.
 
 vllm:
   image: vllm/vllm-openai
   pinned_tag: v0.20.2
+  # pinned_digest: sha256:...  # optional; see header comment above
   health_path: /health
   openai_base: /v1
   metrics_path: /metrics

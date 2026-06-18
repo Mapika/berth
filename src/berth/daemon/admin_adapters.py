@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import re
 import shutil
 import sqlite3
@@ -13,9 +14,12 @@ from pydantic import BaseModel, field_validator
 from berth.backends.base import Backend
 from berth.daemon.admin import get_backends, get_conn, get_manager, router
 from berth.lifecycle.manager import LifecycleManager
+from berth.net_guard import assert_dialable_engine
 from berth.store import adapters as ad_store
 from berth.store import deployment_adapters as da_store
 from berth.store import deployments as dep_store
+
+logger = logging.getLogger("berth.adapters")
 
 _ADAPTER_NAME_RE = re.compile(r"[a-zA-Z0-9_-]+")
 
@@ -307,6 +311,10 @@ async def hot_load_adapter(
                 "model cache; re-register the adapter",
             ) from e
         container_path = "/cache/" + str(rel_adapter_path)
+        try:
+            assert_dialable_engine(dep)
+        except ValueError as e:
+            raise HTTPException(502, str(e)) from e
         url = (
             f"http://{dep.container_address}:{dep.container_port}"
             f"{backend.adapter_load_path}"
@@ -320,8 +328,13 @@ async def hot_load_adapter(
             except httpx.HTTPError as e:
                 raise HTTPException(502, f"engine adapter load failed: {e}") from e
         if response.status_code >= 400:
+            logger.warning(
+                "adapter load: engine %s returned %s: %s",
+                dep.id, response.status_code, response.text[:200],
+            )
             raise HTTPException(
-                502, f"engine returned {response.status_code}: {response.text[:200]}",
+                502,
+                f"engine rejected adapter load (HTTP {response.status_code})",
             )
         da_store.attach(conn, dep.id, adapter.id)
         return {
@@ -359,6 +372,10 @@ async def hot_unload_adapter(
 async def _engine_unload_adapter(backend: Backend, dep, adapter_name: str) -> None:
     if dep.container_address == "tunnel":
         return  # remote — no direct-dial unload path
+    try:
+        assert_dialable_engine(dep)
+    except ValueError:
+        return  # adopted endpoint at an unsafe address — skip the dial
     url = (
         f"http://{dep.container_address}:{dep.container_port}"
         f"{backend.adapter_unload_path}"

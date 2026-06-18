@@ -34,12 +34,41 @@ RestartSec=5
 StandardOutput=journal
 StandardError=journal
 
-# Modest hardening. Loosen these if your deployments need additional
-# capabilities (e.g. ReadWritePaths if model weights live elsewhere).
+# Process hardening (kept in sync with the installer-generated unit in
+# scripts/setup-leader-vps.sh). The daemon listens on high ports and talks to
+# Docker over /var/run/docker.sock; it never needs kernel modules, devices,
+# raw sockets, or capabilities of any kind. Loosen these only if a deployment
+# genuinely requires extra access (e.g. add a ReadWritePaths entry if model
+# weights live elsewhere).
 NoNewPrivileges=true
 PrivateTmp=true
-ProtectSystem=full
+PrivateDevices=true
+ProtectSystem=strict
 ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectKernelLogs=true
+ProtectControlGroups=true
+ProtectClock=true
+ProtectHostname=true
+ProtectProc=invisible
+ProcSubset=pid
+RestrictNamespaces=true
+RestrictRealtime=true
+RestrictSUIDSGID=true
+LockPersonality=true
+RemoveIPC=true
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+SystemCallFilter=~@privileged @resources
+CapabilityBoundingSet=
+AmbientCapabilities=
+UMask=0077
+# NOTE: granting write access to /var/run/docker.sock makes the `berth` service
+# user effectively root-equivalent on the host (the Docker API can mount the
+# host filesystem and launch privileged containers). Drop this entry if the
+# daemon does not need to manage Docker on this node.
 ReadWritePaths=/var/lib/berth /var/run/docker.sock
 
 [Install]

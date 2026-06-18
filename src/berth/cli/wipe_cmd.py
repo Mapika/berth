@@ -27,12 +27,39 @@ _DANGEROUS_HOMES = {
 }
 
 
+# Files/dirs that mark a directory as a genuine berth state directory. We
+# refuse to wipe anything that doesn't look like one, so `--home /home/alice`
+# can't be turned into a `rm -rf` of a real user home.
+_BERTH_MARKERS = ("db.sqlite", "config.toml", "key_pepper", "ca", "agent.yaml")
+
+
+def _is_berth_home(resolved: Path) -> bool:
+    """A directory counts as a berth home if it carries a berth marker, is
+    named `.berth`, or is the configured BERTH_DIR/BERTH_HOME."""
+    if resolved.name == ".berth":
+        return True
+    try:
+        configured = config.BERTH_DIR.expanduser().resolve(strict=False)
+    except Exception:
+        configured = None
+    if configured is not None and resolved == configured:
+        return True
+    return any((resolved / marker).exists() for marker in _BERTH_MARKERS)
+
+
 def _validated_home(home: Path) -> Path:
     resolved = home.expanduser().resolve(strict=False)
     if resolved in _DANGEROUS_HOMES or len(resolved.parts) < 3:
         raise typer.BadParameter(f"refusing to wipe broad path: {resolved}")
     if resolved.exists() and resolved.is_symlink():
         raise typer.BadParameter(f"refusing to wipe symlink: {resolved}")
+    if resolved.exists() and not _is_berth_home(resolved):
+        raise typer.BadParameter(
+            f"refusing to wipe {resolved}: it does not look like a berth home "
+            "(no db.sqlite/config.toml/ca/key_pepper marker, not named .berth, "
+            "and not the configured BERTH_HOME). Point --home at the berth "
+            "state directory."
+        )
     return resolved
 
 

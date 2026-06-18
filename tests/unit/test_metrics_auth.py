@@ -47,9 +47,9 @@ async def test_metrics_requires_auth_when_keys_exist(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_metrics_with_valid_key_returns_200(tmp_path):
+async def test_metrics_with_admin_key_returns_200(tmp_path):
     app, conn = _public_app(tmp_path)
-    secret, _ = ak_store.create(conn, name="scraper", tier="standard")
+    secret, _ = ak_store.create(conn, name="scraper", tier="admin")
     transport = httpx.ASGITransport(app=app)
     async with httpx.AsyncClient(
         transport=transport, base_url="http://1.2.3.4",
@@ -60,3 +60,19 @@ async def test_metrics_with_valid_key_returns_200(tmp_path):
         )
     assert r.status_code == 200
     assert b"berth_" in r.content
+
+
+@pytest.mark.asyncio
+async def test_metrics_rejects_non_admin_key(tmp_path):
+    """A low-tier tenant key must not be able to scrape cluster inventory."""
+    app, conn = _public_app(tmp_path)
+    secret, _ = ak_store.create(conn, name="tenant", tier="standard")
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(
+        transport=transport, base_url="http://1.2.3.4",
+    ) as c:
+        r = await c.get(
+            "/metrics",
+            headers={"Authorization": f"Bearer {secret}"},
+        )
+    assert r.status_code == 403

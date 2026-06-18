@@ -133,7 +133,7 @@ def metrics_history(
 
 
 @router.get("/deployments/current/logs")
-def stream_current_logs(request: Request):
+async def stream_current_logs(request: Request):
     conn: sqlite3.Connection = request.app.state.conn
     docker_client = request.app.state.manager._docker
     active = dep_store.find_active(conn)
@@ -146,12 +146,25 @@ def stream_current_logs(request: Request):
             "logs endpoint (which routes through the agent tunnel) instead",
         )
 
-    def gen():
-        for chunk in docker_client.stream_logs(active.container_id, follow=True):
-            if isinstance(chunk, bytes):
-                yield chunk
-            else:
-                yield chunk.encode()
+    async def gen():
+        # Pull from the blocking follow-stream in a thread so the event loop
+        # keeps running, and stop as soon as the client disconnects. A purely
+        # synchronous generator here would pin a threadpool worker and leave
+        # the Docker attach open after the client walks away.
+        sync_iter = docker_client.stream_logs(active.container_id, follow=True)
+        sentinel = object()
+        try:
+            while True:
+                if await request.is_disconnected():
+                    return
+                chunk = await asyncio.to_thread(next, sync_iter, sentinel)
+                if chunk is sentinel:
+                    return
+                yield chunk if isinstance(chunk, bytes) else chunk.encode()
+        finally:
+            close = getattr(sync_iter, "close", None)
+            if callable(close):
+                close()
 
     return StreamingResponse(gen(), media_type="text/plain")
 

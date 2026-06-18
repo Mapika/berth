@@ -1,15 +1,21 @@
 const TOKEN_KEY = 'berth.adminToken'
 
+// The admin token is a long-lived, high-privilege credential. We store it in
+// sessionStorage (not localStorage) so it is scoped to the tab/session and is
+// cleared when the tab or browser closes. This shrinks the durable-theft window
+// from an XSS or a malicious extension: a stolen token can no longer be
+// exfiltrated from a persistent store across browser restarts. Callers must go
+// through these helpers and never touch the backing store directly.
 export function getToken(): string | null {
-  return localStorage.getItem(TOKEN_KEY)
+  return sessionStorage.getItem(TOKEN_KEY)
 }
 
 export function setToken(t: string) {
-  localStorage.setItem(TOKEN_KEY, t)
+  sessionStorage.setItem(TOKEN_KEY, t)
 }
 
 export function clearToken() {
-  localStorage.removeItem(TOKEN_KEY)
+  sessionStorage.removeItem(TOKEN_KEY)
 }
 
 export const queryKeys = {
@@ -45,6 +51,19 @@ export async function eventSourceUrl(path: string): Promise<string> {
   const ticket = await api.createStreamToken(
     new URL(path, window.location.origin).pathname,
   )
+  // The stream ticket is passed in the query string because the browser
+  // EventSource API cannot set request headers (no Authorization header).
+  // This is acceptable because the ticket issued by /admin/stream-token is
+  // single-use, short-TTL (~60s), and path-bound server-side, so even if it
+  // leaks it is of very limited value. NOTE for operators: reverse proxies /
+  // gateways in front of berth should NOT log query strings, to avoid the
+  // ticket landing in access logs.
+  //
+  // A fetch()-based SSE reader (see streamChat in views/Playground.tsx, which
+  // manually parses the response body and sends a real Authorization header)
+  // would remove the URL credential entirely. Migrating these EventSource
+  // calls to that pattern is the proper long-term fix, but is intentionally
+  // left out of scope here to keep behavior unchanged.
   const sep = path.includes('?') ? '&' : '?'
   return `${path}${sep}stream_token=${encodeURIComponent(ticket.token)}`
 }

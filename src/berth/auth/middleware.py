@@ -11,9 +11,11 @@ from berth.store import api_keys, db, key_usage
 
 
 def _is_local_control_request(request: Request) -> bool:
-    return request.scope.get("client") is None or bool(
-        getattr(request.app.state, "local_control_surface", False)
-    )
+    # Trust the explicit per-app flag only (set True solely on the UDS app).
+    # Inferring locality from ``scope['client'] is None`` is a fragile,
+    # silently-failing heuristic that could disable auth on a TCP listener;
+    # the explicit flag fails closed. See _is_uds_request in daemon/admin.py.
+    return bool(getattr(request.app.state, "local_control_surface", False))
 
 
 def _extract_bearer(authorization: str | None) -> str | None:
@@ -57,6 +59,14 @@ def require_auth_dep(request: Request) -> api_keys.ApiKey | None:
 
     tier_cfg: dict[str, Limits] = request.app.state.tier_cfg
     usage_event_id: int | None = None
+    # Rate-limit semantics: request-per-window limits (rpm/rpd) are enforced
+    # hard at admission. Token-per-window limits (tpm/tpd) are necessarily
+    # *advisory / post-hoc*: a request's own token cost is unknown at admission
+    # and is backfilled later via key_usage.set_tokens, so the check evaluates
+    # only previously-completed requests. A single request can therefore exceed
+    # a token budget; the budget reasserts on the next request. Only /v1/* calls
+    # record a usage event, so other authenticated routes are intentionally
+    # unmetered (admin/control traffic is not billed against tenant quotas).
     with db.locked(conn):
         decision = limiter.check(conn, key=key, tier_cfg=tier_cfg)
         if isinstance(decision, limiter.Denied):
@@ -76,12 +86,15 @@ def require_auth_dep(request: Request) -> api_keys.ApiKey | None:
 
 
 def require_metrics_key(request: Request) -> api_keys.ApiKey | None:
-    """Light-weight bearer-auth for /metrics on the public listener.
+    """Bearer-auth for /metrics on the public listener — admin tier only.
 
-    Any non-revoked key (no tier requirement) is accepted — the only goal
-    is to keep the deployment inventory / engine URLs / key counts off
-    public scrapers. UDS callers bypass (so local control commands over the
-    local socket still works).
+    /metrics exposes the deployment inventory, scraped engine metrics, active
+    key counts, and per-node cluster topology/labels. That is operational
+    detail useful for reconnaissance, so it is restricted to admin-tier keys
+    rather than any valid tenant key — a low-tier tenant must not be able to
+    map internal deployments/nodes. Point Prometheus (etc.) at an admin key.
+    UDS callers bypass (so local control commands over the local socket still
+    work).
     """
     if _is_local_control_request(request):
         return None  # UDS — operator surface
@@ -98,5 +111,10 @@ def require_metrics_key(request: Request) -> api_keys.ApiKey | None:
         raise HTTPException(
             status.HTTP_401_UNAUTHORIZED,
             detail="invalid or revoked API key",
+        )
+    if key.tier != "admin":
+        raise HTTPException(
+            status.HTTP_403_FORBIDDEN,
+            detail="admin tier required for /metrics",
         )
     return key

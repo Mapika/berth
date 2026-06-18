@@ -13,7 +13,7 @@ import yaml
 from berth.backends.base import Backend
 from berth.cluster.agent_link import StartedContainer
 from berth.cluster.agent_registry import AgentRegistry
-from berth.lifecycle.docker_client import DockerClient
+from berth.lifecycle.docker_client import DockerClient, ImageDigestMismatch
 from berth.lifecycle.downloader import download_model
 from berth.lifecycle.kv_estimator import (
     KVEstimateInput,
@@ -612,6 +612,23 @@ class LifecycleManager:
                 image_digest = None
             if isinstance(image_digest, str) and image_digest:
                 dep_store.set_image_digest(self._conn, dep.id, image_digest)
+            # Enforce a content-addressable digest pin when the backend
+            # declares one. Tags are mutable; if a backend pins `pinned_digest`
+            # in backends.yaml we refuse to mark the deployment ready unless the
+            # image that actually launched matches it (registry-substitution /
+            # retag defense). No-op when unpinned (default).
+            pinned_digest = getattr(backend, "pinned_digest", None)
+            if pinned_digest:
+                try:
+                    self._docker.verify_image_digest(handle.id, pinned_digest)
+                except ImageDigestMismatch as e:
+                    self._docker.stop(handle.id, timeout=10, remove=True)
+                    msg = str(e)
+                    dep_store.update_status(
+                        self._conn, dep.id, "failed", last_error=msg,
+                    )
+                    await self._emit("deployment.failed", dep_id=dep.id, error=msg)
+                    raise RuntimeError(msg) from e
             await self._emit("deployment.spawned", dep_id=dep.id, container_id=handle.id)
 
             health_url = f"http://{handle.address}:{handle.port}{backend.health_path}"

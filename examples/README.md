@@ -14,13 +14,17 @@ couple of POSTs. They're here so you don't have to write the JSON from scratch.
 To apply the profile and its route, point `$BERTH_URL` and `$BERTH_TOKEN` at your
 daemon and POST the two files:
 
+These requests carry an admin Bearer token, so verify TLS — pin berth's CA with
+`--cacert` instead of disabling verification with `-k` (which would expose the
+token to any MITM). Adjust the path if your CA lives elsewhere.
+
 ```bash
-curl -k -X POST "$BERTH_URL/admin/service-profiles" \
+curl --cacert ~/.berth/ca/ca.crt -X POST "$BERTH_URL/admin/service-profiles" \
   -H "Authorization: Bearer $BERTH_TOKEN" \
   -H "Content-Type: application/json" \
   --data @examples/service-profile-qwen.json
 
-curl -k -X POST "$BERTH_URL/admin/routes" \
+curl --cacert ~/.berth/ca/ca.crt -X POST "$BERTH_URL/admin/routes" \
   -H "Authorization: Bearer $BERTH_TOKEN" \
   -H "Content-Type: application/json" \
   --data @examples/service-route-chat.json

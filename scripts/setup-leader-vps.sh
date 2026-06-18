@@ -139,6 +139,11 @@ _fail() {
   exit 1
 }
 
+_redact_secrets() {
+  # Mask minted API keys (sk-...) so they never persist in $LOG.
+  sed 's/sk-[A-Za-z0-9_-]\{8,\}/sk-***REDACTED***/g'
+}
+
 step() {
   local label="$1"; shift
   _step_n=$(( _step_n + 1 ))
@@ -150,13 +155,18 @@ step() {
   # a mid-step failure would slip through. `step` is always called as a plain
   # statement, which keeps -e honoured all the way down.
   set +e
+  # Defense in depth: redact any sk-... secret before it reaches $LOG so the
+  # admin key never lands on disk even if the file's perms are loosened later.
+  # (The operator-facing one-time display reads $BOOTSTRAP_OUT, which is 0600
+  # and removed on EXIT, so it is unaffected.)
   if [[ $VERBOSE == 1 ]]; then
     printf '\n'
-    ( set -eo pipefail; "$@" ) 2>&1 | tee -a "$LOG"
+    ( set -eo pipefail; "$@" ) 2>&1 \
+      | tee >(_redact_secrets >>"$LOG")
     rc=${PIPESTATUS[0]}
   else
-    ( set -eo pipefail; "$@" ) >>"$LOG" 2>&1
-    rc=$?
+    ( set -eo pipefail; "$@" ) 2>&1 | _redact_secrets >>"$LOG"
+    rc=${PIPESTATUS[0]}
   fi
   set -e
   (( rc == 0 )) || _fail
@@ -522,7 +532,9 @@ do_start_services() {
 }
 
 print_header() {
-  : > "$LOG"
+  # Create the log private (0600). The bootstrap step's stdout carries the
+  # freshly minted sk-... admin key; a world-readable log would leak it.
+  install -m 0600 /dev/null "$LOG"
   printf '\n  %sberth%s leader installer    %s%s%s\n' \
     "$_c_accent" "$_c_off" "$_c_dim" "$BASE_DOMAIN" "$_c_off"
   _rule
